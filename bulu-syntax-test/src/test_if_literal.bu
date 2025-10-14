@@ -1,0 +1,13 @@
+// Test de condition if avec littéral
+
+func main() {
+    println("=== Test If Literal ===")
+    
+    if true {
+        println("Condition vraie")
+    } else {
+        println("Condition fausse")
+    }
+    
+    println("Test terminé")
+}

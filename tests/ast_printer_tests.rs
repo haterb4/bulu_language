@@ -78,11 +78,13 @@ fn test_ast_printer_struct_declaration() {
                 name: "x".to_string(),
                 field_type: Type::Float64,
                 position: AstBuilder::dummy_pos(),
+                is_private: false
             },
             StructField {
                 name: "y".to_string(),
                 field_type: Type::Float64,
                 position: AstBuilder::dummy_pos(),
+                is_private: false
             },
         ],
         methods: vec![],

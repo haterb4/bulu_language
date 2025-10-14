@@ -1,0 +1,27 @@
+// Test de méthode privée avec paramètre
+
+struct TestStruct {
+    value: float64
+    
+    priv func validateInput(x: float64): bool {
+        println("validateInput appelé avec x = " + x.toString())
+        return x >= 0.0
+    }
+    
+    pub func testValidation(x: float64): bool {
+        println("testValidation appelé avec x = " + x.toString())
+        return this.validateInput(x)
+    }
+}
+
+func main() {
+    println("=== Test Méthode Privée avec Paramètre ===")
+    
+    let s = TestStruct{value: 42.0}
+    println("TestStruct créé")
+    
+    let result = s.testValidation(3.0)
+    println("testValidation(3.0): " + result.toString())
+    
+    println("Test terminé")
+}

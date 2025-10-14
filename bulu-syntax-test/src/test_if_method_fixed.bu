@@ -1,0 +1,24 @@
+// Test de condition if avec appel de méthode
+
+struct TestStruct {
+    value: float64
+    
+    func isPositive(): bool {
+        return true
+    }
+}
+
+func main() {
+    println("=== Test If avec Méthode Fixed ===")
+    
+    let s = TestStruct{value: 3.0}
+    println("TestStruct créé")
+    
+    if s.isPositive() {
+        println("La valeur est positive")
+    } else {
+        println("La valeur est négative")
+    }
+    
+    println("Test terminé")
+}

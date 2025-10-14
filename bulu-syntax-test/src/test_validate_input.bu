@@ -1,0 +1,30 @@
+// Test de validateInput avec logique réelle
+
+struct TestStruct {
+    value: float64
+    
+    priv func validateInput(x: float64): bool {
+        println("validateInput appelé avec x = " + x.toString())
+        return x >= 0.0
+    }
+    
+    pub func testValidation(x: float64): bool {
+        println("testValidation appelé avec x = " + x.toString())
+        return this.validateInput(x)
+    }
+}
+
+func main() {
+    println("=== Test ValidateInput ===")
+    
+    let s = TestStruct{value: 10.0}
+    println("Structure créée")
+    
+    let result1 = s.testValidation(5.0)
+    println("testValidation(5.0): " + result1.toString())
+    
+    let result2 = s.testValidation(-2.0)
+    println("testValidation(-2.0): " + result2.toString())
+    
+    println("Test terminé")
+}

@@ -1,0 +1,31 @@
+// Test simple de condition if avec méthode
+
+struct TestStruct {
+    value: float64
+    
+    func isPositive(): bool {
+        println("isPositive appelé")
+        return true
+    }
+}
+
+func main() {
+    println("=== Test Simple If Method ===")
+    
+    let s = TestStruct{value: 3.0}
+    println("Structure créée")
+    
+    println("Avant appel de isPositive")
+    let result = s.isPositive()
+    println("Après appel de isPositive, résultat: " + result.toString())
+    
+    println("Avant condition if")
+    if s.isPositive() {
+        println("Condition vraie")
+    } else {
+        println("Condition fausse")
+    }
+    println("Après condition if")
+    
+    println("Test terminé")
+}

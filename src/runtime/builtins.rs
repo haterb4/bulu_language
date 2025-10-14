@@ -417,6 +417,7 @@ pub fn builtin_sizeof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
             // Estimate struct size as sum of field sizes
             fields.values().map(|v| estimate_value_size(v)).sum::<usize>()
         }
+        RuntimeValue::Global(_) => std::mem::size_of::<String>(), // Global refs are pointer-sized
     };
 
     Ok(RuntimeValue::Int32(size as i32))
@@ -765,6 +766,7 @@ pub fn builtin_typeof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Function(_) => "function",
         RuntimeValue::MethodRef { .. } => "method",
         RuntimeValue::Struct { name, .. } => name,
+        RuntimeValue::Global(_) => "global",
         RuntimeValue::Null => "null",
     };
 
@@ -817,6 +819,7 @@ pub fn builtin_instanceof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Function(_) => "function",
         RuntimeValue::MethodRef { .. } => "method",
         RuntimeValue::Struct { name, .. } => name,
+        RuntimeValue::Global(_) => "global",
         RuntimeValue::Null => "null",
     };
 
@@ -1264,6 +1267,7 @@ pub fn format_runtime_value(value: &RuntimeValue) -> String {
                 .collect();
             format!("{}{{ {} }}", name, field_strs.join(", "))
         }
+        RuntimeValue::Global(name) => format!("global:{}", name),
         RuntimeValue::Null => "null".to_string(),
     }
 }

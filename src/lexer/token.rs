@@ -88,7 +88,8 @@ pub enum TokenType {
     // Module system
     Import,
     Export,
-    Private,
+    Pub,
+    Priv,
     // Error handling
     Try,
     Fail,
@@ -193,7 +194,8 @@ impl fmt::Display for TokenType {
             TokenType::Not => "not",
             TokenType::Import => "import",
             TokenType::Export => "export",
-            TokenType::Private => "private",
+            TokenType::Pub => "pub",
+            TokenType::Priv => "priv",
             TokenType::Try => "try",
             TokenType::Fail => "fail",
             TokenType::Defer => "defer",

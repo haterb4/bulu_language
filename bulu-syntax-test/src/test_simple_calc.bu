@@ -1,0 +1,22 @@
+// Test calcul simple
+
+struct Point {
+    x: float64
+    y: float64
+    
+    pub func simpleCalc(): float64 {
+        return this.x + this.y
+    }
+}
+
+func main() {
+    println("=== Test Simple Calc ===")
+    
+    let p = Point{x: 3.0, y: 4.0}
+    println("Point créé")
+    
+    let result = p.simpleCalc()
+    println("Résultat: " + result.toString())
+    
+    println("Test terminé")
+}

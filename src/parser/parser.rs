@@ -470,8 +470,14 @@ impl Parser {
                 continue;
             }
 
-            // Check if this is a method (starts with 'func')
-            if self.check(&TokenType::Func) {
+            // Check if this is a method (starts with visibility modifier or 'func')
+            if self.check(&TokenType::Pub) {
+                self.advance(); // consume 'pub'
+                methods.push(self.parse_method_declaration_with_visibility(false)?);
+            } else if self.check(&TokenType::Priv) {
+                self.advance(); // consume 'priv'
+                methods.push(self.parse_method_declaration_with_visibility(true)?);
+            } else if self.check(&TokenType::Func) {
                 methods.push(self.parse_method_declaration()?);
             } else {
                 // Parse field
@@ -2129,7 +2135,13 @@ impl Parser {
             } else if self.check(&TokenType::LeftBrace) {
                 // Check if this is a struct literal (TypeName{...})
                 if let Expression::Identifier(_) = expr {
-                    expr = self.finish_struct_literal(expr)?;
+                    // Look ahead to see if this looks like a struct literal
+                    // A struct literal should have: { identifier : ... } or be empty { }
+                    if self.looks_like_struct_literal() {
+                        expr = self.finish_struct_literal(expr)?;
+                    } else {
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -2156,6 +2168,54 @@ impl Parser {
         }
 
         Ok(expr)
+    }
+
+    /// Check if the upcoming tokens look like a struct literal
+    fn looks_like_struct_literal(&self) -> bool {
+        // Look ahead to see what's after the '{'
+        if let Some(token1) = self.peek_ahead(1) {
+            match &token1.token_type {
+                // Empty struct literal: {}
+                TokenType::RightBrace => true,
+                // Field in struct literal: { identifier : ... }
+                TokenType::Identifier => {
+                    if let Some(token2) = self.peek_ahead(2) {
+                        // Skip potential newlines
+                        if token2.token_type == TokenType::Newline {
+                            if let Some(token3) = self.peek_ahead(3) {
+                                token3.token_type == TokenType::Colon
+                            } else {
+                                false
+                            }
+                        } else {
+                            token2.token_type == TokenType::Colon
+                        }
+                    } else {
+                        false
+                    }
+                }
+                // Newlines followed by identifier:colon
+                TokenType::Newline => {
+                    if let Some(token2) = self.peek_ahead(2) {
+                        if token2.token_type == TokenType::Identifier {
+                            if let Some(token3) = self.peek_ahead(3) {
+                                token3.token_type == TokenType::Colon
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+                // Anything else is probably not a struct literal
+                _ => false,
+            }
+        } else {
+            false
+        }
     }
 
     /// Finish parsing a struct literal (TypeName{field: value, ...})

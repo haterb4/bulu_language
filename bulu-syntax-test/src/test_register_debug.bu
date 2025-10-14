@@ -1,0 +1,8 @@
+// Test debug registres
+
+func main() {
+    println("=== Test Register Debug ===")
+    
+    let x = 5.0
+    println("Test terminé")
+}

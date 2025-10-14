@@ -1,0 +1,11 @@
+// Test debug if
+
+func main() {
+    println("=== Test If Debug ===")
+    
+    if true {
+        println("True branch")
+    }
+    
+    println("Test terminé")
+}

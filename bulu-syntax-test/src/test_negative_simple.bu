@@ -1,0 +1,10 @@
+// Test simple avec valeur négative
+
+func main() {
+    println("=== Test Negative Simple ===")
+    
+    let x = -5.0
+    println("x = " + x.toString())
+    
+    println("Test terminé")
+}

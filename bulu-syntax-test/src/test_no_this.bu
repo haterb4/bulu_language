@@ -1,0 +1,27 @@
+// Test sans this
+
+func validate(x: float64): bool {
+    println("validate appelé avec x = " + x.toString())
+    return x >= 0.0
+}
+
+func process(x: float64): float64 {
+    println("process appelé avec x = " + x.toString())
+    
+    if validate(x) {
+        println("Validation réussie")
+        return 10.0 + x
+    } else {
+        println("Validation échouée")
+        return 10.0
+    }
+}
+
+func main() {
+    println("=== Test No This ===")
+    
+    let result = process(3.0)
+    println("process(3.0): " + result.toString())
+    
+    println("Test terminé")
+}

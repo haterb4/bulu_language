@@ -50,6 +50,7 @@ fn test_simple_function_generation() {
         type_params: Vec::new(),
         doc_comment: None,
         is_exported: false,
+        is_private: false,
         params: vec![
             Parameter {
                 name: "a".to_string(),
@@ -208,11 +209,13 @@ fn test_struct_generation() {
                 name: "x".to_string(),
                 field_type: Type::Float64,
                 position: test_pos(),
+                is_private: false,
             },
             StructField {
                 name: "y".to_string(),
                 field_type: Type::Float64,
                 position: test_pos(),
+                is_private: false,
             },
         ],
         doc_comment: None,
@@ -280,6 +283,7 @@ fn test_program_generation() {
                 is_exported: false,
                 params: Vec::new(),
                 return_type: None,
+                is_private: false,
                 body: BlockStmt {
                     statements: vec![Statement::Return(ReturnStmt {
                         value: None,

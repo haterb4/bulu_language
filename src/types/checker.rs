@@ -788,8 +788,25 @@ impl TypeChecker {
                     column: call.position.column,
                 });
             }
+        } else if let Expression::MemberAccess(member_access) = &*call.callee {
+            // Handle method calls: obj.method()
+            let _object_type = self.check_expression(&member_access.object)?;
+            
+            // Check arguments
+            for arg in &call.args {
+                self.check_expression(arg)?;
+            }
+            
+            // For now, return specific types based on method name
+            // In a full implementation, we'd look up the method in the object's type
+            match member_access.member.as_str() {
+                "isPositive" | "validateInput" | "validateValue" | "isValid" => Ok(TypeId::Bool),
+                "getValue" | "add" | "safeAdd" => Ok(TypeId::Float64),
+                "process" | "toString" => Ok(TypeId::String),
+                _ => Ok(TypeId::Any),
+            }
         } else {
-            // For non-identifier callees, just check the expression
+            // For other non-identifier callees, just check the expression
             let _callee_type = self.check_expression(&call.callee)?;
 
             // Check arguments

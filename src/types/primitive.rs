@@ -610,6 +610,9 @@ pub enum RuntimeValue {
         fields: std::collections::HashMap<String, RuntimeValue>,
     },
 
+    // Global references
+    Global(String), // Global variable name
+    
     // Special values
     Null,
 }
@@ -643,6 +646,7 @@ impl RuntimeValue {
             RuntimeValue::Function(_) => PrimitiveType::Any, // Functions are treated as Any type
             RuntimeValue::MethodRef { .. } => PrimitiveType::Any, // Method refs are treated as Any type
             RuntimeValue::Struct { .. } => PrimitiveType::Any, // Structs are treated as Any type
+            RuntimeValue::Global(_) => PrimitiveType::Any, // Global refs are treated as Any type
             RuntimeValue::Null => PrimitiveType::Any,
         }
     }
@@ -675,6 +679,7 @@ impl RuntimeValue {
             RuntimeValue::Function(_) => true, // Functions are always truthy (they exist)
             RuntimeValue::MethodRef { .. } => true, // Method refs are always truthy (they exist)
             RuntimeValue::Struct { .. } => true, // Structs are always truthy (they exist)
+            RuntimeValue::Global(_) => true, // Global refs are always truthy (they exist)
             RuntimeValue::Null => false,
         }
     }
@@ -724,6 +729,7 @@ impl RuntimeValue {
                     .collect();
                 format!("{}{{ {} }}", name, field_strs.join(", "))
             }
+            RuntimeValue::Global(name) => format!("global:{}", name),
             RuntimeValue::Null => "null".to_string(),
         }
     }
@@ -1057,6 +1063,7 @@ impl fmt::Display for RuntimeValue {
                     .collect();
                 write!(f, "{}{{ {} }}", name, field_strs.join(", "))
             }
+            RuntimeValue::Global(name) => write!(f, "global:{}", name),
             RuntimeValue::Null => write!(f, "null"),
         }
     }

@@ -52,7 +52,8 @@ impl Lexer {
         // Module system keywords
         keywords.insert("import".to_string(), TokenType::Import);
         keywords.insert("export".to_string(), TokenType::Export);
-        keywords.insert("private".to_string(), TokenType::Private);
+        keywords.insert("pub".to_string(), TokenType::Pub);
+        keywords.insert("priv".to_string(), TokenType::Priv);
         
         // Error handling keywords
         keywords.insert("try".to_string(), TokenType::Try);

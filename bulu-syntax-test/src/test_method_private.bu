@@ -1,0 +1,32 @@
+// Test de méthodes privées
+
+struct TestStruct {
+    value: float64
+    
+    pub func getValue(): float64 {
+        return this.value
+    }
+    
+    priv func validateValue(): bool {
+        return this.value >= 0.0
+    }
+    
+    pub func isValid(): bool {
+        return this.validateValue()
+    }
+}
+
+func main() {
+    println("=== Test Méthodes Privées ===")
+    
+    let s = TestStruct{value: 42.0}
+    println("TestStruct créé avec value = " + s.value.toString())
+    
+    let result1 = s.getValue()
+    println("getValue(): " + result1.toString())
+    
+    let result2 = s.isValid()
+    println("isValid(): " + result2.toString())
+    
+    println("Test terminé")
+}

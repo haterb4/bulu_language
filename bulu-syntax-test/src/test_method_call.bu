@@ -1,0 +1,25 @@
+// Test d'appel de méthode privée
+
+struct TestStruct {
+    value: float64
+    
+    priv func validateValue(): bool {
+        return true
+    }
+    
+    pub func test(): bool {
+        return this.validateValue()
+    }
+}
+
+func main() {
+    println("=== Test Appel Méthode Privée ===")
+    
+    let s = TestStruct{value: 42.0}
+    println("TestStruct créé")
+    
+    let result = s.test()
+    println("test(): " + result.toString())
+    
+    println("Test terminé")
+}

@@ -1,0 +1,22 @@
+// Test simple d'appel de méthode
+
+struct TestStruct {
+    value: float64
+    
+    func simpleMethod(): float64 {
+        println("simpleMethod appelé")
+        return this.value
+    }
+}
+
+func main() {
+    println("=== Test Simple Method Call ===")
+    
+    let s = TestStruct{value: 42.0}
+    println("Structure créée")
+    
+    let result = s.simpleMethod()
+    println("Résultat: " + result.toString())
+    
+    println("Test terminé")
+}

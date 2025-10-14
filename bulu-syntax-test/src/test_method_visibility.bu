@@ -1,0 +1,31 @@
+// Test de visibilité des méthodes
+
+struct TestStruct {
+    value: float64
+    
+    priv func getValue(): float64 {
+        return this.value
+    }
+
+    func multipy(factor: float64): float64 {
+        return this.value * factor
+    } 
+}
+
+func main() {
+    println("=== Test Visibilité des Méthodes ===")
+    
+    let s = TestStruct{value: 42.0}
+    println("TestStruct créé avec value = " + s.value.toString())
+    
+    println("Should be private and raise error")
+    let result = s.getValue()
+    println("getValue(): " + result.toString())
+    println("error because private method or attribute accessed here without error")
+
+    println("Should be public")
+    result = s.multipy(2.0)
+    println("multiply(2) = "+result.toString())
+    
+    println("Test terminé")
+}
