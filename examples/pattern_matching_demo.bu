@@ -1,0 +1,139 @@
+// Pattern Matching Demonstration in Bulu Language
+
+func main() {
+    // Basic value matching
+    let value = 42
+    match value {
+        0 -> print("zero")
+        1 -> print("one")
+        42 -> print("the answer")
+        _ -> print("something else")
+    }
+
+    // Range matching
+    let age = 25
+    match age {
+        0...12 -> print("child")
+        13...19 -> print("teenager")
+        20..<65 -> print("adult")
+        _ -> print("senior")
+    }
+
+    // OR patterns
+    let grade = 'B'
+    match grade {
+        'A' | 'B' -> print("excellent")
+        'C' | 'D' -> print("passing")
+        'F' -> print("failing")
+        _ -> print("invalid grade")
+    }
+
+    // Match as expression
+    let category = match age {
+        0...17 -> "minor"
+        18...64 -> "adult"
+        _ -> "senior"
+    }
+    print("Category: " + category)
+
+    // Array patterns
+    let numbers = [1, 2, 3]
+    match numbers {
+        [] -> print("empty array")
+        [x] -> print("single element: " + x)
+        [1, 2, 3] -> print("specific sequence")
+        [first, _, last] -> print("first: " + first + ", last: " + last)
+    }
+
+    // Struct patterns (conceptual - struct literals not yet implemented)
+    // struct Point {
+    //     x: int32,
+    //     y: int32
+    // }
+    //
+    // let point = Point{x: 0, y: 5}
+    // match point {
+    //     Point{x: 0, y: 0} -> print("origin")
+    //     Point{x: 0, y: _} -> print("on y-axis")
+    //     Point{x: _, y: 0} -> print("on x-axis")
+    //     Point{x: x, y: y} -> print("point at (" + x + ", " + y + ")")
+    // }
+
+    // Guards in patterns
+    let number = -5
+    match number {
+        n if n > 0 -> print("positive: " + n)
+        n if n < 0 -> print("negative: " + n)
+        _ -> print("zero")
+    }
+
+    // Nested match expressions
+    let outer = 1
+    let inner = 2
+    let result = match outer {
+        1 -> match inner {
+            1 -> "one-one"
+            2 -> "one-two"
+            _ -> "one-other"
+        }
+        2 -> "two"
+        _ -> "other"
+    }
+    print("Result: " + result)
+
+    // Complex pattern matching with multiple types
+    func processValue(val: any) {
+        match val {
+            42 -> print("the answer to everything")
+            "hello" -> print("greeting")
+            true -> print("boolean true")
+            false -> print("boolean false")
+            null -> print("null value")
+            _ -> print("unknown value")
+        }
+    }
+
+    processValue(42)
+    processValue("hello")
+    processValue(true)
+    processValue(null)
+
+    // Pattern matching in function parameters (conceptual)
+    func fibonacci(n: int32): int32 {
+        match n {
+            0 -> 0
+            1 -> 1
+            _ -> fibonacci(n - 1) + fibonacci(n - 2)
+        }
+    }
+
+    print("Fibonacci sequence:")
+    for i in 0..<10 {
+        print("fib(" + i + ") = " + fibonacci(i))
+    }
+
+    // Pattern matching for error handling (conceptual)
+    func divide(a: int32, b: int32): any {
+        match b {
+            0 -> "Error: Division by zero"
+            _ -> a / b
+        }
+    }
+
+    let divResult = divide(10, 2)
+    match divResult {
+        result if typeof(result) == "int32" -> print("Division result: " + result)
+        error if typeof(error) == "string" -> print(error)
+        _ -> print("Unknown result")
+    }
+
+    // Demonstrating exhaustiveness
+    let boolean = true
+    match boolean {
+        true -> print("it's true")
+        false -> print("it's false")
+        // No wildcard needed - all cases covered
+    }
+
+    print("Pattern matching demonstration complete!")
+}

@@ -1,0 +1,24 @@
+// Concurrency example with channels
+
+func producer(ch: chan<- int32, count: int32) {
+    for i in 0..<count {
+        ch <- i
+        println("Produced: " + string(i))
+    }
+    close(ch)
+}
+
+func consumer(ch: <-chan int32) {
+    for value in ch {
+        println("Consumed: " + string(value))
+    }
+}
+
+func main() {
+    let ch = make(chan int32, 5)
+    
+    run producer(ch, 10)
+    consumer(ch)
+    
+    println("Done!")
+}

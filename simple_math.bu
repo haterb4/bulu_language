@@ -1,0 +1,6 @@
+// Simple math module
+export func add(a: int32, b: int32): int32 {
+    return a + b
+}
+
+export const PI: float64 = 3.14159

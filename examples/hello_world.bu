@@ -1,0 +1,5 @@
+// Simple Hello World program in Bulu
+
+func main() {
+    println("Hello, World!")
+}

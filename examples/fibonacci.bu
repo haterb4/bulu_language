@@ -1,0 +1,17 @@
+// Fibonacci sequence calculator
+
+func fibonacci(n: int32): int32 {
+    if n <= 1 {
+        return n
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+func main() {
+    const N = 10
+    
+    for i in 0...N {
+        let result = fibonacci(i)
+        println("fibonacci(" + string(i) + ") = " + string(result))
+    }
+}

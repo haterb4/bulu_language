@@ -1,0 +1,279 @@
+// Advanced Generics System demonstration in Bulu
+
+// Type alias with multiple type parameters
+type Result<T, E> = T  // Simplified for demo
+
+// Type alias with constraints
+type StringMap<T: Clone> = map[string]T
+
+// Generic struct with multiple type parameters and constraints
+struct Container<T, U> where T: Clone, U: Display {
+    first: T
+    second: U
+    count: int32
+    
+    func new(first: T, second: U): Container<T, U> {
+        return Container<T, U>{
+            first: first,
+            second: second,
+            count: 0
+        }
+    }
+    
+    func get_first(): T {
+        return this.first.clone()
+    }
+    
+    func get_second(): U {
+        return this.second
+    }
+    
+    func swap(): Container<U, T> where U: Clone, T: Display {
+        return Container<U, T>{
+            first: this.second.clone(),
+            second: this.first,
+            count: this.count
+        }
+    }
+}
+
+// Generic interface with associated type constraints
+interface Iterator<T> {
+    func next(): T
+    func has_next(): bool
+    func reset()
+}
+
+// Generic interface with multiple type parameters
+interface Converter<From, To> {
+    func convert(input: From): To
+}
+
+// Generic struct with default type parameters
+struct Optional<T = string> {
+    value: T
+    has_value: bool
+    
+    func some(value: T): Optional<T> {
+        return Optional<T>{value: value, has_value: true}
+    }
+    
+    func none(): Optional<T> {
+        return Optional<T>{has_value: false}
+    }
+    
+    func is_some(): bool {
+        return this.has_value
+    }
+    
+    func unwrap(): T {
+        if this.has_value {
+            return this.value
+        } else {
+            fail "Attempted to unwrap None value"
+        }
+    }
+    
+    func map<U>(fn: func(T): U): Optional<U> {
+        if this.has_value {
+            return Optional<U>.some(fn(this.value))
+        } else {
+            return Optional<U>.none()
+        }
+    }
+}
+
+// Non-generic struct with generic methods
+struct AnyContainer {
+    data: any
+    
+    func set<T>(value: T) {
+        this.data = value
+    }
+    
+    func get<T>(): T {
+        return this.data as T
+    }
+    
+    func transform<T, U>(transformer: func(T): U): U where T: Clone {
+        let typed_data = this.data as T
+        return transformer(typed_data.clone())
+    }
+}
+
+// Complex generic function with multiple constraints
+func merge<T, U, V>(
+    left: Container<T, U>, 
+    right: Container<T, U>
+): Container<T, U> 
+where 
+    T: Clone + Eq, 
+    U: Clone + Display 
+{
+    if left.get_first() == right.get_first() {
+        return Container<T, U>{
+            first: left.get_first(),
+            second: left.get_second(),
+            count: left.count + right.count
+        }
+    } else {
+        return left
+    }
+}
+
+// Generic function with type inference
+func create_pair<T>(first: T, second: T): Container<T, T> {
+    return Container<T, T>.new(first, second)
+}
+
+// Higher-order generic function
+func map_container<T, U, V, W>(
+    container: Container<T, U>,
+    f1: func(T): V,
+    f2: func(U): W
+): Container<V, W> {
+    return Container<V, W>{
+        first: f1(container.first),
+        second: f2(container.second),
+        count: container.count
+    }
+}
+
+// Generic interface implementation (duck typing)
+struct NumberIterator {
+    current: int32
+    max: int32
+    
+    func next(): int32 {
+        if this.has_next() {
+            let result = this.current
+            this.current = this.current + 1
+            return result
+        } else {
+            fail "Iterator exhausted"
+        }
+    }
+    
+    func has_next(): bool {
+        return this.current < this.max
+    }
+    
+    func reset() {
+        this.current = 0
+    }
+}
+
+// Generic type with complex constraints
+struct SortedList<T> where T: Ord + Clone + Display {
+    items: []T
+    
+    func new(): SortedList<T> {
+        return SortedList<T>{items: []}
+    }
+    
+    func add(item: T) {
+        // Insert in sorted order
+        let index = this.find_insert_position(item)
+        this.items.insert(index, item)
+    }
+    
+    func find_insert_position(item: T): int32 {
+        // Binary search for insertion position
+        let left = 0
+        let right = len(this.items)
+        
+        while left < right {
+            let mid = (left + right) / 2
+            if this.items[mid] < item {
+                left = mid + 1
+            } else {
+                right = mid
+            }
+        }
+        
+        return left
+    }
+    
+    func get(index: int32): T {
+        return this.items[index].clone()
+    }
+    
+    func size(): int32 {
+        return len(this.items)
+    }
+}
+
+// Generic function with associated types
+func process_iterator<I, T>(iterator: I): []T 
+where I: Iterator<T> {
+    let results = []T{}
+    
+    while iterator.has_next() {
+        results.append(iterator.next())
+    }
+    
+    return results
+}
+
+// Main function demonstrating advanced generics
+func main() {
+    // Basic generic usage
+    let string_container = Container<string, int32>.new("hello", 42)
+    print("String container: " + string_container.get_first())
+    
+    // Type inference
+    let inferred_pair = create_pair("a", "b")
+    print("Inferred pair: " + inferred_pair.get_first())
+    
+    // Generic methods in non-generic struct
+    let any_container = AnyContainer{data: null}
+    any_container.set<string>("test")
+    let retrieved = any_container.get<string>()
+    print("Retrieved: " + retrieved)
+    
+    // Optional with default type parameter
+    let default_optional = Optional{value: "default", has_value: true}
+    print("Default optional: " + default_optional.unwrap())
+    
+    // Optional with explicit type
+    let int_optional = Optional<int32>.some(123)
+    let doubled = int_optional.map<int32>((x: int32) => x * 2)
+    print("Doubled optional: " + doubled.unwrap())
+    
+    // Complex generic function
+    let left = Container<string, string>.new("key", "left")
+    let right = Container<string, string>.new("key", "right")
+    let merged = merge<string, string, string>(left, right)
+    print("Merged container: " + merged.get_second())
+    
+    // Generic iterator (duck typing)
+    let number_iter = NumberIterator{current: 0, max: 5}
+    let numbers = process_iterator<NumberIterator, int32>(number_iter)
+    print("Numbers: " + len(numbers))
+    
+    // Sorted list with constraints
+    let sorted_strings = SortedList<string>.new()
+    sorted_strings.add("zebra")
+    sorted_strings.add("apple")
+    sorted_strings.add("banana")
+    
+    for i in 0..<sorted_strings.size() {
+        print("Sorted[" + i + "]: " + sorted_strings.get(i))
+    }
+    
+    // Higher-order generic function
+    let mapped = map_container<string, int32, int32, string>(
+        string_container,
+        (s: string) => len(s),
+        (i: int32) => "number: " + i
+    )
+    print("Mapped container: " + mapped.get_second())
+    
+    // Type aliases
+    let string_map = StringMap<int32>{}
+    string_map["key1"] = 100
+    string_map["key2"] = 200
+    
+    let result = Result<string, string>("success")
+    print("Result: " + result)
+}

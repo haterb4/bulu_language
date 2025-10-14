@@ -1,0 +1,27 @@
+// Test des variables et types de base
+
+func main() {
+    println("=== Test des Variables ===")
+    
+    // Variables sans type explicite
+    let a = 42
+    let b = 3.14
+    let c = "Hello"
+    let d = true
+    
+    println("a = " + a.toString())
+    println("b = " + b.toString())
+    println("c = " + c)
+    println("d = " + d.toString())
+    
+    // Variables avec types explicites
+    let x: int32 = 100
+    let y: float64 = 2.5
+    let z: string = "World"
+    let w: bool = false
+    
+    println("x = " + x.toString())
+    println("y = " + y.toString())
+    println("z = " + z)
+    println("w = " + w.toString())
+}

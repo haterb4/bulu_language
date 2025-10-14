@@ -1,0 +1,1272 @@
+//! Type checking implementation for the Bulu language
+
+use crate::ast::*;
+use crate::error::{BuluError, Result};
+use crate::lexer::token::Position;
+use crate::types::composite::TypeRegistry;
+use crate::types::primitive::{PrimitiveType, TypeId};
+use std::collections::HashMap;
+
+/// Symbol table entry for type checking
+#[derive(Debug, Clone)]
+pub struct Symbol {
+    pub name: String,
+    pub type_id: TypeId,
+    pub is_mutable: bool,
+    pub position: Position,
+    pub function_info: Option<FunctionInfo>,
+}
+
+/// Function signature information
+#[derive(Debug, Clone)]
+pub struct FunctionInfo {
+    pub param_types: Vec<TypeId>,
+    pub return_type: Option<TypeId>,
+}
+
+/// Type checking context
+#[derive(Debug)]
+pub struct TypeChecker {
+    /// Symbol table stack for nested scopes
+    pub scopes: Vec<HashMap<String, Symbol>>,
+    /// Function return type stack
+    return_types: Vec<Option<TypeId>>,
+    /// Current function being checked
+    current_function: Option<String>,
+    /// Error accumulator
+    errors: Vec<BuluError>,
+    /// Type registry for composite types
+    type_registry: TypeRegistry,
+}
+
+impl TypeChecker {
+    /// Create a new type checker
+    pub fn new() -> Self {
+        let mut checker = Self {
+            scopes: vec![HashMap::new()], // Global scope
+            return_types: Vec::new(),
+            current_function: None,
+            errors: Vec::new(),
+            type_registry: TypeRegistry::new(),
+        };
+
+        // Add built-in functions to global scope
+        checker.add_builtin_functions();
+        checker
+    }
+
+    /// Add built-in functions to the global scope
+    fn add_builtin_functions(&mut self) {
+        let builtin_functions = vec![
+            // I/O functions
+            ("print", vec![], None),
+            ("println", vec![], None),
+            ("printf", vec![TypeId::String], None),
+            ("input", vec![], Some(TypeId::String)),
+            // Type conversion functions
+            ("int8", vec![TypeId::Any], Some(TypeId::Int8)),
+            ("int16", vec![TypeId::Any], Some(TypeId::Int16)),
+            ("int32", vec![TypeId::Any], Some(TypeId::Int32)),
+            ("int64", vec![TypeId::Any], Some(TypeId::Int64)),
+            ("uint8", vec![TypeId::Any], Some(TypeId::UInt8)),
+            ("uint16", vec![TypeId::Any], Some(TypeId::UInt16)),
+            ("uint32", vec![TypeId::Any], Some(TypeId::UInt32)),
+            ("uint64", vec![TypeId::Any], Some(TypeId::UInt64)),
+            ("float32", vec![TypeId::Any], Some(TypeId::Float32)),
+            ("float64", vec![TypeId::Any], Some(TypeId::Float64)),
+            ("bool", vec![TypeId::Any], Some(TypeId::Bool)),
+            ("char", vec![TypeId::Any], Some(TypeId::Char)),
+            ("string", vec![TypeId::Any], Some(TypeId::String)),
+            // Memory functions
+            ("len", vec![TypeId::Any], Some(TypeId::Int32)),
+            ("cap", vec![TypeId::Any], Some(TypeId::Int32)),
+            ("clone", vec![TypeId::Any], Some(TypeId::Any)),
+            ("sizeof", vec![TypeId::Any], Some(TypeId::Int32)),
+            // Collection functions
+            ("make", vec![TypeId::Any], Some(TypeId::Any)),
+            ("append", vec![TypeId::Any, TypeId::Any], Some(TypeId::Any)),
+            ("copy", vec![TypeId::Any, TypeId::Any], Some(TypeId::Int32)),
+            ("delete", vec![TypeId::Any, TypeId::Any], None),
+            // Utility functions
+            ("typeof", vec![TypeId::Any], Some(TypeId::String)),
+            (
+                "instanceof",
+                vec![TypeId::Any, TypeId::String],
+                Some(TypeId::Bool),
+            ),
+            ("panic", vec![TypeId::Any], None),
+            ("assert", vec![TypeId::Bool], None),
+            ("recover", vec![], Some(TypeId::Any)),
+            // Channel functions
+            ("close", vec![TypeId::Any], None),
+            // Synchronization functions
+            ("lock", vec![], Some(TypeId::Any)),
+            ("sleep", vec![TypeId::Int32], None),
+            ("yield", vec![], None),
+            ("timer", vec![TypeId::Int32], Some(TypeId::Any)),
+            ("atomic_load", vec![TypeId::Any], Some(TypeId::Any)),
+            ("atomic_store", vec![TypeId::Any, TypeId::Any], None),
+            (
+                "atomic_add",
+                vec![TypeId::Any, TypeId::Any],
+                Some(TypeId::Any),
+            ),
+            (
+                "atomic_sub",
+                vec![TypeId::Any, TypeId::Any],
+                Some(TypeId::Any),
+            ),
+            (
+                "atomic_cas",
+                vec![TypeId::Any, TypeId::Any, TypeId::Any],
+                Some(TypeId::Bool),
+            ),
+        ];
+
+        if let Some(global_scope) = self.scopes.first_mut() {
+            for (name, param_types, return_type) in builtin_functions {
+                let symbol = Symbol {
+                    name: name.to_string(),
+                    type_id: TypeId::Function(0), // Placeholder function type
+                    is_mutable: false,
+                    position: Position::new(0, 0, 0),
+                    function_info: Some(FunctionInfo {
+                        param_types,
+                        return_type,
+                    }),
+                };
+                global_scope.insert(name.to_string(), symbol);
+            }
+        }
+    }
+
+    /// Type check a complete program (alias for check_program)
+    pub fn check(&mut self, program: &Program) -> Result<()> {
+        self.check_program(program)
+    }
+
+    /// Convert AST type to TypeId using the type registry
+    fn ast_type_to_type_id(&mut self, ast_type: &Type) -> TypeId {
+        match ast_type {
+            Type::Int8 => TypeId::Int8,
+            Type::Int16 => TypeId::Int16,
+            Type::Int32 => TypeId::Int32,
+            Type::Int64 => TypeId::Int64,
+            Type::UInt8 => TypeId::UInt8,
+            Type::UInt16 => TypeId::UInt16,
+            Type::UInt32 => TypeId::UInt32,
+            Type::UInt64 => TypeId::UInt64,
+            Type::Float32 => TypeId::Float32,
+            Type::Float64 => TypeId::Float64,
+            Type::Bool => TypeId::Bool,
+            Type::Char => TypeId::Char,
+            Type::String => TypeId::String,
+            Type::Any => TypeId::Any,
+            Type::Void => TypeId::Void,
+            Type::Array(array_type) => {
+                let element_type = self.ast_type_to_type_id(&array_type.element_type);
+                let array_id = self.type_registry.register_array_type(element_type);
+                TypeId::Array(array_id)
+            }
+            Type::Slice(slice_type) => {
+                let element_type = self.ast_type_to_type_id(&slice_type.element_type);
+                let slice_id = self.type_registry.register_slice_type(element_type);
+                TypeId::Slice(slice_id)
+            }
+            Type::Map(map_type) => {
+                let key_type = self.ast_type_to_type_id(&map_type.key_type);
+                let value_type = self.ast_type_to_type_id(&map_type.value_type);
+                let map_id = self.type_registry.register_map_type(key_type, value_type);
+                TypeId::Map(map_id)
+            }
+            Type::Promise(promise_type) => {
+                let result_type = self.ast_type_to_type_id(&promise_type.result_type);
+                let promise_id = self.type_registry.register_promise_type(result_type);
+                TypeId::Promise(promise_id)
+            }
+            Type::Function(_) => TypeId::Function(0), // Placeholder
+            _ => TypeId::Unknown,
+        }
+    }
+
+    /// Type check a complete program
+    pub fn check_program(&mut self, program: &Program) -> Result<()> {
+        for statement in &program.statements {
+            self.check_statement(statement)?;
+        }
+
+        if !self.errors.is_empty() {
+            return Err(self.errors[0].clone());
+        }
+
+        Ok(())
+    }
+
+    /// Type check a statement
+    pub fn check_statement(&mut self, statement: &Statement) -> Result<TypeId> {
+        match statement {
+            Statement::VariableDecl(decl) => self.check_variable_declaration(decl),
+            Statement::FunctionDecl(decl) => self.check_function_declaration(decl),
+            Statement::If(stmt) => self.check_if_statement(stmt),
+            Statement::While(stmt) => self.check_while_statement(stmt),
+            Statement::For(stmt) => self.check_for_statement(stmt),
+            Statement::Return(stmt) => self.check_return_statement(stmt),
+            Statement::Break(_) | Statement::Continue(_) => Ok(TypeId::Any), // No type for control flow
+            Statement::Expression(stmt) => self.check_expression(&stmt.expr),
+            Statement::Block(stmt) => self.check_block_statement(stmt),
+            _ => {
+                // For now, return Any for unimplemented statement types
+                Ok(TypeId::Any)
+            }
+        }
+    }
+
+    /// Type check a variable declaration
+    fn check_variable_declaration(&mut self, decl: &VariableDecl) -> Result<TypeId> {
+        let mut inferred_type = None;
+
+        // Check initializer if present
+        if let Some(ref initializer) = decl.initializer {
+            let init_type = self.check_expression(initializer)?;
+            inferred_type = Some(init_type);
+        }
+
+        // Determine the final type
+        let final_type = match (&decl.type_annotation, inferred_type) {
+            // Explicit type annotation
+            (Some(ref type_ann), None) => self.ast_type_to_type_id(type_ann),
+            // Type inference from initializer
+            (None, Some(inferred)) => inferred,
+            // Both explicit type and initializer - check compatibility
+            (Some(ref type_ann), Some(inferred)) => {
+                let explicit_type = self.ast_type_to_type_id(type_ann);
+
+                // Check compatibility with special cases
+                let is_compatible = if PrimitiveType::is_assignable(inferred, explicit_type) {
+                    // Standard assignability check passes
+                    true
+                } else if let Some(ref initializer) = decl.initializer {
+                    if let Expression::Literal(lit_expr) = initializer {
+                        if let crate::ast::LiteralValue::Integer(_) = lit_expr.value {
+                            // Allow integer literals to be assigned to any integer type
+                            PrimitiveType::is_integer_type_id(explicit_type)
+                                && inferred == TypeId::Int32
+                        } else {
+                            false
+                        }
+                    } else if let Expression::Array(_) = initializer {
+                        // Allow array literals to be assigned to slice types if element types match
+                        match (inferred, explicit_type) {
+                            (TypeId::Array(_), TypeId::Slice(_)) => {
+                                // Check if element types are compatible
+                                if let (Some(array_elem), Some(slice_elem)) = (
+                                    self.type_registry.get_element_type(inferred),
+                                    self.type_registry.get_element_type(explicit_type),
+                                ) {
+                                    PrimitiveType::is_assignable(array_elem, slice_elem)
+                                } else {
+                                    false
+                                }
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if !is_compatible {
+                    return Err(BuluError::TypeError {
+                        file: None,
+                        message: format!(
+                            "Cannot assign {} to variable of type {}",
+                            PrimitiveType::type_name(inferred),
+                            PrimitiveType::type_name(explicit_type)
+                        ),
+                        line: decl.position.line,
+                        column: decl.position.column,
+                    });
+                }
+                explicit_type
+            }
+            // Neither type annotation nor initializer
+            (None, None) => {
+                return Err(BuluError::TypeError {
+                    file: None,
+                    message: "Variable declaration must have either type annotation or initializer"
+                        .to_string(),
+                    line: decl.position.line,
+                    column: decl.position.column,
+                });
+            }
+        };
+
+        // Add to symbol table
+        let symbol = Symbol {
+            name: decl.name.clone(),
+            type_id: final_type,
+            is_mutable: !decl.is_const,
+            position: decl.position,
+            function_info: None,
+        };
+
+        self.add_symbol(symbol)?;
+        Ok(final_type)
+    }
+
+    /// Type check a function declaration
+    fn check_function_declaration(&mut self, decl: &FunctionDecl) -> Result<TypeId> {
+        // Collect parameter types
+        let param_types: Vec<TypeId> = decl
+            .params
+            .iter()
+            .map(|p| self.ast_type_to_type_id(&p.param_type))
+            .collect();
+
+        let declared_return_type = decl
+            .return_type
+            .as_ref()
+            .map(|t| self.ast_type_to_type_id(t));
+
+        // For async functions, wrap the return type in a Promise
+        let actual_return_type = if decl.is_async {
+            match declared_return_type {
+                Some(ret_type) => {
+                    // Wrap the declared return type in a Promise
+                    let promise_id = self.type_registry.register_promise_type(ret_type);
+                    Some(TypeId::Promise(promise_id))
+                }
+                None => {
+                    // Async function with no explicit return type returns Promise<void>
+                    let promise_id = self.type_registry.register_promise_type(TypeId::Void);
+                    Some(TypeId::Promise(promise_id))
+                }
+            }
+        } else {
+            declared_return_type
+        };
+
+        // Add function to current scope first (for recursive calls)
+        let func_symbol = Symbol {
+            name: decl.name.clone(),
+            type_id: TypeId::Function(0), // Placeholder function type
+            is_mutable: false,
+            position: decl.position,
+            function_info: Some(FunctionInfo {
+                param_types: param_types.clone(),
+                return_type: actual_return_type,
+            }),
+        };
+        self.add_symbol(func_symbol)?;
+
+        // Enter new scope for function
+        self.enter_scope();
+        self.current_function = Some(decl.name.clone());
+
+        // Set return type for checking return statements
+        // For async functions, we check against the unwrapped return type
+        let check_return_type = if decl.is_async {
+            declared_return_type.or(Some(TypeId::Void))
+        } else {
+            actual_return_type
+        };
+        self.return_types.push(check_return_type);
+
+        // Add parameters to scope
+        for param in &decl.params {
+            let param_type = self.ast_type_to_type_id(&param.param_type);
+            let symbol = Symbol {
+                name: param.name.clone(),
+                type_id: param_type,
+                is_mutable: true, // Parameters are mutable by default
+                position: param.position,
+                function_info: None,
+            };
+            self.add_symbol(symbol)?;
+        }
+
+        // Check function body
+        self.check_block_statement(&decl.body)?;
+
+        // Exit function scope
+        self.return_types.pop();
+        self.current_function = None;
+        self.exit_scope();
+
+        Ok(TypeId::Function(0)) // Placeholder function type
+    }
+
+    /// Type check an if statement
+    fn check_if_statement(&mut self, stmt: &IfStmt) -> Result<TypeId> {
+        // Check condition
+        let condition_type = self.check_expression(&stmt.condition)?;
+        if condition_type != TypeId::Bool {
+            return Err(BuluError::TypeError {
+                file: None,
+                message: format!(
+                    "If condition must be bool, got {}",
+                    PrimitiveType::type_name(condition_type)
+                ),
+                line: stmt.position.line,
+                column: stmt.position.column,
+            });
+        }
+
+        // Check then branch
+        self.check_block_statement(&stmt.then_branch)?;
+
+        // Check else branch if present
+        if let Some(ref else_branch) = stmt.else_branch {
+            self.check_statement(else_branch)?;
+        }
+
+        Ok(TypeId::Any) // If statements don't have a type
+    }
+
+    /// Type check a while statement
+    fn check_while_statement(&mut self, stmt: &WhileStmt) -> Result<TypeId> {
+        // Check condition
+        let condition_type = self.check_expression(&stmt.condition)?;
+        if condition_type != TypeId::Bool {
+            return Err(BuluError::TypeError {
+                file: None,
+                message: format!(
+                    "While condition must be bool, got {}",
+                    PrimitiveType::type_name(condition_type)
+                ),
+                line: stmt.position.line,
+                column: stmt.position.column,
+            });
+        }
+
+        // Check body
+        self.check_block_statement(&stmt.body)?;
+
+        Ok(TypeId::Any) // While statements don't have a type
+    }
+
+    /// Type check a for statement
+    fn check_for_statement(&mut self, stmt: &ForStmt) -> Result<TypeId> {
+        // Enter new scope for loop variable
+        self.enter_scope();
+
+        // Check iterable expression
+        let iterable_type = self.check_expression(&stmt.iterable)?;
+
+        // For now, assume any type is iterable (we'll implement proper checking later)
+        let element_type = match iterable_type {
+            TypeId::String => TypeId::Char,
+            TypeId::Array(_) | TypeId::Slice(_) => TypeId::Any, // Placeholder
+            _ => {
+                return Err(BuluError::TypeError {
+                    file: None,
+                    message: format!(
+                        "Cannot iterate over {}",
+                        PrimitiveType::type_name(iterable_type)
+                    ),
+                    line: stmt.position.line,
+                    column: stmt.position.column,
+                });
+            }
+        };
+
+        // Add index variable to scope if present
+        if let Some(ref index_var) = stmt.index_variable {
+            let index_symbol = Symbol {
+                name: index_var.clone(),
+                type_id: TypeId::Int32, // Index is always int32
+                is_mutable: false,      // Loop variables are immutable
+                position: stmt.position,
+                function_info: None,
+            };
+            self.add_symbol(index_symbol)?;
+        }
+
+        // Add loop variable to scope
+        let symbol = Symbol {
+            name: stmt.variable.clone(),
+            type_id: element_type,
+            is_mutable: false, // Loop variables are immutable
+            position: stmt.position,
+            function_info: None,
+        };
+        self.add_symbol(symbol)?;
+
+        // Check body
+        self.check_block_statement(&stmt.body)?;
+
+        // Exit loop scope
+        self.exit_scope();
+
+        Ok(TypeId::Any) // For statements don't have a type
+    }
+
+    /// Type check a return statement
+    fn check_return_statement(&mut self, stmt: &ReturnStmt) -> Result<TypeId> {
+        let expected_return_type = self.return_types.last().copied().flatten();
+
+        match (&stmt.value, expected_return_type) {
+            // Return with value
+            (Some(ref expr), Some(expected)) => {
+                let actual_type = self.check_expression(expr)?;
+                if !PrimitiveType::is_assignable(actual_type, expected) {
+                    return Err(BuluError::TypeError {
+                        file: None,
+                        message: format!(
+                            "Cannot return {} from function expecting {}",
+                            PrimitiveType::type_name(actual_type),
+                            PrimitiveType::type_name(expected)
+                        ),
+                        line: stmt.position.line,
+                        column: stmt.position.column,
+                    });
+                }
+                Ok(actual_type)
+            }
+            // Return without value from void function or function without explicit return type
+            (None, None) => Ok(TypeId::Any), // Void return
+            // Return with value from function without explicit return type (infer return type)
+            (Some(ref expr), None) => {
+                let actual_type = self.check_expression(expr)?;
+                Ok(actual_type)
+            }
+            // Return without value but function expects a value
+            (None, Some(expected)) => Err(BuluError::TypeError {
+                file: None,
+                message: format!(
+                    "Function expects return value of type {}",
+                    PrimitiveType::type_name(expected)
+                ),
+                line: stmt.position.line,
+                column: stmt.position.column,
+            }),
+        }
+    }
+
+    /// Type check a block statement
+    fn check_block_statement(&mut self, stmt: &BlockStmt) -> Result<TypeId> {
+        self.enter_scope();
+
+        let mut last_type = TypeId::Any;
+        for statement in &stmt.statements {
+            last_type = self.check_statement(statement)?;
+        }
+
+        self.exit_scope();
+        Ok(last_type)
+    }
+
+    /// Type check an expression
+    pub fn check_expression(&mut self, expr: &Expression) -> Result<TypeId> {
+        match expr {
+            Expression::Literal(lit) => Ok(self.check_literal_expression(lit)),
+            Expression::Identifier(ident) => self.check_identifier_expression(ident),
+            Expression::Binary(bin) => self.check_binary_expression(bin),
+            Expression::Unary(unary) => self.check_unary_expression(unary),
+            Expression::Call(call) => self.check_call_expression(call),
+            Expression::MemberAccess(access) => self.check_member_access_expression(access),
+            Expression::Index(index) => self.check_index_expression(index),
+            Expression::Assignment(assign) => self.check_assignment_expression(assign),
+            Expression::Array(array) => self.check_array_expression(array),
+            Expression::Map(map) => self.check_map_expression(map),
+            Expression::Cast(cast) => self.check_cast_expression(cast),
+            Expression::TypeOf(typeof_expr) => self.check_typeof_expression(typeof_expr),
+            Expression::Async(async_expr) => self.check_async_expression(async_expr),
+            Expression::Await(await_expr) => self.check_await_expression(await_expr),
+            Expression::Parenthesized(paren) => self.check_expression(&paren.expr),
+            _ => {
+                // For now, return Any for unimplemented expression types
+                Ok(TypeId::Any)
+            }
+        }
+    }
+
+    /// Type check a literal expression
+    fn check_literal_expression(&self, lit: &LiteralExpr) -> TypeId {
+        PrimitiveType::infer_from_literal(&lit.value)
+    }
+
+    /// Type check an identifier expression
+    fn check_identifier_expression(&self, ident: &IdentifierExpr) -> Result<TypeId> {
+        match self.lookup_symbol(&ident.name) {
+            Some(symbol) => Ok(symbol.type_id),
+            None => Err(BuluError::TypeError {
+                file: None,
+                message: format!("Undefined identifier '{}'", ident.name),
+                line: ident.position.line,
+                column: ident.position.column,
+            }),
+        }
+    }
+
+    /// Type check a binary expression
+    fn check_binary_expression(&mut self, bin: &BinaryExpr) -> Result<TypeId> {
+        let left_type = self.check_expression(&bin.left)?;
+        let right_type = self.check_expression(&bin.right)?;
+
+        let op_str = match bin.operator {
+            BinaryOperator::Add => "+",
+            BinaryOperator::Subtract => "-",
+            BinaryOperator::Multiply => "*",
+            BinaryOperator::Divide => "/",
+            BinaryOperator::Modulo => "%",
+            BinaryOperator::Power => "**",
+            BinaryOperator::Equal => "==",
+            BinaryOperator::NotEqual => "!=",
+            BinaryOperator::Less => "<",
+            BinaryOperator::Greater => ">",
+            BinaryOperator::LessEqual => "<=",
+            BinaryOperator::GreaterEqual => ">=",
+            BinaryOperator::And => "and",
+            BinaryOperator::Or => "or",
+            _ => "unknown",
+        };
+
+        PrimitiveType::binary_operation_result_type(left_type, right_type, op_str).map_err(
+            |mut e| {
+                if let BuluError::TypeError {
+                    file: None,
+                    ref mut line,
+                    ref mut column,
+                    ..
+                } = e
+                {
+                    *line = bin.position.line;
+                    *column = bin.position.column;
+                }
+                e
+            },
+        )
+    }
+
+    /// Type check a unary expression
+    fn check_unary_expression(&mut self, unary: &UnaryExpr) -> Result<TypeId> {
+        let operand_type = self.check_expression(&unary.operand)?;
+
+        match unary.operator {
+            UnaryOperator::Plus | UnaryOperator::Minus => {
+                if PrimitiveType::is_numeric_type_id(operand_type) {
+                    Ok(operand_type)
+                } else {
+                    Err(BuluError::TypeError {
+                        file: None,
+                        message: format!(
+                            "Unary {} operator requires numeric operand, got {}",
+                            match unary.operator {
+                                UnaryOperator::Plus => "+",
+                                UnaryOperator::Minus => "-",
+                                _ => "unknown",
+                            },
+                            PrimitiveType::type_name(operand_type)
+                        ),
+                        line: unary.position.line,
+                        column: unary.position.column,
+                    })
+                }
+            }
+            UnaryOperator::Not => {
+                if operand_type == TypeId::Bool {
+                    Ok(TypeId::Bool)
+                } else {
+                    Err(BuluError::TypeError {
+                        file: None,
+                        message: format!(
+                            "Unary not operator requires bool operand, got {}",
+                            PrimitiveType::type_name(operand_type)
+                        ),
+                        line: unary.position.line,
+                        column: unary.position.column,
+                    })
+                }
+            }
+            _ => Ok(operand_type), // For other operators, assume same type
+        }
+    }
+
+    /// Type check a function call expression
+    fn check_call_expression(&mut self, call: &CallExpr) -> Result<TypeId> {
+        // Check callee - for now we only support identifier function calls
+        if let Expression::Identifier(ident) = &*call.callee {
+            // Look up function in symbol table and clone the info to avoid borrow issues
+            let symbol_opt = self.lookup_symbol(&ident.name);
+            let func_info_opt = symbol_opt.and_then(|s| s.function_info.clone());
+
+            if let Some(func_info) = func_info_opt {
+                // For built-in functions like print, we're more lenient
+                if ident.name == "print" {
+                    // Print can take any number of arguments of any type
+                    for arg in &call.args {
+                        self.check_expression(arg)?;
+                    }
+                    return Ok(TypeId::Any); // print doesn't return a value
+                }
+
+                // Handle println built-in function
+                if ident.name == "println" {
+                    // println can take any number of arguments of any type
+                    for arg in &call.args {
+                        self.check_expression(arg)?;
+                    }
+                    return Ok(TypeId::Any); // println doesn't return a value
+                }
+
+                // Handle typeof built-in function
+                if ident.name == "typeof" {
+                    // typeof takes exactly one argument of any type
+                    if call.args.len() != 1 {
+                        return Err(BuluError::TypeError {
+                            file: None,
+                            message: format!(
+                                "typeof() expects exactly 1 argument, got {}",
+                                call.args.len()
+                            ),
+                            line: call.position.line,
+                            column: call.position.column,
+                        });
+                    }
+                    // Check the argument
+                    self.check_expression(&call.args[0])?;
+                    return Ok(TypeId::String); // typeof returns string
+                }
+
+                // Check argument count
+                if call.args.len() != func_info.param_types.len() {
+                    return Err(BuluError::TypeError {
+                        file: None,
+                        message: format!(
+                            "Function '{}' expects {} arguments, got {}",
+                            ident.name,
+                            func_info.param_types.len(),
+                            call.args.len()
+                        ),
+                        line: call.position.line,
+                        column: call.position.column,
+                    });
+                }
+
+                // Check argument types
+                for (i, (arg, expected_type)) in call
+                    .args
+                    .iter()
+                    .zip(func_info.param_types.iter())
+                    .enumerate()
+                {
+                    let actual_type = self.check_expression(arg)?;
+                    if !PrimitiveType::is_assignable(actual_type, *expected_type) {
+                        return Err(BuluError::TypeError {
+                            file: None,
+                            message: format!(
+                                "Argument {} to function '{}': expected {}, got {}",
+                                i + 1,
+                                ident.name,
+                                PrimitiveType::type_name(*expected_type),
+                                PrimitiveType::type_name(actual_type)
+                            ),
+                            line: call.position.line,
+                            column: call.position.column,
+                        });
+                    }
+                }
+
+                // Return the function's return type
+                Ok(func_info.return_type.unwrap_or(TypeId::Any))
+            } else if self.lookup_symbol(&ident.name).is_some() {
+                // Symbol exists but is not a function
+                return Err(BuluError::TypeError {
+                    file: None,
+                    message: format!("'{}' is not a function", ident.name),
+                    line: call.position.line,
+                    column: call.position.column,
+                });
+            } else {
+                return Err(BuluError::TypeError {
+                    file: None,
+                    message: format!("Undefined function '{}'", ident.name),
+                    line: call.position.line,
+                    column: call.position.column,
+                });
+            }
+        } else {
+            // For non-identifier callees, just check the expression
+            let _callee_type = self.check_expression(&call.callee)?;
+
+            // Check arguments
+            for arg in &call.args {
+                self.check_expression(arg)?;
+            }
+
+            Ok(TypeId::Any)
+        }
+    }
+
+    /// Type check a member access expression
+    fn check_member_access_expression(&mut self, access: &MemberAccessExpr) -> Result<TypeId> {
+        let _object_type = self.check_expression(&access.object)?;
+
+        // For now, assume member access returns Any
+        // TODO: Implement proper struct/interface member checking
+        Ok(TypeId::Any)
+    }
+
+    /// Type check an index expression
+    fn check_index_expression(&mut self, index: &IndexExpr) -> Result<TypeId> {
+        let object_type = self.check_expression(&index.object)?;
+        let index_type = self.check_expression(&index.index)?;
+
+        // Check index type based on the object type
+        match object_type {
+            TypeId::String | TypeId::Array(_) | TypeId::Slice(_) => {
+                // Arrays, slices, and strings require integer indices
+                if !PrimitiveType::is_integer_type_id(index_type) {
+                    return Err(BuluError::TypeError {
+                        file: None,
+                        message: format!(
+                            "Array/slice/string index must be integer, got {}",
+                            PrimitiveType::type_name(index_type)
+                        ),
+                        line: index.position.line,
+                        column: index.position.column,
+                    });
+                }
+            }
+            TypeId::Map(_type_id) => {
+                // For maps, check that the index type matches the key type
+                if let Some((key_type, _value_type)) = self.type_registry.get_map_types(object_type)
+                {
+                    if !PrimitiveType::is_assignable(index_type, key_type) {
+                        return Err(BuluError::TypeError {
+                            file: None,
+                            message: format!(
+                                "Map key must be {}, got {}",
+                                PrimitiveType::type_name(key_type),
+                                PrimitiveType::type_name(index_type)
+                            ),
+                            line: index.position.line,
+                            column: index.position.column,
+                        });
+                    }
+                }
+                // If we can't determine the key type, allow any index type for now
+            }
+            _ => {
+                // For other types, we'll check later if indexing is supported
+            }
+        }
+
+        // Return the appropriate element type based on the object type
+        match object_type {
+            TypeId::String => Ok(TypeId::Char),
+            TypeId::Array(_type_id) | TypeId::Slice(_type_id) => {
+                // Try to get the element type from the type registry
+                if let Some(element_type) = self.type_registry.get_element_type(object_type) {
+                    Ok(element_type)
+                } else {
+                    // Fallback to Any if we can't determine the element type
+                    Ok(TypeId::Any)
+                }
+            }
+            TypeId::Map(_type_id) => {
+                // For maps, indexing returns the value type
+                if let Some((_key_type, value_type)) = self.type_registry.get_map_types(object_type)
+                {
+                    Ok(value_type)
+                } else {
+                    // Fallback to Any if we can't determine the value type
+                    Ok(TypeId::Any)
+                }
+            }
+            _ => Err(BuluError::TypeError {
+                file: None,
+                message: format!(
+                    "Cannot index into {}",
+                    PrimitiveType::type_name(object_type)
+                ),
+                line: index.position.line,
+                column: index.position.column,
+            }),
+        }
+    }
+
+    /// Type check an assignment expression
+    fn check_assignment_expression(&mut self, assign: &AssignmentExpr) -> Result<TypeId> {
+        let target_type = self.check_expression(&assign.target)?;
+        let value_type = self.check_expression(&assign.value)?;
+
+        // Check assignment compatibility
+        if !PrimitiveType::is_assignable(value_type, target_type) {
+            return Err(BuluError::TypeError {
+                file: None,
+                message: format!(
+                    "Cannot assign {} to {}",
+                    PrimitiveType::type_name(value_type),
+                    PrimitiveType::type_name(target_type)
+                ),
+                line: assign.position.line,
+                column: assign.position.column,
+            });
+        }
+
+        // Check if target is mutable (for identifier assignments)
+        if let Expression::Identifier(ident) = &*assign.target {
+            if let Some(symbol) = self.lookup_symbol(&ident.name) {
+                if !symbol.is_mutable {
+                    return Err(BuluError::TypeError {
+                        file: None,
+                        message: format!("Cannot assign to immutable variable '{}'", ident.name),
+                        line: assign.position.line,
+                        column: assign.position.column,
+                    });
+                }
+            }
+        }
+
+        Ok(target_type)
+    }
+
+    /// Type check an array expression
+    fn check_array_expression(&mut self, array: &ArrayExpr) -> Result<TypeId> {
+        if array.elements.is_empty() {
+            return Ok(TypeId::Array(0)); // Empty array
+        }
+
+        // Check all elements and ensure they have the same type
+        let first_type = self.check_expression(&array.elements[0])?;
+        for element in &array.elements[1..] {
+            let element_type = self.check_expression(element)?;
+            if !PrimitiveType::is_assignable(element_type, first_type) {
+                return Err(BuluError::TypeError {
+                    file: None,
+                    message: format!(
+                        "Array elements must have the same type, expected {}, got {}",
+                        PrimitiveType::type_name(first_type),
+                        PrimitiveType::type_name(element_type)
+                    ),
+                    line: array.position.line,
+                    column: array.position.column,
+                });
+            }
+        }
+
+        // Register the array type and return it
+        let array_type_id = self.type_registry.register_array_type(first_type);
+        Ok(TypeId::Array(array_type_id))
+    }
+
+    /// Type check a map expression
+    fn check_map_expression(&mut self, map: &MapExpr) -> Result<TypeId> {
+        if map.entries.is_empty() {
+            return Ok(TypeId::Map(0)); // Empty map
+        }
+
+        // Check first entry to determine key and value types
+        let first_entry = &map.entries[0];
+        let key_type = self.check_expression(&first_entry.key)?;
+        let value_type = self.check_expression(&first_entry.value)?;
+
+        // Check all other entries have compatible types
+        for entry in &map.entries[1..] {
+            let entry_key_type = self.check_expression(&entry.key)?;
+            let entry_value_type = self.check_expression(&entry.value)?;
+
+            if !PrimitiveType::is_assignable(entry_key_type, key_type) {
+                let key_type_name = self.type_registry.get_type_name(key_type);
+                let entry_key_type_name = self.type_registry.get_type_name(entry_key_type);
+                return Err(BuluError::TypeError {
+                    file: None,
+                    message: format!(
+                        "Map keys must have the same type, expected {}, got {}",
+                        key_type_name, entry_key_type_name
+                    ),
+                    line: entry.position.line,
+                    column: entry.position.column,
+                });
+            }
+
+            if !PrimitiveType::is_assignable(entry_value_type, value_type) {
+                let value_type_name = self.type_registry.get_type_name(value_type);
+                let entry_value_type_name = self.type_registry.get_type_name(entry_value_type);
+                return Err(BuluError::TypeError {
+                    file: None,
+                    message: format!(
+                        "Map values must have the same type, expected {}, got {}",
+                        value_type_name, entry_value_type_name
+                    ),
+                    line: entry.position.line,
+                    column: entry.position.column,
+                });
+            }
+        }
+
+        // Register the map type and return it
+        let map_type_id = self.type_registry.register_map_type(key_type, value_type);
+        Ok(TypeId::Map(map_type_id))
+    }
+
+    /// Type check a cast expression
+    fn check_cast_expression(&mut self, cast: &CastExpr) -> Result<TypeId> {
+        let expr_type = self.check_expression(&cast.expr)?;
+        let target_type = PrimitiveType::ast_type_to_type_id(&cast.target_type);
+
+        // Check if the cast is valid
+        use crate::types::casting::TypeCaster;
+        if !TypeCaster::is_cast_valid(expr_type, target_type) {
+            return Err(BuluError::TypeError {
+                file: None,
+                message: format!(
+                    "Cannot cast {} to {}",
+                    PrimitiveType::type_name(expr_type),
+                    PrimitiveType::type_name(target_type)
+                ),
+                line: cast.position.line,
+                column: cast.position.column,
+            });
+        }
+
+        Ok(target_type)
+    }
+
+    /// Type check a typeof expression
+    fn check_typeof_expression(&mut self, typeof_expr: &TypeOfExpr) -> Result<TypeId> {
+        // Check the inner expression to ensure it's valid
+        let _expr_type = self.check_expression(&typeof_expr.expr)?;
+
+        // typeof() always returns a string containing the type name
+        Ok(TypeId::String)
+    }
+
+    /// Type check an async expression
+    fn check_async_expression(&mut self, async_expr: &AsyncExpr) -> Result<TypeId> {
+        // Check the inner expression
+        let expr_type = self.check_expression(&async_expr.expr)?;
+
+        // Wrap the result type in a Promise
+        let promise_id = self.type_registry.register_promise_type(expr_type);
+        Ok(TypeId::Promise(promise_id))
+    }
+
+    /// Type check an await expression
+    fn check_await_expression(&mut self, await_expr: &AwaitExpr) -> Result<TypeId> {
+        // Check the inner expression
+        let expr_type = self.check_expression(&await_expr.expr)?;
+
+        // The expression must be a Promise type
+        match expr_type {
+            TypeId::Promise(promise_id) => {
+                // Get the result type from the Promise
+                if let Some(composite_type) = self.type_registry.get_composite_type(promise_id) {
+                    if let crate::types::composite::CompositeTypeId::Promise(result_type) =
+                        composite_type
+                    {
+                        Ok(**result_type)
+                    } else {
+                        Err(BuluError::TypeError {
+            file: None,
+                            message: "Internal error: Promise type ID does not map to Promise composite type".to_string(),
+                            line: await_expr.position.line,
+                            column: await_expr.position.column,
+                        })
+                    }
+                } else {
+                    Err(BuluError::TypeError {
+                        file: None,
+                        message: "Internal error: Promise type ID not found in registry"
+                            .to_string(),
+                        line: await_expr.position.line,
+                        column: await_expr.position.column,
+                    })
+                }
+            }
+            _ => Err(BuluError::TypeError {
+                file: None,
+                message: format!("Cannot await non-Promise type: {:?}", expr_type),
+                line: await_expr.position.line,
+                column: await_expr.position.column,
+            }),
+        }
+    }
+
+    /// Enter a new scope
+    fn enter_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    /// Exit the current scope
+    fn exit_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    /// Add a symbol to the current scope
+    fn add_symbol(&mut self, symbol: Symbol) -> Result<()> {
+        if let Some(current_scope) = self.scopes.last_mut() {
+            if current_scope.contains_key(&symbol.name) {
+                return Err(BuluError::TypeError {
+                    file: None,
+                    message: format!(
+                        "Variable '{}' is already defined in this scope",
+                        symbol.name
+                    ),
+                    line: symbol.position.line,
+                    column: symbol.position.column,
+                });
+            }
+            current_scope.insert(symbol.name.clone(), symbol);
+        }
+        Ok(())
+    }
+
+    /// Look up a symbol in the scope stack
+    fn lookup_symbol(&self, name: &str) -> Option<&Symbol> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(symbol) = scope.get(name) {
+                return Some(symbol);
+            }
+        }
+        None
+    }
+
+    /// Get all errors accumulated during type checking
+    pub fn get_errors(&self) -> &[BuluError] {
+        &self.errors
+    }
+
+    /// Import symbols from a SymbolResolver into the global scope
+    pub fn import_symbols_from_resolver(
+        &mut self,
+        symbol_resolver: &crate::compiler::symbol_resolver::SymbolResolver,
+    ) {
+        let symbol_table = symbol_resolver.symbol_table();
+
+        // Only import imported symbols (not local symbols, as they are handled by the TypeChecker itself)
+        for (name, imported_symbol) in &symbol_table.imported_symbols {
+            let symbol = match imported_symbol.symbol_type {
+                crate::compiler::symbol_resolver::SymbolType::Function => {
+                    let function_info =
+                        if let Some(ref signature) = imported_symbol.function_signature {
+                            // Extract parameter types from function signature
+                            let param_types: Vec<TypeId> = signature
+                                .parameters
+                                .iter()
+                                .map(|param| self.convert_ast_type_to_type_id(&param.param_type))
+                                .collect();
+
+                            // Extract return type from function signature
+                            let return_type = signature
+                                .return_type
+                                .as_ref()
+                                .map(|rt| self.convert_ast_type_to_type_id(rt));
+
+                            Some(FunctionInfo {
+                                param_types,
+                                return_type,
+                            })
+                        } else {
+                            // Fallback for functions without signature info
+                            Some(FunctionInfo {
+                                param_types: Vec::new(),
+                                return_type: Some(TypeId::Any),
+                            })
+                        };
+
+                    Symbol {
+                        name: name.clone(),
+                        type_id: TypeId::Function(0), // Use placeholder ID
+                        is_mutable: false,
+                        position: imported_symbol.position,
+                        function_info,
+                    }
+                }
+                crate::compiler::symbol_resolver::SymbolType::Variable => {
+                    Symbol {
+                        name: name.clone(),
+                        type_id: TypeId::Any, // TODO: Infer actual type
+                        is_mutable: true,
+                        position: imported_symbol.position,
+                        function_info: None,
+                    }
+                }
+                crate::compiler::symbol_resolver::SymbolType::Constant => {
+                    Symbol {
+                        name: name.clone(),
+                        type_id: TypeId::Any, // TODO: Infer actual type
+                        is_mutable: false,
+                        position: imported_symbol.position,
+                        function_info: None,
+                    }
+                }
+                crate::compiler::symbol_resolver::SymbolType::Struct => {
+                    Symbol {
+                        name: name.clone(),
+                        type_id: TypeId::Struct(0), // Use placeholder ID
+                        is_mutable: false,
+                        position: imported_symbol.position,
+                        function_info: None,
+                    }
+                }
+                crate::compiler::symbol_resolver::SymbolType::Interface => {
+                    Symbol {
+                        name: name.clone(),
+                        type_id: TypeId::Interface(0), // Use placeholder ID
+                        is_mutable: false,
+                        position: imported_symbol.position,
+                        function_info: None,
+                    }
+                }
+                crate::compiler::symbol_resolver::SymbolType::TypeAlias => Symbol {
+                    name: name.clone(),
+                    type_id: TypeId::Any,
+                    is_mutable: false,
+                    position: imported_symbol.position,
+                    function_info: None,
+                },
+                crate::compiler::symbol_resolver::SymbolType::Module => Symbol {
+                    name: name.clone(),
+                    type_id: TypeId::Any,
+                    is_mutable: false,
+                    position: imported_symbol.position,
+                    function_info: None,
+                },
+            };
+
+            // Add to global scope (first scope in the stack)
+            if let Some(global_scope) = self.scopes.first_mut() {
+                global_scope.insert(name.clone(), symbol);
+            }
+        }
+    }
+
+    /// Convert AST Type to TypeId
+    fn convert_ast_type_to_type_id(&self, ast_type: &Type) -> TypeId {
+        match ast_type {
+            Type::Int8 => TypeId::Int8,
+            Type::Int16 => TypeId::Int16,
+            Type::Int32 => TypeId::Int32,
+            Type::Int64 => TypeId::Int64,
+            Type::UInt8 => TypeId::UInt8,
+            Type::UInt16 => TypeId::UInt16,
+            Type::UInt32 => TypeId::UInt32,
+            Type::UInt64 => TypeId::UInt64,
+            Type::Float32 => TypeId::Float32,
+            Type::Float64 => TypeId::Float64,
+            Type::Bool => TypeId::Bool,
+            Type::Char => TypeId::Char,
+            Type::String => TypeId::String,
+            Type::Any => TypeId::Any,
+            Type::Void => TypeId::Void,
+            Type::Array(_) => TypeId::Array(0), // Use placeholder ID for now
+            Type::Slice(_) => TypeId::Slice(0), // Use placeholder ID for now
+            Type::Map(_) => TypeId::Map(0),     // Use placeholder ID for now
+            Type::Function(_) => TypeId::Function(0), // Use placeholder ID for now
+            Type::Named(_) => TypeId::Any,      // Custom types - simplified for now
+            Type::Generic(_) => TypeId::Any,    // Generic types - simplified for now
+            _ => TypeId::Any,                   // Fallback for other types
+        }
+    }
+}
+
+impl Default for TypeChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}

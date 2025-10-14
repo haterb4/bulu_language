@@ -1,0 +1,23 @@
+// Test des structures
+
+struct Point {
+    x: float64
+    y: float64
+    
+    func distance(): float64 {
+        return this.x ** 2 + this.y **2
+    }
+}
+
+func main() {
+    print("Test des structures\n")
+    
+    let p = Point{x: 3.0, y: 4.0}
+    println("Point cree")
+    
+    println("x = " + p.x.toString())
+    println("y = " + p.y.toString())
+    
+    let dist = p.distance()
+    println("Distance: " + dist.toString())
+}

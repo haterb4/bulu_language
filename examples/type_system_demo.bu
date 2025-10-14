@@ -1,0 +1,50 @@
+// Type system demonstration for Bulu language
+
+// Variable declarations with type inference
+let x = 42          // inferred as int32
+let y = 3.14        // inferred as float64
+let name = "Alice"  // inferred as string
+let active = true   // inferred as bool
+
+// Variable declarations with explicit types
+let age: int32 = 25
+let height: float64 = 5.8
+let initial: char = 'A'
+
+// Type casting
+let float_x = x as float64
+let int_y = y as int32
+let str_age = age as string
+
+// Function with typed parameters and return type
+func add(a: int32, b: int32): int32 {
+    return a + b
+}
+
+// Function without explicit return type (inferred)
+func greet(name: string) {
+    print("Hello, " + name)
+}
+
+// Function calls
+let sum = add(10, 20)
+greet("World")
+
+// Arrays
+let numbers = [1, 2, 3, 4, 5]
+let first = numbers[0]
+
+// Control flow with type checking
+if sum > 25 {
+    print("Sum is greater than 25")
+}
+
+let i = 0
+while i < 5 {
+    print(i)
+    i = i + 1
+}
+
+for num in numbers {
+    print(num)
+}

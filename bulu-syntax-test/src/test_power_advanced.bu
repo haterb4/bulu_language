@@ -1,0 +1,29 @@
+// Test avancé de l'opérateur puissance **
+
+func main() {
+    println("=== Test Avancé de l'Opérateur Puissance ** ===")
+    
+    // Test avec des entiers
+    let result1 = 2 ** 3
+    println("2 ** 3 = " + result1.toString())
+    
+    // Test avec des nombres négatifs
+    let result2 = (-2.0) ** 3.0
+    println("(-2.0) ** 3.0 = " + result2.toString())
+    
+    // Test avec exposant négatif
+    let result3 = 2.0 ** (-2.0)
+    println("2.0 ** (-2.0) = " + result3.toString())
+    
+    // Test de précédence (doit être 2^(3^2) = 2^9 = 512)
+    let result4 = 2.0 ** 3.0 ** 2.0
+    println("2.0 ** 3.0 ** 2.0 = " + result4.toString())
+    
+    // Test avec des variables
+    let base = 7.0
+    let exp = 2.0
+    let result5 = base ** exp
+    println("7.0 ** 2.0 = " + result5.toString())
+    
+    println("Test terminé")
+}

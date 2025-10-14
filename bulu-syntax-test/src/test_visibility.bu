@@ -1,0 +1,53 @@
+// Test de la visibilité des structures et méthodes
+
+// Structure publique exportée
+export struct PublicUser {
+    name: string
+    private age: int32  // Champ privé
+    
+    // Méthode publique
+    func getName(): string {
+        return this.name
+    }
+    
+    // Méthode privée
+    private func getAge(): int32 {
+        return this.age
+    }
+    
+    // Méthode publique qui utilise une méthode privée
+    func canVote(): bool {
+        return this.getAge() >= 18
+    }
+}
+
+// Structure privée (non exportée)
+struct InternalConfig {
+    debug: bool
+    
+    func isDebug(): bool {
+        return this.debug
+    }
+}
+
+func main() {
+    println("=== Test de Visibilité ===")
+    
+    let user = PublicUser{name: "Alice", age: 25}
+    println("Nom: " + user.getName())
+    println("Peut voter: " + user.canVote().toString())
+    
+    // Ceci devrait fonctionner (champ public)
+    println("Nom direct: " + user.name)
+    
+    // Ceci devrait échouer (champ privé)
+    // println("Age direct: " + user.age.toString())
+    
+    // Ceci devrait échouer (méthode privée)
+    // println("Age: " + user.getAge().toString())
+    
+    let config = InternalConfig{debug: true}
+    println("Debug: " + config.isDebug().toString())
+    
+    println("Test terminé")
+}

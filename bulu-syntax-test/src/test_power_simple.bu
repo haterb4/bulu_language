@@ -1,0 +1,18 @@
+// Test simple de l'opérateur puissance **
+
+func main() {
+    println("=== Test Simple de l'Opérateur Puissance ** ===")
+    
+    // Test avec des entiers positifs
+    let result1 = 2 ** 3
+    println("2 ** 3 = " + result1.toString())
+    
+    let result2 = 3 ** 2
+    println("3 ** 2 = " + result2.toString())
+    
+    // Test avec des floats positifs
+    let result3 = 2.0 ** 3.0
+    println("2.0 ** 3.0 = " + result3.toString())
+    
+    println("Test terminé")
+}

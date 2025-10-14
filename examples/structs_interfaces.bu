@@ -1,0 +1,47 @@
+// Structs and interfaces example
+
+interface Shape {
+    func area(): float64
+    func perimeter(): float64
+}
+
+struct Circle {
+    radius: float64
+    
+    func area(): float64 {
+        return 3.14159 * this.radius * this.radius
+    }
+    
+    func perimeter(): float64 {
+        return 2.0 * 3.14159 * this.radius
+    }
+}
+
+struct Rectangle {
+    width: float64
+    height: float64
+    
+    func area(): float64 {
+        return this.width * this.height
+    }
+    
+    func perimeter(): float64 {
+        return 2.0 * (this.width + this.height)
+    }
+}
+
+func printShapeInfo(s: Shape) {
+    println("Area: " + string(s.area()))
+    println("Perimeter: " + string(s.perimeter()))
+}
+
+func main() {
+    let circle = Circle{radius: 5.0}
+    let rect = Rectangle{width: 3.0, height: 4.0}
+    
+    println("Circle:")
+    printShapeInfo(circle)
+    
+    println("Rectangle:")
+    printShapeInfo(rect)
+}

@@ -1,0 +1,187 @@
+// Defer Statement Demonstration
+// This example shows various uses of the defer statement in Bulu
+
+// Basic defer usage
+func basic_defer_example() {
+    print("Starting function")
+    defer print("This will execute at the end")
+    print("Middle of function")
+    print("End of function")
+}
+
+// Multiple defers execute in LIFO order
+func multiple_defers_example() {
+    print("Function start")
+    defer print("Defer 1 (executes last)")
+    defer print("Defer 2 (executes second)")
+    defer print("Defer 3 (executes first)")
+    print("Function end")
+}
+
+// Defer with error handling
+func defer_with_error_handling() {
+    try {
+        defer print("Cleanup: This always executes")
+        defer print("Cleanup: Even if error occurs")
+        
+        print("About to fail...")
+        fail "Something went wrong!"
+        
+        print("This won't execute")
+    } fail on err {
+        print("Caught error: " + err)
+    }
+}
+
+// Resource management with defer
+func resource_management_example() {
+    print("Opening file...")
+    let file = "example.txt"  // Simulated file handle
+    defer print("Closing file: " + file)
+    
+    try {
+        defer print("Cleanup: Rolling back transaction")
+        
+        print("Processing file: " + file)
+        print("Writing data...")
+        
+        // Simulate potential error
+        if true {
+            fail "Write failed"
+        }
+        
+        print("Commit transaction")
+    } fail on err {
+        print("Error during processing: " + err)
+    }
+}
+
+// Defer in loops
+func defer_in_loops_example() {
+    print("Processing items...")
+    
+    for i in 0..<3 {
+        defer print("Cleanup for item " + string(i))
+        print("Processing item " + string(i))
+        
+        if i == 1 {
+            defer print("Special cleanup for item " + string(i))
+        }
+    }
+    
+    print("All items processed")
+}
+
+// Nested scopes with defers
+func nested_scopes_example() {
+    defer print("Outer scope cleanup")
+    
+    print("Outer scope work")
+    
+    {
+        defer print("Inner scope cleanup 1")
+        defer print("Inner scope cleanup 2")
+        
+        print("Inner scope work")
+    }
+    
+    print("Back to outer scope")
+}
+
+// Variable capture in defer
+func variable_capture_example() {
+    let x = 10
+    defer print("x at defer time: " + string(x))
+    
+    x = 20
+    defer print("x at second defer time: " + string(x))
+    
+    x = 30
+    print("x at end: " + string(x))
+}
+
+// Defer with function calls
+func cleanup_resource(name: string) {
+    print("Cleaning up resource: " + name)
+}
+
+func defer_with_function_calls() {
+    defer cleanup_resource("database connection")
+    defer cleanup_resource("file handle")
+    defer cleanup_resource("network socket")
+    
+    print("Using resources...")
+    print("Work completed")
+}
+
+// Complex defer scenario with early returns
+func complex_defer_scenario(should_return_early: bool): int32 {
+    defer print("Always executed cleanup")
+    
+    print("Starting complex operation")
+    
+    if should_return_early {
+        defer print("Early return cleanup")
+        print("Returning early")
+        return 1
+    }
+    
+    defer print("Normal path cleanup")
+    
+    try {
+        defer print("Try block cleanup")
+        
+        print("Risky operation...")
+        
+        if false {  // Simulate no error for this example
+            fail "Operation failed"
+        }
+        
+        print("Operation succeeded")
+    } fail on err {
+        print("Error handled: " + err)
+        return -1
+    }
+    
+    print("Normal completion")
+    return 0
+}
+
+// Main function to run all examples
+func main() {
+    print("=== Defer Statement Examples ===")
+    
+    print("\n1. Basic defer:")
+    basic_defer_example()
+    
+    print("\n2. Multiple defers (LIFO order):")
+    multiple_defers_example()
+    
+    print("\n3. Defer with error handling:")
+    defer_with_error_handling()
+    
+    print("\n4. Resource management:")
+    resource_management_example()
+    
+    print("\n5. Defer in loops:")
+    defer_in_loops_example()
+    
+    print("\n6. Nested scopes:")
+    nested_scopes_example()
+    
+    print("\n7. Variable capture:")
+    variable_capture_example()
+    
+    print("\n8. Defer with function calls:")
+    defer_with_function_calls()
+    
+    print("\n9. Complex scenario (normal path):")
+    let result1 = complex_defer_scenario(false)
+    print("Result: " + string(result1))
+    
+    print("\n10. Complex scenario (early return):")
+    let result2 = complex_defer_scenario(true)
+    print("Result: " + string(result2))
+    
+    print("\n=== All examples completed ===")
+}

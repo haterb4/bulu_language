@@ -1,0 +1,10 @@
+// Main file that imports from simple_test.bu
+import {
+    hello,
+    MESSAGE
+} from "./simple_test.bu"
+
+func main() {
+    hello()
+    print(MESSAGE)
+}

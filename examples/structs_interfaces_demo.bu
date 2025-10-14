@@ -1,0 +1,120 @@
+// Struct and Interface demonstration in Bulu
+
+// Define a simple struct
+struct Point {
+    x: float64
+    y: float64
+    
+    func distance_from_origin(): float64 {
+        return (this.x * this.x + this.y * this.y) ** 0.5
+    }
+    
+    func move_by(dx: float64, dy: float64) {
+        this.x = this.x + dx
+        this.y = this.y + dy
+    }
+}
+
+// Define an interface
+interface Shape {
+    func area(): float64
+    func perimeter(): float64
+}
+
+// Define a struct that implements the Shape interface
+struct Rectangle {
+    width: float64
+    height: float64
+    
+    func area(): float64 {
+        return this.width * this.height
+    }
+    
+    func perimeter(): float64 {
+        return 2.0 * (this.width + this.height)
+    }
+    
+    func scale(factor: float64) {
+        this.width = this.width * factor
+        this.height = this.height * factor
+    }
+}
+
+// Define another struct that implements the Shape interface
+struct Circle {
+    radius: float64
+    
+    func area(): float64 {
+        return 3.14159 * this.radius * this.radius
+    }
+    
+    func perimeter(): float64 {
+        return 2.0 * 3.14159 * this.radius
+    }
+}
+
+// Generic struct example
+struct Box<T> {
+    value: T
+    
+    func get(): T {
+        return this.value
+    }
+    
+    func set(new_value: T) {
+        this.value = new_value
+    }
+    
+    func map<U>(fn: func(T): U): Box<U> {
+        return Box<U>{value: fn(this.value)}
+    }
+}
+
+// Generic interface example
+interface Container<T> {
+    func add(item: T)
+    func get(index: int32): T
+    func size(): int32
+    func is_empty(): bool
+}
+
+// Function that works with any Shape
+func print_shape_info(shape: Shape) {
+    print("Area: " + shape.area())
+    print("Perimeter: " + shape.perimeter())
+}
+
+// Main function demonstrating usage
+func main() {
+    // Create and use a Point
+    let p = Point{x: 3.0, y: 4.0}
+    print("Point distance from origin: " + p.distance_from_origin())
+    p.move_by(1.0, 1.0)
+    print("After moving: (" + p.x + ", " + p.y + ")")
+    
+    // Create and use shapes
+    let rect = Rectangle{width: 5.0, height: 3.0}
+    let circle = Circle{radius: 2.0}
+    
+    print("Rectangle info:")
+    print_shape_info(rect)
+    
+    print("Circle info:")
+    print_shape_info(circle)
+    
+    // Scale the rectangle
+    rect.scale(2.0)
+    print("After scaling rectangle:")
+    print_shape_info(rect)
+    
+    // Use generic Box
+    let int_box = Box<int32>{value: 42}
+    print("Box contains: " + int_box.get())
+    
+    let string_box = Box<string>{value: "Hello, World!"}
+    print("String box contains: " + string_box.get())
+    
+    // Map over box contents
+    let doubled_box = int_box.map<int32>((x: int32) => x * 2)
+    print("Doubled box contains: " + doubled_box.get())
+}

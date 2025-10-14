@@ -1,0 +1,97 @@
+// Error Handling Demo for Bulu Language
+// This file demonstrates the try-fail error handling system
+
+func divide(a: int32, b: int32): int32 {
+    if b == 0 {
+        fail "Division by zero is not allowed"
+    }
+    return a / b
+}
+
+func safe_divide(a: int32, b: int32): int32 {
+    try {
+        return divide(a, b)
+    } fail on err {
+        print("Error caught: " + err)
+        return 0
+    }
+}
+
+func risky_operation(): string {
+    defer print("Cleanup: risky_operation finished")
+    
+    try {
+        let result = divide(10, 0)
+        return "Success: " + string(result)
+    } fail on error {
+        fail "Operation failed: " + error
+    }
+}
+
+func nested_error_handling(): void {
+    try {
+        try {
+            risky_operation()
+        } fail on inner_err {
+            print("Inner catch: " + inner_err)
+            fail "Nested error: " + inner_err
+        }
+    } fail on outer_err {
+        print("Outer catch: " + outer_err)
+    }
+}
+
+func multiple_defers(): void {
+    defer print("Cleanup 3: Last defer")
+    defer print("Cleanup 2: Second defer")
+    defer print("Cleanup 1: First defer")
+    
+    print("Executing function body")
+    fail "Something went wrong"
+}
+
+func error_propagation_demo(): void {
+    try {
+        multiple_defers()
+    } fail on err {
+        print("Caught propagated error: " + err)
+    }
+}
+
+func main(): void {
+    print("=== Error Handling Demo ===")
+    
+    // Basic try-catch
+    print("\n1. Basic try-catch:")
+    let result = safe_divide(10, 2)
+    print("Safe divide result: " + string(result))
+    
+    result = safe_divide(10, 0)
+    print("Safe divide with error result: " + string(result))
+    
+    // Nested error handling
+    print("\n2. Nested error handling:")
+    nested_error_handling()
+    
+    // Defer with error handling
+    print("\n3. Defer with error handling:")
+    error_propagation_demo()
+    
+    // Error without catch (would terminate program)
+    print("\n4. Error types:")
+    try {
+        let x = 10 / 0  // This would cause a division by zero error
+    } fail on math_err {
+        print("Math error caught: " + math_err)
+    }
+    
+    // Multiple error types
+    try {
+        let arr = [1, 2, 3]
+        let value = arr[10]  // Index out of bounds
+    } fail on index_err {
+        print("Index error caught: " + index_err)
+    }
+    
+    print("\n=== Demo Complete ===")
+}

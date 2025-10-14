@@ -1,0 +1,26 @@
+// Test des fonctions
+
+func add(a: int32, b: int32): int32 {
+    return a + b
+}
+
+func multiply(x: float64, y: float64): float64 {
+    return x * y
+}
+
+func greet(name: string): string {
+    return "Hello, " + name + "!"
+}
+
+func main() {
+    println("=== Test des Fonctions ===")
+    
+    let sum = add(5, 3)
+    println("add(5, 3) = " + sum.toString())
+    
+    let product = multiply(2.5, 4.0)
+    println("multiply(2.5, 4.0) = " + product.toString())
+    
+    let greeting = greet("Bulu")
+    println("greet(\"Bulu\") = " + greeting)
+}

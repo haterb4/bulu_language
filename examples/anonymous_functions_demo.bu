@@ -1,0 +1,240 @@
+// Anonymous Functions and Closures Demo
+// This file demonstrates various anonymous function and closure patterns in Bulu
+
+// Basic anonymous function (lambda)
+func basicLambdaExample() {
+    let add = func(x: int32, y: int32): int32 { return x + y }
+    let result = add(5, 3)
+    print("Basic lambda result: " + result)
+}
+
+// Arrow function syntax
+func arrowFunctionExample() {
+    let square = (x: int32) => x * x
+    let double = (x: int32) => x * 2
+    
+    let numbers = [1, 2, 3, 4, 5]
+    
+    // Using arrow functions with higher-order functions
+    let squared = map(numbers, square)
+    let doubled = map(numbers, double)
+    
+    print("Original: " + numbers)
+    print("Squared: " + squared)
+    print("Doubled: " + doubled)
+}
+
+// Single parameter arrow function (no parentheses needed)
+func singleParamArrowExample() {
+    let increment = x => x + 1
+    let negate = x => -x
+    
+    print("Increment 5: " + increment(5))
+    print("Negate 10: " + negate(10))
+}
+
+// Closure with variable capture
+func closureExample() {
+    let multiplier = 3
+    
+    // This lambda captures 'multiplier' from the outer scope
+    let multiplyBy3 = func(x: int32): int32 { return x * multiplier }
+    
+    print("5 * 3 = " + multiplyBy3(5))
+    print("10 * 3 = " + multiplyBy3(10))
+}
+
+// Closure factory - function returning a closure
+func createMultiplier(factor: int32): func(int32): int32 {
+    return func(x: int32): int32 { return x * factor }
+}
+
+func closureFactoryExample() {
+    let multiplyBy5 = createMultiplier(5)
+    let multiplyBy10 = createMultiplier(10)
+    
+    print("7 * 5 = " + multiplyBy5(7))
+    print("7 * 10 = " + multiplyBy10(7))
+}
+
+// Counter closure with mutable capture
+func createCounter(): func(): int32 {
+    let count = 0
+    return func(): int32 {
+        count = count + 1
+        return count
+    }
+}
+
+func mutableClosureExample() {
+    let counter1 = createCounter()
+    let counter2 = createCounter()
+    
+    print("Counter1: " + counter1()) // 1
+    print("Counter1: " + counter1()) // 2
+    print("Counter2: " + counter2()) // 1
+    print("Counter1: " + counter1()) // 3
+    print("Counter2: " + counter2()) // 2
+}
+
+// Higher-order function examples
+func map(arr: []int32, fn: func(int32): int32): []int32 {
+    let result = []
+    for x in arr {
+        result.append(fn(x))
+    }
+    return result
+}
+
+func filter(arr: []int32, predicate: func(int32): bool): []int32 {
+    let result = []
+    for x in arr {
+        if predicate(x) {
+            result.append(x)
+        }
+    }
+    return result
+}
+
+func reduce(arr: []int32, initial: int32, fn: func(int32, int32): int32): int32 {
+    let acc = initial
+    for x in arr {
+        acc = fn(acc, x)
+    }
+    return acc
+}
+
+func higherOrderExample() {
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    
+    // Filter even numbers
+    let evens = filter(numbers, x => x % 2 == 0)
+    print("Even numbers: " + evens)
+    
+    // Sum all numbers
+    let sum = reduce(numbers, 0, (acc, x) => acc + x)
+    print("Sum: " + sum)
+    
+    // Chain operations
+    let result = numbers
+        |> filter(x => x > 5)
+        |> map(x => x * x)
+        |> reduce(0, (acc, x) => acc + x)
+    
+    print("Sum of squares > 5: " + result)
+}
+
+// Function composition
+func compose(f: func(int32): int32, g: func(int32): int32): func(int32): int32 {
+    return func(x: int32): int32 { return f(g(x)) }
+}
+
+func compositionExample() {
+    let addOne = x => x + 1
+    let double = x => x * 2
+    
+    // Compose functions: first double, then add one
+    let doubleAndAddOne = compose(addOne, double)
+    
+    print("Double 5 and add 1: " + doubleAndAddOne(5)) // (5 * 2) + 1 = 11
+}
+
+// Partial application
+func add(x: int32, y: int32): int32 {
+    return x + y
+}
+
+func partial(fn: func(int32, int32): int32, x: int32): func(int32): int32 {
+    return func(y: int32): int32 { return fn(x, y) }
+}
+
+func partialApplicationExample() {
+    let add5 = partial(add, 5)
+    let add10 = partial(add, 10)
+    
+    print("Add 5 to 3: " + add5(3))
+    print("Add 10 to 7: " + add10(7))
+}
+
+// Callback pattern
+func processAsync(data: string, callback: func(string)) {
+    // Simulate async processing
+    let processed = data + " processed"
+    callback(processed)
+}
+
+func callbackExample() {
+    processAsync("Hello", func(result: string) {
+        print("Callback received: " + result)
+    })
+    
+    // Using arrow function as callback
+    processAsync("World", result => print("Arrow callback: " + result))
+}
+
+// Event handler pattern
+struct Button {
+    label: string
+    onClick: func()
+    
+    func click() {
+        print("Button '" + this.label + "' clicked!")
+        this.onClick()
+    }
+}
+
+func eventHandlerExample() {
+    let clickCount = 0
+    
+    let button = Button{
+        label: "Click Me",
+        onClick: func() {
+            clickCount = clickCount + 1
+            print("Clicked " + clickCount + " times")
+        }
+    }
+    
+    button.click()
+    button.click()
+    button.click()
+}
+
+// Main function to run all examples
+func main() {
+    print("=== Anonymous Functions and Closures Demo ===")
+    
+    print("\n1. Basic Lambda Example:")
+    basicLambdaExample()
+    
+    print("\n2. Arrow Function Example:")
+    arrowFunctionExample()
+    
+    print("\n3. Single Parameter Arrow Example:")
+    singleParamArrowExample()
+    
+    print("\n4. Closure Example:")
+    closureExample()
+    
+    print("\n5. Closure Factory Example:")
+    closureFactoryExample()
+    
+    print("\n6. Mutable Closure Example:")
+    mutableClosureExample()
+    
+    print("\n7. Higher-Order Function Example:")
+    higherOrderExample()
+    
+    print("\n8. Function Composition Example:")
+    compositionExample()
+    
+    print("\n9. Partial Application Example:")
+    partialApplicationExample()
+    
+    print("\n10. Callback Example:")
+    callbackExample()
+    
+    print("\n11. Event Handler Example:")
+    eventHandlerExample()
+    
+    print("\n=== Demo Complete ===")
+}
