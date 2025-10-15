@@ -2,8 +2,8 @@
 
 // Structure publique exportée
 export struct PublicUser {
-    name: string
-    private age: int32  // Champ privé
+    name: string        // Champ public par défaut
+    priv age: int32     // Champ privé
     
     // Méthode publique
     func getName(): string {
@@ -11,7 +11,7 @@ export struct PublicUser {
     }
     
     // Méthode privée
-    private func getAge(): int32 {
+    priv func getAge(): int32 {
         return this.age
     }
     

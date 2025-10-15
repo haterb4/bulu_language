@@ -186,8 +186,10 @@ pub struct InterfaceMethod {
     pub name: String,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
+    pub is_private: bool,
     pub position: Position,
 }
+
 
 /// Type alias declaration
 #[derive(Debug, Clone, PartialEq)]
@@ -892,6 +894,7 @@ impl HasPosition for Statement {
             Statement::FunctionDecl(node) => node.position,
             Statement::StructDecl(node) => node.position,
             Statement::InterfaceDecl(node) => node.position,
+
             Statement::TypeAlias(node) => node.position,
             Statement::If(node) => node.position,
             Statement::While(node) => node.position,

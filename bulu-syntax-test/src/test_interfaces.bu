@@ -1,0 +1,113 @@
+// Test des interfaces Bulu
+
+// Interface simple
+interface Drawable {
+    func draw(): void
+    func getArea(): float64
+}
+
+// Interface avec paramètres
+interface Comparable {
+    func compareTo(other: Comparable): int32
+    func equals(other: Comparable): bool
+    func getArea(): float64  // Needed for comparison
+}
+
+// Interface avec méthodes publiques/privées
+interface Storage {
+    pub func store(key: string, value: string): bool
+    pub func retrieve(key: string): string
+    priv func cleanup(): void
+}
+
+// Structure qui implémente une interface
+struct Circle {
+    radius: float64
+    
+    // Implémentation de Drawable
+    func draw(): void {
+        println("Dessin d'un cercle de rayon " + this.radius.toString())
+    }
+    
+    func getArea(): float64 {
+        return 3.14159 * this.radius * this.radius
+    }
+}
+
+// Structure qui implémente plusieurs interfaces
+struct Rectangle {
+    width: float64
+    height: float64
+    
+    // Implémentation de Drawable
+    func draw(): void {
+        println("Dessin d'un rectangle " + this.width.toString() + "x" + this.height.toString())
+    }
+    
+    func getArea(): float64 {
+        return this.width * this.height
+    }
+    
+    // Implémentation de Comparable
+    func compareTo(other: Comparable): int32 {
+        let myArea = this.getArea()
+        let otherArea = other.getArea()
+        
+        if myArea > otherArea {
+            return 1
+        } else if myArea < otherArea {
+            return -1
+        } else {
+            return 0
+        }
+    }
+    
+    func equals(other: Comparable): bool {
+        return this.compareTo(other) == 0
+    }
+}
+
+// Fonction qui utilise une interface
+func drawShape(shape: Drawable): void {
+    shape.draw()
+    println("Aire: " + shape.getArea().toString())
+}
+
+// Fonction qui compare des objets
+func compareShapes(shape1: Comparable, shape2: Comparable): void {
+    let result = shape1.compareTo(shape2)
+    if result > 0 {
+        println("La première forme est plus grande")
+    } else if result < 0 {
+        println("La deuxième forme est plus grande")
+    } else {
+        println("Les formes ont la même taille")
+    }
+}
+
+func main() {
+    println("=== Test des Interfaces ===")
+    
+    // Créer des objets
+    let circle = Circle{radius: 5.0}
+    let rectangle = Rectangle{width: 4.0, height: 6.0}
+    
+    // Utiliser l'interface Drawable
+    println("Test de l'interface Drawable:")
+    drawShape(circle)
+    drawShape(rectangle)
+    
+    // Utiliser l'interface Comparable
+    println("\nTest de l'interface Comparable:")
+    compareShapes(rectangle, rectangle)
+    
+    // Test direct des méthodes
+    println("\nTest direct:")
+    circle.draw()
+    println("Aire du cercle: " + circle.getArea().toString())
+    
+    rectangle.draw()
+    println("Aire du rectangle: " + rectangle.getArea().toString())
+    
+    println("Test terminé")
+}

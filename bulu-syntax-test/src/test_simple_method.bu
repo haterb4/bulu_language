@@ -1,0 +1,22 @@
+// Test simple d'appel de méthode
+
+struct Simple {
+    value: float64
+    
+    pub func getValue(): float64 {
+        println("getValue appelé")
+        return this.value
+    }
+}
+
+func main() {
+    println("=== Test Simple ===")
+    
+    let s = Simple{value: 42.0}
+    println("Simple créé")
+    
+    let result = s.getValue()
+    println("Résultat: " + result.toString())
+    
+    println("Test terminé")
+}

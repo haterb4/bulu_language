@@ -37,6 +37,16 @@ pub struct TypeChecker {
     errors: Vec<BuluError>,
     /// Type registry for composite types
     type_registry: TypeRegistry,
+    /// Interface declarations
+    interfaces: HashMap<String, InterfaceDecl>,
+    /// Struct declarations
+    structs: HashMap<String, StructDecl>,
+    /// Map from type names to TypeIds
+    type_name_to_id: HashMap<String, TypeId>,
+    /// Map from TypeIds to type names
+    type_id_to_name: HashMap<TypeId, String>,
+    /// Next available type ID
+    next_type_id: u32,
 }
 
 impl TypeChecker {
@@ -48,6 +58,11 @@ impl TypeChecker {
             current_function: None,
             errors: Vec::new(),
             type_registry: TypeRegistry::new(),
+            interfaces: HashMap::new(),
+            structs: HashMap::new(),
+            type_name_to_id: HashMap::new(),
+            type_id_to_name: HashMap::new(),
+            next_type_id: 1000, // Start from 1000 to avoid conflicts with primitive types
         };
 
         // Add built-in functions to global scope
@@ -185,6 +200,16 @@ impl TypeChecker {
                 TypeId::Promise(promise_id)
             }
             Type::Function(_) => TypeId::Function(0), // Placeholder
+            Type::Named(name) => {
+                // Check if it's an interface or struct and create/get proper TypeId
+                if self.interfaces.contains_key(name) {
+                    self.get_or_create_named_type_id(name, true)
+                } else if self.structs.contains_key(name) {
+                    self.get_or_create_named_type_id(name, false)
+                } else {
+                    TypeId::Unknown
+                }
+            }
             _ => TypeId::Unknown,
         }
     }
@@ -207,6 +232,9 @@ impl TypeChecker {
         match statement {
             Statement::VariableDecl(decl) => self.check_variable_declaration(decl),
             Statement::FunctionDecl(decl) => self.check_function_declaration(decl),
+            Statement::StructDecl(decl) => self.check_struct_declaration(decl),
+            Statement::InterfaceDecl(decl) => self.check_interface_declaration(decl),
+
             Statement::If(stmt) => self.check_if_statement(stmt),
             Statement::While(stmt) => self.check_while_statement(stmt),
             Statement::For(stmt) => self.check_for_statement(stmt),
@@ -398,6 +426,137 @@ impl TypeChecker {
         Ok(TypeId::Function(0)) // Placeholder function type
     }
 
+    /// Type check an interface declaration
+    fn check_interface_declaration(&mut self, decl: &InterfaceDecl) -> Result<TypeId> {
+        // Create a unique TypeId for this interface
+        let interface_type_id = self.get_or_create_named_type_id(&decl.name, true);
+        
+        // Store the interface declaration
+        self.interfaces.insert(decl.name.clone(), decl.clone());
+
+        // Register the interface name in the symbol table
+        let interface_symbol = Symbol {
+            name: decl.name.clone(),
+            type_id: interface_type_id,
+            is_mutable: false,
+            position: decl.position,
+            function_info: None,
+        };
+
+        self.add_symbol(interface_symbol)?;
+        Ok(interface_type_id)
+    }
+
+    /// Type check a struct declaration
+    fn check_struct_declaration(&mut self, decl: &StructDecl) -> Result<TypeId> {
+        // Create a unique TypeId for this struct
+        let struct_type_id = self.get_or_create_named_type_id(&decl.name, false);
+        
+        // Store the struct declaration
+        self.structs.insert(decl.name.clone(), decl.clone());
+
+        // Register the struct name in the symbol table
+        let struct_symbol = Symbol {
+            name: decl.name.clone(),
+            type_id: struct_type_id,
+            is_mutable: false,
+            position: decl.position,
+            function_info: None,
+        };
+
+        self.add_symbol(struct_symbol)?;
+
+        // Type check all methods in the struct
+        for method in &decl.methods {
+            self.check_struct_method_declaration(method, &decl.name)?;
+        }
+
+        Ok(struct_type_id)
+    }
+
+    /// Type check a method declaration within a struct context
+    fn check_struct_method_declaration(
+        &mut self,
+        decl: &FunctionDecl,
+        struct_name: &str,
+    ) -> Result<TypeId> {
+        // Collect parameter types
+        let param_types: Vec<TypeId> = decl
+            .params
+            .iter()
+            .map(|p| self.ast_type_to_type_id(&p.param_type))
+            .collect();
+
+        let declared_return_type = decl
+            .return_type
+            .as_ref()
+            .map(|t| self.ast_type_to_type_id(t));
+
+        // For async functions, wrap the return type in a Promise
+        let actual_return_type = if decl.is_async {
+            match declared_return_type {
+                Some(ret_type) => {
+                    // Wrap the declared return type in a Promise
+                    let promise_id = self.type_registry.register_promise_type(ret_type);
+                    Some(TypeId::Promise(promise_id))
+                }
+                None => {
+                    // Async function with no explicit return type returns Promise<void>
+                    let promise_id = self.type_registry.register_promise_type(TypeId::Void);
+                    Some(TypeId::Promise(promise_id))
+                }
+            }
+        } else {
+            declared_return_type
+        };
+
+        // Enter new scope for method
+        self.enter_scope();
+        self.current_function = Some(decl.name.clone());
+
+        // Set return type for checking return statements
+        let check_return_type = if decl.is_async {
+            declared_return_type.or(Some(TypeId::Void))
+        } else {
+            actual_return_type
+        };
+        self.return_types.push(check_return_type);
+
+        // Add 'this' parameter to scope (refers to the struct instance)
+        let struct_type_id = self.get_or_create_named_type_id(struct_name, false);
+        let this_symbol = Symbol {
+            name: "this".to_string(),
+            type_id: struct_type_id, // Reference to the actual struct type
+            is_mutable: true,        // 'this' is mutable by default
+            position: decl.position,
+            function_info: None,
+        };
+        self.add_symbol(this_symbol)?;
+
+        // Add parameters to scope
+        for param in &decl.params {
+            let param_type = self.ast_type_to_type_id(&param.param_type);
+            let symbol = Symbol {
+                name: param.name.clone(),
+                type_id: param_type,
+                is_mutable: true, // Parameters are mutable by default
+                position: param.position,
+                function_info: None,
+            };
+            self.add_symbol(symbol)?;
+        }
+
+        // Check method body
+        self.check_block_statement(&decl.body)?;
+
+        // Exit method scope
+        self.return_types.pop();
+        self.current_function = None;
+        self.exit_scope();
+
+        Ok(TypeId::Function(0)) // Placeholder function type
+    }
+
     /// Type check an if statement
     fn check_if_statement(&mut self, stmt: &IfStmt) -> Result<TypeId> {
         // Check condition
@@ -571,6 +730,7 @@ impl TypeChecker {
             Expression::Assignment(assign) => self.check_assignment_expression(assign),
             Expression::Array(array) => self.check_array_expression(array),
             Expression::Map(map) => self.check_map_expression(map),
+            Expression::StructLiteral(struct_lit) => self.check_struct_literal_expression(struct_lit),
             Expression::Cast(cast) => self.check_cast_expression(cast),
             Expression::TypeOf(typeof_expr) => self.check_typeof_expression(typeof_expr),
             Expression::Async(async_expr) => self.check_async_expression(async_expr),
@@ -687,8 +847,9 @@ impl TypeChecker {
 
     /// Type check a function call expression
     fn check_call_expression(&mut self, call: &CallExpr) -> Result<TypeId> {
-        // Check callee - for now we only support identifier function calls
-        if let Expression::Identifier(ident) = &*call.callee {
+        match &*call.callee {
+            // Handle direct function calls (e.g., func())
+            Expression::Identifier(ident) => {
             // Look up function in symbol table and clone the info to avoid borrow issues
             let symbol_opt = self.lookup_symbol(&ident.name);
             let func_info_opt = symbol_opt.and_then(|s| s.function_info.clone());
@@ -754,15 +915,15 @@ impl TypeChecker {
                     .enumerate()
                 {
                     let actual_type = self.check_expression(arg)?;
-                    if !PrimitiveType::is_assignable(actual_type, *expected_type) {
+                    if !self.is_type_compatible(actual_type, *expected_type) {
                         return Err(BuluError::TypeError {
                             file: None,
                             message: format!(
                                 "Argument {} to function '{}': expected {}, got {}",
                                 i + 1,
                                 ident.name,
-                                PrimitiveType::type_name(*expected_type),
-                                PrimitiveType::type_name(actual_type)
+                                self.type_name_for_error(*expected_type),
+                                self.type_name_for_error(actual_type)
                             ),
                             line: call.position.line,
                             column: call.position.column,
@@ -788,43 +949,166 @@ impl TypeChecker {
                     column: call.position.column,
                 });
             }
-        } else if let Expression::MemberAccess(member_access) = &*call.callee {
+            }
+            Expression::MemberAccess(member_access) => {
             // Handle method calls: obj.method()
-            let _object_type = self.check_expression(&member_access.object)?;
-            
-            // Check arguments
-            for arg in &call.args {
-                self.check_expression(arg)?;
-            }
-            
-            // For now, return specific types based on method name
-            // In a full implementation, we'd look up the method in the object's type
-            match member_access.member.as_str() {
-                "isPositive" | "validateInput" | "validateValue" | "isValid" => Ok(TypeId::Bool),
-                "getValue" | "add" | "safeAdd" => Ok(TypeId::Float64),
-                "process" | "toString" => Ok(TypeId::String),
-                _ => Ok(TypeId::Any),
-            }
-        } else {
-            // For other non-identifier callees, just check the expression
-            let _callee_type = self.check_expression(&call.callee)?;
+            let object_type = self.check_expression(&member_access.object)?;
 
             // Check arguments
             for arg in &call.args {
                 self.check_expression(arg)?;
             }
 
+            // Look up the method in the object's type
+            let type_name = self.get_type_name_from_expression(&member_access.object)?;
+            
+            match object_type {
+                TypeId::Struct(_) => {
+                    if let Some(struct_name) = type_name {
+                        if let Some(struct_decl) = self.structs.get(&struct_name).cloned() {
+                            // Look for the method in the struct
+                            for method in &struct_decl.methods {
+                                if method.name == member_access.member {
+                                    return match &method.return_type {
+                                        Some(return_type) => Ok(self.ast_type_to_type_id(return_type)),
+                                        None => Ok(TypeId::Void),
+                                    };
+                                }
+                            }
+                            
+                            // Check if struct implements any interface with this method
+                            let interfaces_clone = self.interfaces.clone();
+                            for (interface_name, interface_decl) in &interfaces_clone {
+                                if self.struct_implements_interface(&struct_name, interface_name) {
+                                    for method in &interface_decl.methods {
+                                        if method.name == member_access.member {
+                                            return match &method.return_type {
+                                                Some(return_type) => Ok(self.ast_type_to_type_id(return_type)),
+                                                None => Ok(TypeId::Void),
+                                            };
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                TypeId::Interface(_) => {
+                    if let Some(interface_name) = type_name {
+                        if let Some(interface_decl) = self.interfaces.get(&interface_name).cloned() {
+                            for method in &interface_decl.methods {
+                                if method.name == member_access.member {
+                                    return match &method.return_type {
+                                        Some(return_type) => Ok(self.ast_type_to_type_id(return_type)),
+                                        None => Ok(TypeId::Void),
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    // Handle built-in methods for primitive types
+                    match member_access.member.as_str() {
+                        "toString" => return Ok(TypeId::String),
+                        _ => {}
+                    }
+                }
+            }
+            
+            // If method not found, return Any for now (could be an error)
             Ok(TypeId::Any)
+            }
+            _ => {
+                // For other non-identifier callees, just check the expression
+                let _callee_type = self.check_expression(&call.callee)?;
+
+                // Check arguments
+                for arg in &call.args {
+                    self.check_expression(arg)?;
+                }
+
+                Ok(TypeId::Any)
+            }
         }
     }
 
     /// Type check a member access expression
     fn check_member_access_expression(&mut self, access: &MemberAccessExpr) -> Result<TypeId> {
-        let _object_type = self.check_expression(&access.object)?;
+        let object_type = self.check_expression(&access.object)?;
 
-        // For now, assume member access returns Any
-        // TODO: Implement proper struct/interface member checking
-        Ok(TypeId::Any)
+        // Get the type name from the object
+        let type_name = self.get_type_name_from_expression(&access.object)?;
+        
+        match object_type {
+            TypeId::Interface(_) => {
+                // Look up the method in the specific interface
+                if let Some(interface_name) = type_name {
+                    if let Some(interface_decl) = self.interfaces.get(&interface_name).cloned() {
+                        for method in &interface_decl.methods {
+                            if method.name == access.member {
+                                return match &method.return_type {
+                                    Some(return_type) => Ok(self.ast_type_to_type_id(return_type)),
+                                    None => Ok(TypeId::Void),
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+            TypeId::Struct(_) => {
+                // Look up the field or method in the struct
+                if let Some(struct_name) = type_name {
+                    if let Some(struct_decl) = self.structs.get(&struct_name).cloned() {
+                        // First check struct fields
+                        for field in &struct_decl.fields {
+                            if field.name == access.member {
+                                return Ok(self.ast_type_to_type_id(&field.field_type));
+                            }
+                        }
+                        
+                        // Then check struct's own methods
+                        for method in &struct_decl.methods {
+                            if method.name == access.member {
+                                return match &method.return_type {
+                                    Some(return_type) => Ok(self.ast_type_to_type_id(return_type)),
+                                    None => Ok(TypeId::Void),
+                                };
+                            }
+                        }
+                        
+                        // Finally check if struct implements any interface with this method
+                        let interfaces_clone = self.interfaces.clone();
+                        for (interface_name, interface_decl) in &interfaces_clone {
+                            if self.struct_implements_interface(&struct_name, interface_name) {
+                                for method in &interface_decl.methods {
+                                    if method.name == access.member {
+                                        return match &method.return_type {
+                                            Some(return_type) => Ok(self.ast_type_to_type_id(return_type)),
+                                            None => Ok(TypeId::Void),
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Handle built-in methods for primitive types
+                match access.member.as_str() {
+                    "toString" => return Ok(TypeId::String),
+                    _ => {}
+                }
+            }
+        }
+
+        Err(BuluError::TypeError {
+            message: format!("Member '{}' not found", access.member),
+            line: access.position.line,
+            column: access.position.column,
+            file: None,
+        })
     }
 
     /// Type check an index expression
@@ -1019,6 +1303,84 @@ impl TypeChecker {
         // Register the map type and return it
         let map_type_id = self.type_registry.register_map_type(key_type, value_type);
         Ok(TypeId::Map(map_type_id))
+    }
+
+    /// Type check a struct literal expression
+    fn check_struct_literal_expression(&mut self, struct_lit: &StructLiteralExpr) -> Result<TypeId> {
+        // Check if the struct type exists
+        if let Some(struct_decl) = self.structs.get(&struct_lit.type_name).cloned() {
+            // Get or create the TypeId for this struct
+            let struct_type_id = self.get_or_create_named_type_id(&struct_lit.type_name, false);
+            
+            // Verify that all required fields are provided and have correct types
+            for field in &struct_decl.fields {
+                let mut field_found = false;
+                
+                for field_init in &struct_lit.fields {
+                    if field_init.name == field.name {
+                        field_found = true;
+                        
+                        // Check that the field value has the correct type
+                        let value_type = self.check_expression(&field_init.value)?;
+                        let expected_type = self.ast_type_to_type_id(&field.field_type);
+                        
+                        if !PrimitiveType::is_assignable(value_type, expected_type) {
+                            return Err(BuluError::TypeError {
+                                message: format!(
+                                    "Field '{}' expects type {}, got {}",
+                                    field.name,
+                                    PrimitiveType::type_name(expected_type),
+                                    PrimitiveType::type_name(value_type)
+                                ),
+                                line: field_init.position.line,
+                                column: field_init.position.column,
+                                file: None,
+                            });
+                        }
+                        break;
+                    }
+                }
+                
+                if !field_found {
+                    return Err(BuluError::TypeError {
+                        message: format!("Missing field '{}' in struct literal", field.name),
+                        line: struct_lit.position.line,
+                        column: struct_lit.position.column,
+                        file: None,
+                    });
+                }
+            }
+            
+            // Check for extra fields that don't exist in the struct
+            for field_init in &struct_lit.fields {
+                let mut field_exists = false;
+                
+                for field in &struct_decl.fields {
+                    if field.name == field_init.name {
+                        field_exists = true;
+                        break;
+                    }
+                }
+                
+                if !field_exists {
+                    return Err(BuluError::TypeError {
+                        message: format!("Unknown field '{}' in struct '{}'", field_init.name, struct_lit.type_name),
+                        line: field_init.position.line,
+                        column: field_init.position.column,
+                        file: None,
+                    });
+                }
+            }
+            
+            Ok(struct_type_id)
+        } else {
+            Err(BuluError::TypeError {
+                message: format!("Unknown struct type '{}'", struct_lit.type_name),
+                line: struct_lit.position.line,
+                column: struct_lit.position.column,
+                file: None,
+            })
+        }
     }
 
     /// Type check a cast expression
@@ -1278,6 +1640,172 @@ impl TypeChecker {
             Type::Named(_) => TypeId::Any,      // Custom types - simplified for now
             Type::Generic(_) => TypeId::Any,    // Generic types - simplified for now
             _ => TypeId::Any,                   // Fallback for other types
+        }
+    }
+
+    /// Find an interface declaration by name
+    fn find_interface_declaration(&self, interface_name: &str) -> Option<&InterfaceDecl> {
+        self.interfaces.get(interface_name)
+    }
+
+    /// Find a struct declaration by name
+    fn find_struct_declaration(&self, struct_name: &str) -> Option<&StructDecl> {
+        self.structs.get(struct_name)
+    }
+
+    /// Check if a struct implements an interface
+    fn struct_implements_interface(&self, struct_name: &str, interface_name: &str) -> bool {
+        let struct_decl = match self.find_struct_declaration(struct_name) {
+            Some(decl) => decl,
+            None => return false,
+        };
+
+        let interface_decl = match self.find_interface_declaration(interface_name) {
+            Some(decl) => decl,
+            None => return false,
+        };
+
+        // Check if the struct has all the methods required by the interface
+        for interface_method in &interface_decl.methods {
+            let mut found_method = false;
+
+            for struct_method in &struct_decl.methods {
+                if struct_method.name == interface_method.name {
+                    // Check if the method signatures match
+                    if self.method_signatures_match(struct_method, interface_method) {
+                        found_method = true;
+                        break;
+                    }
+                }
+            }
+
+            if !found_method {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if two method signatures match
+    fn method_signatures_match(
+        &self,
+        struct_method: &FunctionDecl,
+        interface_method: &InterfaceMethod,
+    ) -> bool {
+        // Check parameter count
+        if struct_method.params.len() != interface_method.params.len() {
+            return false;
+        }
+
+        // Check parameter types
+        for (struct_param, interface_param) in struct_method
+            .params
+            .iter()
+            .zip(interface_method.params.iter())
+        {
+            if !self.types_match(&struct_param.param_type, &interface_param.param_type) {
+                return false;
+            }
+        }
+
+        // Check return types
+        match (&struct_method.return_type, &interface_method.return_type) {
+            (Some(struct_ret), Some(interface_ret)) => {
+                if !self.types_match(struct_ret, interface_ret) {
+                    return false;
+                }
+            }
+            (None, None) => {} // Both void
+            _ => return false, // One void, one not
+        }
+
+        true
+    }
+
+    /// Check if two types match
+    fn types_match(&self, type1: &Type, type2: &Type) -> bool {
+        // For now, do a simple comparison
+        // In a full implementation, this would handle type equivalence more thoroughly
+        type1 == type2
+    }
+
+    /// Create or get a TypeId for a named type
+    fn get_or_create_named_type_id(&mut self, name: &str, is_interface: bool) -> TypeId {
+        if let Some(&type_id) = self.type_name_to_id.get(name) {
+            return type_id;
+        }
+
+        let type_id = if is_interface {
+            TypeId::Interface(self.next_type_id)
+        } else {
+            TypeId::Struct(self.next_type_id)
+        };
+
+        self.next_type_id += 1;
+        self.type_name_to_id.insert(name.to_string(), type_id);
+        self.type_id_to_name.insert(type_id, name.to_string());
+        type_id
+    }
+
+    /// Get the type name from a TypeId
+    fn get_type_name_from_id(&self, type_id: TypeId) -> Option<&String> {
+        self.type_id_to_name.get(&type_id)
+    }
+
+    /// Check if actual_type is compatible with expected_type (including interface implementation)
+    fn is_type_compatible(&self, actual_type: TypeId, expected_type: TypeId) -> bool {
+        // Direct type match
+        if actual_type == expected_type {
+            return true;
+        }
+
+        // Check primitive type compatibility
+        if PrimitiveType::is_assignable(actual_type, expected_type) {
+            return true;
+        }
+
+        // Check if a struct implements an interface
+        match (actual_type, expected_type) {
+            (TypeId::Struct(_), TypeId::Interface(_)) => {
+                // Get the struct and interface names
+                if let (Some(struct_name), Some(interface_name)) = (
+                    self.get_type_name_from_id(actual_type),
+                    self.get_type_name_from_id(expected_type),
+                ) {
+                    return self.struct_implements_interface(struct_name, interface_name);
+                }
+            }
+            _ => {}
+        }
+
+        false
+    }
+
+    /// Get a user-friendly type name for error messages
+    fn type_name_for_error(&self, type_id: TypeId) -> String {
+        if let Some(name) = self.get_type_name_from_id(type_id) {
+            match type_id {
+                TypeId::Interface(_) => format!("interface {}", name),
+                TypeId::Struct(_) => format!("struct {}", name),
+                _ => name.clone(),
+            }
+        } else {
+            PrimitiveType::type_name(type_id).to_string()
+        }
+    }
+
+    /// Get the type name from an expression (for named types like interfaces/structs)
+    fn get_type_name_from_expression(&self, expr: &Expression) -> Result<Option<String>> {
+        match expr {
+            Expression::Identifier(ident) => {
+                if let Some(symbol) = self.lookup_symbol(&ident.name) {
+                    Ok(self.get_type_name_from_id(symbol.type_id).cloned())
+                } else {
+                    Ok(None)
+                }
+            }
+            _ => Ok(None),
         }
     }
 }

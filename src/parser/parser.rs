@@ -377,7 +377,7 @@ impl Parser {
             is_async,
             doc_comment: doc_comments,
             is_exported,
-            is_private: false,  // Functions are public by default
+            is_private: false, // Functions are public by default
             position: start_pos,
         }))
     }
@@ -413,11 +413,27 @@ impl Parser {
                 continue;
             }
 
-            // Check if this is a method (starts with 'func')
-            if self.check(&TokenType::Func) {
+            // Check for visibility modifiers and what follows
+            if self.check(&TokenType::Pub) {
+                self.advance(); // consume 'pub'
+                if self.check(&TokenType::Func) {
+                    methods.push(self.parse_method_declaration_with_visibility(false)?);
+                } else {
+                    // Public field
+                    fields.push(self.parse_struct_field_with_visibility(false)?);
+                }
+            } else if self.check(&TokenType::Priv) {
+                self.advance(); // consume 'priv'
+                if self.check(&TokenType::Func) {
+                    methods.push(self.parse_method_declaration_with_visibility(true)?);
+                } else {
+                    // Private field
+                    fields.push(self.parse_struct_field_with_visibility(true)?);
+                }
+            } else if self.check(&TokenType::Func) {
                 methods.push(self.parse_method_declaration()?);
             } else {
-                // Parse field
+                // Parse field (public by default)
                 fields.push(self.parse_struct_field()?);
             }
         }
@@ -470,17 +486,27 @@ impl Parser {
                 continue;
             }
 
-            // Check if this is a method (starts with visibility modifier or 'func')
+            // Check for visibility modifiers and what follows
             if self.check(&TokenType::Pub) {
                 self.advance(); // consume 'pub'
-                methods.push(self.parse_method_declaration_with_visibility(false)?);
+                if self.check(&TokenType::Func) {
+                    methods.push(self.parse_method_declaration_with_visibility(false)?);
+                } else {
+                    // Public field
+                    fields.push(self.parse_struct_field_with_visibility(false)?);
+                }
             } else if self.check(&TokenType::Priv) {
                 self.advance(); // consume 'priv'
-                methods.push(self.parse_method_declaration_with_visibility(true)?);
+                if self.check(&TokenType::Func) {
+                    methods.push(self.parse_method_declaration_with_visibility(true)?);
+                } else {
+                    // Private field
+                    fields.push(self.parse_struct_field_with_visibility(true)?);
+                }
             } else if self.check(&TokenType::Func) {
                 methods.push(self.parse_method_declaration()?);
             } else {
-                // Parse field
+                // Parse field (public by default)
                 fields.push(self.parse_struct_field()?);
             }
         }
@@ -529,7 +555,10 @@ impl Parser {
     }
 
     /// Parse method declaration with visibility
-    fn parse_method_declaration_with_visibility(&mut self, is_private: bool) -> Result<FunctionDecl> {
+    fn parse_method_declaration_with_visibility(
+        &mut self,
+        is_private: bool,
+    ) -> Result<FunctionDecl> {
         let start_pos = self.current_position();
 
         self.consume(&TokenType::Func, "Expected 'func'")?;
@@ -601,8 +630,17 @@ impl Parser {
                 continue;
             }
 
-            // Parse method signature
-            methods.push(self.parse_interface_method()?);
+            // Check for visibility modifiers
+            if self.check(&TokenType::Pub) {
+                self.advance(); // consume 'pub'
+                methods.push(self.parse_interface_method_with_visibility(false)?);
+            } else if self.check(&TokenType::Priv) {
+                self.advance(); // consume 'priv'
+                methods.push(self.parse_interface_method_with_visibility(true)?);
+            } else {
+                // Parse method signature (public by default)
+                methods.push(self.parse_interface_method()?);
+            }
         }
 
         self.consume(&TokenType::RightBrace, "Expected '}'")?;
@@ -651,8 +689,17 @@ impl Parser {
                 continue;
             }
 
-            // Parse method signature
-            methods.push(self.parse_interface_method()?);
+            // Check for visibility modifiers
+            if self.check(&TokenType::Pub) {
+                self.advance(); // consume 'pub'
+                methods.push(self.parse_interface_method_with_visibility(false)?);
+            } else if self.check(&TokenType::Priv) {
+                self.advance(); // consume 'priv'
+                methods.push(self.parse_interface_method_with_visibility(true)?);
+            } else {
+                // Parse method signature (public by default)
+                methods.push(self.parse_interface_method()?);
+            }
         }
 
         self.consume(&TokenType::RightBrace, "Expected '}'")?;
@@ -701,6 +748,14 @@ impl Parser {
 
     /// Parse interface method signature
     fn parse_interface_method(&mut self) -> Result<InterfaceMethod> {
+        self.parse_interface_method_with_visibility(false)
+    }
+
+    /// Parse interface method signature with visibility
+    fn parse_interface_method_with_visibility(
+        &mut self,
+        is_private: bool,
+    ) -> Result<InterfaceMethod> {
         let pos = self.current_position();
         self.consume(&TokenType::Func, "Expected 'func'")?;
         let name = self.consume_identifier("Expected method name")?;
@@ -726,6 +781,7 @@ impl Parser {
             name,
             params,
             return_type,
+            is_private,
             position: pos,
         })
     }

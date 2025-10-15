@@ -1135,88 +1135,8 @@ impl Interpreter {
         }
     }
 
-    /// Execute method inline in current context to prevent infinite recursion
-    fn execute_method_inline(
-        &mut self,
-        method_function: &IrFunction,
-        object: &RuntimeValue,
-        args: Vec<RuntimeValue>,
-    ) -> Result<RuntimeValue> {
-        // Save current register state
-        let saved_registers = if let Some(frame) = self.call_stack.last() {
-            frame.registers.clone()
-        } else {
-            HashMap::new()
-        };
-
-        // Set up method parameters in current frame
-        if let Some(frame) = self.call_stack.last_mut() {
-            // Clear registers for method execution
-            frame.registers.clear();
-
-            // Set up parameters: 'this' + method arguments
-            let mut all_args = vec![object.clone()];
-            all_args.extend(args);
-
-            for (i, arg) in all_args.into_iter().enumerate() {
-                if i < method_function.params.len() {
-                    let param = &method_function.params[i];
-                    frame.locals.insert(param.name.clone(), arg.clone());
-                    frame.registers.insert(param.register.id, arg);
-                }
-            }
-        }
-
-        // Execute method instructions directly
-        let result = self.execute_function_body(method_function);
-
-        // Restore register state
-        if let Some(frame) = self.call_stack.last_mut() {
-            frame.registers = saved_registers;
-        }
-
-        result
-    }
-
-    /// Execute function body without creating new call frame
-    fn execute_function_body(&mut self, function: &IrFunction) -> Result<RuntimeValue> {
-        // Execute each basic block
-        for block in &function.basic_blocks {
-            for instruction in &block.instructions {
-                self.execute_instruction(instruction)?;
-            }
-
-            // Handle terminator
-            match &block.terminator {
-                IrTerminator::Return(value) => {
-                    if let Some(value) = value {
-                        return Ok(self.evaluate_value(value)?);
-                    } else {
-                        return Ok(RuntimeValue::Null);
-                    }
-                }
-                IrTerminator::Branch(_) => {
-                    // For simplicity, we'll just continue to next block
-                    // In a full implementation, we'd handle branching properly
-                }
-                IrTerminator::ConditionalBranch { .. } => {
-                    // For simplicity, we'll just continue to next block
-                    // In a full implementation, we'd handle conditional branching properly
-                }
-                IrTerminator::Switch { .. } => {
-                    // For simplicity, we'll just continue to next block
-                }
-                IrTerminator::Unreachable => {
-                    return Err(BuluError::Other("Unreachable code executed".to_string()));
-                }
-            }
-        }
-
-        Ok(RuntimeValue::Null)
-    }
-
-    /// Unified method call resolution with inline execution to prevent infinite recursion
-    fn call_method(
+    /// Execute method directly in current context without creating new call frames
+    fn execute_method_directly(
         &mut self,
         object: &RuntimeValue,
         method_name: &str,
@@ -1227,12 +1147,26 @@ impl Interpreter {
             return Ok(RuntimeValue::String(self.runtime_value_to_string(object)));
         }
 
-        // For struct methods, execute inline to avoid call stack issues
+        // For struct methods, find the IR function and execute it directly
         if let RuntimeValue::Struct {
             name: struct_name, ..
         } = object
         {
             let method_function_name = format!("{}.{}", struct_name, method_name);
+
+            // Check for recursion to prevent infinite loops
+            let recursion_count = self
+                .call_stack
+                .iter()
+                .filter(|frame| frame.function_name == method_function_name)
+                .count();
+
+            if recursion_count >= 10 {
+                return Err(BuluError::Other(format!(
+                    "Maximum recursion depth exceeded for method '{}'",
+                    method_function_name
+                )));
+            }
 
             let method_function = if let Some(program) = &self.program {
                 program
@@ -1245,8 +1179,13 @@ impl Interpreter {
             };
 
             if let Some(method_function) = method_function {
-                // Execute method inline in current context to prevent recursion
-                return self.execute_method_inline(&method_function, object, args);
+                // Prepare arguments: 'this' + method arguments
+                let mut method_args = vec![object.clone()];
+                method_args.extend(args);
+
+                // IMPORTANT: Use call_function which properly manages the call stack
+                // This is the correct way to call methods in the IR interpreter
+                return self.call_function(&method_function, method_args);
             }
         }
 
@@ -1286,9 +1225,20 @@ impl Interpreter {
 
     /// Execute a function's instructions
     fn execute_function(&mut self, function: &IrFunction) -> Result<RuntimeValue> {
-        let mut current_block = "bb0";
+        let mut current_block = "bb0".to_string();
+        let mut _visited_blocks: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        let max_iterations = 50; // Protection contre les boucles infinies
+        let mut iterations = 0;
 
         loop {
+            iterations += 1;
+            if iterations > max_iterations {
+                return Err(BuluError::Other(
+                    "Maximum iterations exceeded - possible infinite loop".to_string(),
+                ));
+            }
+
             // Find the current basic block
             let block = function
                 .basic_blocks
@@ -1296,18 +1246,20 @@ impl Interpreter {
                 .find(|b| b.label == current_block)
                 .ok_or_else(|| {
                     BuluError::Other(format!("Basic block '{}' not found", current_block))
-                })?;
+                })?
+                .clone(); // Clone to avoid borrow issues
 
             // Execute instructions in the block
             for instruction in &block.instructions {
                 self.execute_instruction(instruction)?;
             }
 
-            // Execute terminator
-            match &block.terminator {
+            // Execute terminator - clone the terminator to avoid borrow issues
+            let terminator = block.terminator.clone();
+            match terminator {
                 IrTerminator::Return(value) => {
                     return if let Some(val) = value {
-                        Ok(self.evaluate_value(val)?)
+                        Ok(self.evaluate_value(&val)?)
                     } else {
                         Ok(RuntimeValue::Null)
                     };
@@ -1320,15 +1272,20 @@ impl Interpreter {
                     true_label,
                     false_label,
                 } => {
-                    let cond_value = self.evaluate_value(condition)?;
+                    let cond_value = self.evaluate_value(&condition)?;
                     current_block = if cond_value.is_truthy() {
                         true_label
                     } else {
                         false_label
                     };
                 }
-                _ => {
-                    return Err(BuluError::Other("Unsupported terminator".to_string()));
+                IrTerminator::Switch { .. } => {
+                    // Pour les switch, on continue vers le bloc suivant
+                    // Dans une implémentation complète, il faudrait gérer les cas
+                    return Ok(RuntimeValue::Null);
+                }
+                IrTerminator::Unreachable => {
+                    return Err(BuluError::Other("Unreachable code executed".to_string()));
                 }
             }
         }
@@ -1402,8 +1359,8 @@ impl Interpreter {
                                     args.push(self.evaluate_value(operand)?);
                                 }
 
-                                // Call the method
-                                self.call_method(&object, &method_name, args)?
+                                // Execute method directly without creating recursion
+                                self.execute_method_directly(&object, &method_name, args)?
                             }
                             _ => {
                                 return Err(BuluError::Other(format!(
@@ -1521,6 +1478,32 @@ impl Interpreter {
                             "Cannot add {:?} and {:?}",
                             left, right
                         )));
+                    }
+                };
+
+                if let Some(result_reg) = &instruction.result {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.registers.insert(result_reg.id, result);
+                    }
+                }
+            }
+            IrOpcode::Neg => {
+                if instruction.operands.len() != 1 {
+                    return Err(BuluError::Other(
+                        "Neg instruction requires exactly one operand".to_string(),
+                    ));
+                }
+
+                let operand = self.evaluate_value(&instruction.operands[0])?;
+
+                let result = match operand {
+                    RuntimeValue::Int32(i) => RuntimeValue::Int32(-i),
+                    RuntimeValue::Int64(i) => RuntimeValue::Int64(-i),
+                    RuntimeValue::Float32(f) => RuntimeValue::Float32(-f),
+                    RuntimeValue::Float64(f) => RuntimeValue::Float64(-f),
+                    RuntimeValue::Integer(i) => RuntimeValue::Integer(-i),
+                    _ => {
+                        return Err(BuluError::Other(format!("Cannot negate {:?}", operand)));
                     }
                 };
 

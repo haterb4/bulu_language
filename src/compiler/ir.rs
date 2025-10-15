@@ -583,7 +583,9 @@ impl IrGenerator {
         
         // Generate method body
         let old_next_register_id = self.next_register_id;
+        let old_next_block_id = self.next_block_id; // Save block ID state
         self.next_register_id = params.len() as u32; // Start after parameters
+        self.next_block_id = 0; // Reset block ID for this method
         
         let mut basic_blocks = Vec::new();
         
@@ -599,8 +601,9 @@ impl IrGenerator {
             self.register_map.insert(param.name.clone(), param.register);
         }
         
-        // Start a new basic block for the method
-        self.start_block("bb0".to_string());
+        // Start a new basic block for the method using proper label generation
+        let entry_label = self.next_block_label();
+        self.start_block(entry_label);
         
         // Generate instructions for method body
         self.generate_block_statement(&method.body)?;
@@ -621,6 +624,7 @@ impl IrGenerator {
         self.register_map = old_register_map;
         
         self.next_register_id = old_next_register_id;
+        self.next_block_id = old_next_block_id; // Restore block ID state
         
         Ok(IrFunction {
             name: function_name,

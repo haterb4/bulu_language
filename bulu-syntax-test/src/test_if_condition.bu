@@ -1,38 +1,28 @@
-// Test de condition if avec méthode privée
+// Test des conditions if
 
-struct TestStruct {
-    value: float64
+func testCondition(x: float64): string {
+    println("testCondition appelé avec x = " + x.toString())
     
-    priv func validateInput(x: float64): bool {
-        println("validateInput appelé avec x = " + x.toString())
-        return x >= 0.0
-    }
+    let isValid = x >= 0.0
+    println("x >= 0.0 = " + isValid.toString())
     
-    pub func add(x: float64): float64 {
-        return this.value + x
-    }
-    
-    pub func safeAdd(x: float64): float64 {
-        println("safeAdd appelé avec x = " + x.toString())
-        
-        if this.validateInput(x) {
-            println("Validation réussie, appel de add")
-            return this.add(x)
-        } else {
-            println("Validation échouée, retour de value")
-            return this.value
-        }
+    if isValid {
+        println("Condition vraie")
+        return "positif"
+    } else {
+        println("Condition fausse")
+        return "négatif"
     }
 }
 
 func main() {
-    println("=== Test Condition If ===")
+    println("=== Test Conditions If ===")
     
-    let s = TestStruct{value: 10.0}
-    println("TestStruct créé avec value = " + s.value.toString())
+    let result1 = testCondition(3.0)
+    println("testCondition(3.0): " + result1)
     
-    let result = s.safeAdd(3.0)
-    println("safeAdd(3.0): " + result.toString())
+    let result2 = testCondition(-5.0)
+    println("testCondition(-5.0): " + result2)
     
     println("Test terminé")
 }

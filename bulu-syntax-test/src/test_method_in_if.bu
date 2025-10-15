@@ -1,34 +1,39 @@
-// Test de méthode appelée dans condition if
+// Test d'appel de méthode dans if
 
-struct TestStruct {
-    value: float64
+struct Validator {
+    threshold: float64
     
-    func validate(x: float64): bool {
-        println("validate appelé avec x = " + x.toString())
-        return x >= 0.0
+    pub func isValid(x: float64): bool {
+        println("isValid appelé avec x = " + x.toString())
+        let result = x >= this.threshold
+        println("x >= " + this.threshold.toString() + " = " + result.toString())
+        return result
     }
     
-    func process(x: float64): float64 {
+    pub func process(x: float64): string {
         println("process appelé avec x = " + x.toString())
         
-        if this.validate(x) {
+        if this.isValid(x) {
             println("Validation réussie")
-            return this.value + x
+            return "accepté"
         } else {
             println("Validation échouée")
-            return this.value
+            return "rejeté"
         }
     }
 }
 
 func main() {
-    println("=== Test Method In If ===")
+    println("=== Test Méthode dans If ===")
     
-    let s = TestStruct{value: 10.0}
-    println("Structure créée")
+    let validator = Validator{threshold: 0.0}
+    println("Validator créé avec threshold = 0.0")
     
-    let result = s.process(3.0)
-    println("process(3.0): " + result.toString())
+    let result1 = validator.process(3.0)
+    println("process(3.0): " + result1)
+    
+    let result2 = validator.process(-5.0)
+    println("process(-5.0): " + result2)
     
     println("Test terminé")
 }
