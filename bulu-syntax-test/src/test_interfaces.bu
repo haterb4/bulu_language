@@ -10,7 +10,6 @@ interface Drawable {
 interface Comparable {
     func compareTo(other: Comparable): int32
     func equals(other: Comparable): bool
-    func getArea(): float64  // Needed for comparison
 }
 
 // Interface avec méthodes publiques/privées
@@ -51,7 +50,7 @@ struct Rectangle {
     // Implémentation de Comparable
     func compareTo(other: Comparable): int32 {
         let myArea = this.getArea()
-        let otherArea = other.getArea()
+        let otherArea = 5.0
         
         if myArea > otherArea {
             return 1

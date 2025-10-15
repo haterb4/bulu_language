@@ -1,0 +1,8 @@
+func main() {
+    let x = 1
+    let y = 10
+    while x < y and x < 8 {
+        println("x = " + x.toString())
+        x = x + 1
+    }
+}

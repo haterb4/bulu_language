@@ -1138,16 +1138,16 @@ impl IrGenerator {
                 let end = self.generate_expression(&range.end)?;
                 let result_register = self.new_register();
 
-                let mut operands = vec![start, end];
-                if let Some(ref step) = range.step {
-                    operands.push(self.generate_expression(step)?);
-                }
-
-                // Use array construction for ranges (simplified)
+                // Use a special function call for range construction
                 self.emit_instruction(IrInstruction {
-                    opcode: IrOpcode::ArrayAccess, // Would be RangeConstruct in full implementation
+                    opcode: IrOpcode::Call,
                     result: Some(result_register),
-                    operands,
+                    operands: vec![
+                        IrValue::Global("__range_to_array".to_string()),
+                        start,
+                        end,
+                        IrValue::Constant(IrConstant::Boolean(range.inclusive)),
+                    ],
                     position: range.position,
                 });
 
@@ -1738,73 +1738,108 @@ impl IrGenerator {
         self.start_block(loop_init);
         let iterable = self.generate_expression(&for_stmt.iterable)?;
         
-        // Create iterator variable
-        let iter_var = self.new_register();
-        self.register_map.insert(for_stmt.variable.clone(), iter_var);
+        // Create index register (always needed for iteration)
+        let index_reg = self.new_register();
         
-        // Initialize iterator (simplified)
+        // Initialize index to 0
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::Copy,
-            result: Some(iter_var),
+            result: Some(index_reg),
+            operands: vec![IrValue::Constant(IrConstant::Integer(0))],
+            position: for_stmt.position,
+        });
+        
+        // Store the array in a register for later access
+        let array_reg = self.new_register();
+        self.emit_instruction(IrInstruction {
+            opcode: IrOpcode::Copy,
+            result: Some(array_reg),
             operands: vec![iterable],
             position: for_stmt.position,
         });
         
-        // If there's an index variable, initialize it
+        // If there's an explicit index variable, map it to our index register
         if let Some(ref index_var) = for_stmt.index_variable {
-            let index_reg = self.new_register();
             self.register_map.insert(index_var.clone(), index_reg);
-            self.emit_instruction(IrInstruction {
-                opcode: IrOpcode::Copy,
-                result: Some(index_reg),
-                operands: vec![IrValue::Constant(IrConstant::Integer(0))],
-                position: for_stmt.position,
-            });
         }
         
         self.emit_branch(loop_header.clone());
         
-        // Loop header - check if iterator has more elements
+        // Loop header - check if index < array.length
         self.start_block(loop_header.clone());
-        let has_next = self.new_register();
+        
+        // Get array length
+        let array_length = self.new_register();
         self.emit_instruction(IrInstruction {
-            opcode: IrOpcode::ArrayLength, // Simplified - would be iterator.has_next()
-            result: Some(has_next),
-            operands: vec![IrValue::Register(iter_var)],
+            opcode: IrOpcode::ArrayLength,
+            result: Some(array_length),
+            operands: vec![IrValue::Register(array_reg)],
+            position: for_stmt.position,
+        });
+        
+        // Compare index < array_length
+        let condition = self.new_register();
+        self.emit_instruction(IrInstruction {
+            opcode: IrOpcode::Lt,
+            result: Some(condition),
+            operands: vec![
+                IrValue::Register(index_reg),
+                IrValue::Register(array_length),
+            ],
             position: for_stmt.position,
         });
         
         self.emit_conditional_branch(
-            IrValue::Register(has_next),
+            IrValue::Register(condition),
             loop_body.clone(),
             loop_exit.clone(),
         );
         
         // Loop body
         self.start_block(loop_body);
+        
+        // Extract current element from array[index] and assign to loop variable
+        let current_element = self.new_register();
+        self.emit_instruction(IrInstruction {
+            opcode: IrOpcode::ArrayAccess,
+            result: Some(current_element),
+            operands: vec![
+                IrValue::Register(array_reg),
+                IrValue::Register(index_reg),
+            ],
+            position: for_stmt.position,
+        });
+        
+        // Assign current element to the loop variable
+        let loop_var_reg = self.new_register();
+        self.register_map.insert(for_stmt.variable.clone(), loop_var_reg);
+        self.emit_instruction(IrInstruction {
+            opcode: IrOpcode::Copy,
+            result: Some(loop_var_reg),
+            operands: vec![IrValue::Register(current_element)],
+            position: for_stmt.position,
+        });
+        
+        // Execute the loop body
         self.generate_block_statement(&for_stmt.body)?;
         
-        // Increment index if present
-        if let Some(ref index_var) = for_stmt.index_variable {
-            if let Some(&index_reg) = self.register_map.get(index_var) {
-                let incremented = self.new_register();
-                self.emit_instruction(IrInstruction {
-                    opcode: IrOpcode::Add,
-                    result: Some(incremented),
-                    operands: vec![
-                        IrValue::Register(index_reg),
-                        IrValue::Constant(IrConstant::Integer(1)),
-                    ],
-                    position: for_stmt.position,
-                });
-                self.emit_instruction(IrInstruction {
-                    opcode: IrOpcode::Copy,
-                    result: Some(index_reg),
-                    operands: vec![IrValue::Register(incremented)],
-                    position: for_stmt.position,
-                });
-            }
-        }
+        // Increment index (always needed)
+        let incremented = self.new_register();
+        self.emit_instruction(IrInstruction {
+            opcode: IrOpcode::Add,
+            result: Some(incremented),
+            operands: vec![
+                IrValue::Register(index_reg),
+                IrValue::Constant(IrConstant::Integer(1)),
+            ],
+            position: for_stmt.position,
+        });
+        self.emit_instruction(IrInstruction {
+            opcode: IrOpcode::Copy,
+            result: Some(index_reg),
+            operands: vec![IrValue::Register(incremented)],
+            position: for_stmt.position,
+        });
         
         // Branch back to header (if not terminated by break/return)
         if self.current_block_label.is_some() {
@@ -1825,57 +1860,59 @@ impl IrGenerator {
     fn generate_match_statement(&mut self, match_stmt: &MatchStmt) -> Result<()> {
         let expr_val = self.generate_expression(&match_stmt.expr)?;
         
-        // Create labels for each arm and merge
-        let mut arm_labels = Vec::new();
-        let mut cases = Vec::new();
-        
-        for (i, _arm) in match_stmt.arms.iter().enumerate() {
-            let arm_label = self.next_block_label();
-            arm_labels.push(arm_label.clone());
-            cases.push((IrValue::Constant(IrConstant::Integer(i as i64)), arm_label));
-        }
-        
         let merge_label = self.next_block_label();
+        let mut next_arm_label = None;
         
-        // Generate switch terminator
-        self.finish_current_block(IrTerminator::Switch {
-            value: expr_val,
-            cases,
-            default_label: Some(merge_label.clone()),
-        });
-        
-        // Generate code for each arm
+        // Generate code for each arm in sequence
         for (i, arm) in match_stmt.arms.iter().enumerate() {
-            self.start_block(arm_labels[i].clone());
+            // Start with the current block or the "next arm" label from previous iteration
+            if let Some(label) = next_arm_label.take() {
+                self.start_block(label);
+            }
+            
+            // Generate pattern matching condition
+            let pattern_matches = self.generate_pattern_match(&arm.pattern, &expr_val)?;
+            
+            let arm_body_label = self.next_block_label();
+            let next_check_label = if i + 1 < match_stmt.arms.len() {
+                let label = self.next_block_label();
+                next_arm_label = Some(label.clone());
+                Some(label)
+            } else {
+                None
+            };
+            
+            // Branch based on pattern match
+            if let Some(next_label) = next_check_label {
+                self.emit_conditional_branch(pattern_matches, arm_body_label.clone(), next_label);
+            } else {
+                // Last arm - if pattern doesn't match, go to merge (shouldn't happen with wildcard)
+                self.emit_conditional_branch(pattern_matches, arm_body_label.clone(), merge_label.clone());
+            }
+            
+            // Generate arm body
+            self.start_block(arm_body_label);
             
             // Generate guard condition if present
             if let Some(ref guard) = arm.guard {
                 let guard_val = self.generate_expression(guard)?;
                 let guard_true = self.next_block_label();
-                let guard_false = self.next_block_label();
+                let guard_false = if let Some(ref next_label) = next_arm_label {
+                    next_label.clone()
+                } else {
+                    merge_label.clone()
+                };
                 
-                self.emit_conditional_branch(guard_val, guard_true.clone(), guard_false.clone());
+                self.emit_conditional_branch(guard_val, guard_true.clone(), guard_false);
                 
                 // Guard true - execute arm body
                 self.start_block(guard_true);
-                self.generate_statement(&arm.body)?;
-                if self.current_block_label.is_some() {
-                    self.emit_branch(merge_label.clone());
-                }
-                
-                // Guard false - continue to next arm or merge
-                self.start_block(guard_false);
-                if i + 1 < arm_labels.len() {
-                    self.emit_branch(arm_labels[i + 1].clone());
-                } else {
-                    self.emit_branch(merge_label.clone());
-                }
-            } else {
-                // No guard - execute arm body directly
-                self.generate_statement(&arm.body)?;
-                if self.current_block_label.is_some() {
-                    self.emit_branch(merge_label.clone());
-                }
+            }
+            
+            // Execute arm body
+            self.generate_statement(&arm.body)?;
+            if self.current_block_label.is_some() {
+                self.emit_branch(merge_label.clone());
             }
         }
         
@@ -1883,6 +1920,90 @@ impl IrGenerator {
         self.start_block(merge_label);
         
         Ok(())
+    }
+    
+    /// Generate pattern matching logic
+    fn generate_pattern_match(&mut self, pattern: &Pattern, expr_val: &IrValue) -> Result<IrValue> {
+        match pattern {
+            Pattern::Wildcard(_) => {
+                // Wildcard always matches
+                Ok(IrValue::Constant(IrConstant::Boolean(true)))
+            }
+            Pattern::Literal(literal, _) => {
+                // Generate comparison with literal
+                let literal_val = match literal {
+                    LiteralValue::Integer(i) => IrValue::Constant(IrConstant::Integer(*i)),
+                    LiteralValue::Float(f) => IrValue::Constant(IrConstant::Float(*f)),
+                    LiteralValue::String(s) => IrValue::Constant(IrConstant::String(s.clone())),
+                    LiteralValue::Boolean(b) => IrValue::Constant(IrConstant::Boolean(*b)),
+                    LiteralValue::Char(c) => IrValue::Constant(IrConstant::Integer(*c as i64)),
+                    LiteralValue::Null => IrValue::Constant(IrConstant::Null),
+                };
+                
+                let result_reg = self.new_register();
+                self.emit_instruction(IrInstruction {
+                    opcode: IrOpcode::Eq,
+                    result: Some(result_reg.clone()),
+                    operands: vec![expr_val.clone(), literal_val],
+                    position: Position::new(0, 0, 0),
+                });
+                
+                Ok(IrValue::Register(result_reg))
+            }
+            Pattern::Identifier(name, _) => {
+                // For now, treat identifier patterns as wildcards and bind the value
+                // TODO: Implement proper variable binding in patterns
+                let _ = name; // Suppress unused warning
+                Ok(IrValue::Constant(IrConstant::Boolean(true)))
+            }
+            Pattern::Range(range_pattern) => {
+                // Generate range check: expr_val >= start && expr_val <= end (if inclusive)
+                let start_val = match &range_pattern.start {
+                    LiteralValue::Integer(i) => IrValue::Constant(IrConstant::Integer(*i)),
+                    LiteralValue::Float(f) => IrValue::Constant(IrConstant::Float(*f)),
+                    _ => return Err(BuluError::Other("Range patterns only support numeric literals".to_string())),
+                };
+                let end_val = match &range_pattern.end {
+                    LiteralValue::Integer(i) => IrValue::Constant(IrConstant::Integer(*i)),
+                    LiteralValue::Float(f) => IrValue::Constant(IrConstant::Float(*f)),
+                    _ => return Err(BuluError::Other("Range patterns only support numeric literals".to_string())),
+                };
+                
+                // expr_val >= start
+                let ge_reg = self.new_register();
+                self.emit_instruction(IrInstruction {
+                    opcode: IrOpcode::Ge,
+                    result: Some(ge_reg.clone()),
+                    operands: vec![expr_val.clone(), start_val],
+                    position: Position::new(0, 0, 0),
+                });
+                
+                // expr_val <= end (inclusive) or expr_val < end (exclusive)
+                let end_op = if range_pattern.inclusive { IrOpcode::Le } else { IrOpcode::Lt };
+                let le_reg = self.new_register();
+                self.emit_instruction(IrInstruction {
+                    opcode: end_op,
+                    result: Some(le_reg.clone()),
+                    operands: vec![expr_val.clone(), end_val],
+                    position: Position::new(0, 0, 0),
+                });
+                
+                // Combine with AND
+                let result_reg = self.new_register();
+                self.emit_instruction(IrInstruction {
+                    opcode: IrOpcode::LogicalAnd,
+                    result: Some(result_reg.clone()),
+                    operands: vec![IrValue::Register(ge_reg), IrValue::Register(le_reg)],
+                    position: Position::new(0, 0, 0),
+                });
+                
+                Ok(IrValue::Register(result_reg))
+            }
+            _ => {
+                // TODO: Implement other pattern types (Struct, Array, Or)
+                Ok(IrValue::Constant(IrConstant::Boolean(false)))
+            }
+        }
     }
 
     /// Generate IR for try statement

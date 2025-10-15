@@ -85,6 +85,9 @@ pub enum TokenType {
     And,
     Or,
     Not,
+    // Symbolic logical operators
+    LogicalAnd,    // &&
+    LogicalOr,     // ||
     // Module system
     Import,
     Export,
@@ -192,6 +195,8 @@ impl fmt::Display for TokenType {
             TokenType::And => "and",
             TokenType::Or => "or",
             TokenType::Not => "not",
+            TokenType::LogicalAnd => "&&",
+            TokenType::LogicalOr => "||",
             TokenType::Import => "import",
             TokenType::Export => "export",
             TokenType::Pub => "pub",

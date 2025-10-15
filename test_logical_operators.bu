@@ -1,0 +1,31 @@
+func main() {
+    println("Testing logical operators")
+    
+    let x = 5
+    let y = 10
+    
+    // Test && (symbolic AND)
+    if x > 0 && y > 0 {
+        println("Both x and y are positive (using &&)")
+    }
+    
+    // Test and (keyword AND)
+    if x > 0 and y > 0 {
+        println("Both x and y are positive (using and)")
+    }
+    
+    // Test || (symbolic OR)
+    if x < 0 || y > 5 {
+        println("Either x is negative or y is greater than 5 (using ||)")
+    }
+    
+    // Test or (keyword OR)
+    if x < 0 or y > 5 {
+        println("Either x is negative or y is greater than 5 (using or)")
+    }
+    
+    // Test complex expression with both
+    if (x > 0 && y > 0) || (x < 0 and y < 0) {
+        println("Mixed logical operators work!")
+    }
+}

@@ -139,8 +139,20 @@ impl Lexer {
             '?' => self.make_token(TokenType::Question, start_pos),
             '~' => self.make_token(TokenType::Tilde, start_pos),
             '^' => self.make_token(TokenType::Caret, start_pos),
-            '&' => self.make_token(TokenType::Ampersand, start_pos),
-            '|' => self.make_token(TokenType::Pipe, start_pos),
+            '&' => {
+                if self.match_char('&') {
+                    self.make_token(TokenType::LogicalAnd, start_pos)
+                } else {
+                    self.make_token(TokenType::Ampersand, start_pos)
+                }
+            }
+            '|' => {
+                if self.match_char('|') {
+                    self.make_token(TokenType::LogicalOr, start_pos)
+                } else {
+                    self.make_token(TokenType::Pipe, start_pos)
+                }
+            }
             '%' => {
                 if self.match_char('=') {
                     self.make_token(TokenType::PercentAssign, start_pos)

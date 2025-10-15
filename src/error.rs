@@ -36,6 +36,10 @@ pub enum BuluError {
     },
     /// I/O errors
     IoError(String),
+    /// Break statement (control flow)
+    Break,
+    /// Continue statement (control flow)
+    Continue,
     /// Generic error
     Other(String),
 }
@@ -73,6 +77,12 @@ impl fmt::Display for BuluError {
             }
             BuluError::IoError(message) => {
                 write!(f, "I/O error: {}", message)
+            }
+            BuluError::Break => {
+                write!(f, "Break statement outside of loop")
+            }
+            BuluError::Continue => {
+                write!(f, "Continue statement outside of loop")
             }
             BuluError::Other(message) => {
                 write!(f, "Error: {}", message)

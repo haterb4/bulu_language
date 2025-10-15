@@ -1,0 +1,18 @@
+func main() {
+    println("Testing range syntax")
+    
+    println("Testing 1..6 (exclusive, should end at 5):")
+    for i in 1..6 {
+        println("i = " + i.toString())
+    }
+    
+    println("\nTesting 1...6 (inclusive, should include 6):")
+    for i in 1...6 {
+        println("i = " + i.toString())
+    }
+    
+    println("\nTesting 1..<6 (explicit exclusive, should end at 5):")
+    for i in 1..<6 {
+        println("i = " + i.toString())
+    }
+}

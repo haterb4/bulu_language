@@ -541,8 +541,49 @@ impl AstInterpreter {
         Ok(RuntimeValue::Null)
     }
 
-    fn execute_range_expr(&mut self, _expr: &RangeExpr) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+    fn execute_range_expr(&mut self, expr: &RangeExpr) -> Result<RuntimeValue> {
+        let start_val = self.execute_expression(&expr.start)?;
+        let end_val = self.execute_expression(&expr.end)?;
+        
+        // Convert to integers for range creation
+        let start = match start_val {
+            RuntimeValue::Int32(i) => i as i64,
+            RuntimeValue::Int64(i) => i,
+            RuntimeValue::Float32(f) => f as i64,
+            RuntimeValue::Float64(f) => f as i64,
+            _ => return Err(BuluError::RuntimeError {
+                message: "Range start must be a number".to_string(),
+                file: self.current_file.clone(),
+            }),
+        };
+        
+        let end = match end_val {
+            RuntimeValue::Int32(i) => i as i64,
+            RuntimeValue::Int64(i) => i,
+            RuntimeValue::Float32(f) => f as i64,
+            RuntimeValue::Float64(f) => f as i64,
+            _ => return Err(BuluError::RuntimeError {
+                message: "Range end must be a number".to_string(),
+                file: self.current_file.clone(),
+            }),
+        };
+        
+        // Create array from range
+        let mut values = Vec::new();
+        
+        if expr.inclusive {
+            // Inclusive range: 1...5 includes 5
+            for i in start..=end {
+                values.push(RuntimeValue::Int64(i));
+            }
+        } else {
+            // Exclusive range: 1..<5 or 1..5 excludes 5
+            for i in start..end {
+                values.push(RuntimeValue::Int64(i));
+            }
+        }
+        
+        Ok(RuntimeValue::Array(values))
     }
 
     fn execute_yield_expr(&mut self, _expr: &YieldExpr) -> Result<RuntimeValue> {
@@ -568,12 +609,156 @@ impl AstInterpreter {
         Ok(RuntimeValue::Null)
     }
 
-    fn execute_while_stmt(&mut self, _stmt: &WhileStmt) -> Result<RuntimeValue> {
+    fn execute_while_stmt(&mut self, stmt: &WhileStmt) -> Result<RuntimeValue> {
+        loop {
+            // Evaluate the condition
+            let condition_value = self.execute_expression(&stmt.condition)?;
+            
+            // Check if condition is truthy
+            let should_continue = match condition_value {
+                RuntimeValue::Bool(b) => b,
+                RuntimeValue::Null => false,
+                RuntimeValue::Int32(i) => i != 0,
+                RuntimeValue::Int64(i) => i != 0,
+                RuntimeValue::Float32(f) => f != 0.0,
+                RuntimeValue::Float64(f) => f != 0.0,
+                RuntimeValue::String(s) => !s.is_empty(),
+                _ => true, // Other values are considered truthy
+            };
+            
+            if !should_continue {
+                break;
+            }
+            
+            // Execute the body
+            match self.execute_block_stmt(&stmt.body) {
+                Ok(_) => continue,
+                Err(BuluError::Break) => break,
+                Err(BuluError::Continue) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        
         Ok(RuntimeValue::Null)
     }
 
-    fn execute_for_stmt(&mut self, _stmt: &ForStmt) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+    fn execute_for_stmt(&mut self, stmt: &ForStmt) -> Result<RuntimeValue> {
+        // Evaluate the iterable expression
+        let iterable_value = self.execute_expression(&stmt.iterable)?;
+        
+        match iterable_value {
+            RuntimeValue::Array(ref values) => {
+                if let Some(ref index_var) = stmt.index_variable {
+                    // For loop with index and value: for i, val in array
+                    for (index, value) in values.iter().enumerate() {
+                        // Create new scope for each iteration
+                        let parent_env = self.environment.clone();
+                        self.environment = Environment::with_parent(parent_env.clone());
+                        
+                        // Set the index variable
+                        self.environment.define(index_var.clone(), RuntimeValue::Int32(index as i32));
+                        // Set the value variable
+                        self.environment.define(stmt.variable.clone(), value.clone());
+                        
+                        // Execute the body
+                        let result = self.execute_block_stmt(&stmt.body);
+                        
+                        // Restore environment
+                        self.environment = parent_env;
+                        
+                        match result {
+                            Ok(_) => continue,
+                            Err(BuluError::Break) => break,
+                            Err(BuluError::Continue) => continue,
+                            Err(e) => return Err(e),
+                        }
+                    }
+                } else {
+                    // For loop with just value: for val in array
+                    for value in values {
+                        // Create new scope for each iteration
+                        let parent_env = self.environment.clone();
+                        self.environment = Environment::with_parent(parent_env.clone());
+                        
+                        // Set the loop variable
+                        self.environment.define(stmt.variable.clone(), value.clone());
+                        
+                        // Execute the body
+                        let result = self.execute_block_stmt(&stmt.body);
+                        
+                        // Restore environment
+                        self.environment = parent_env;
+                        
+                        match result {
+                            Ok(_) => continue,
+                            Err(BuluError::Break) => break,
+                            Err(BuluError::Continue) => continue,
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
+                Ok(RuntimeValue::Null)
+            }
+            RuntimeValue::String(ref s) => {
+                // Iterate over characters in string
+                if let Some(ref index_var) = stmt.index_variable {
+                    // For loop with index and character: for i, char in string
+                    for (index, ch) in s.chars().enumerate() {
+                        // Create new scope for each iteration
+                        let parent_env = self.environment.clone();
+                        self.environment = Environment::with_parent(parent_env.clone());
+                        
+                        // Set the index variable
+                        self.environment.define(index_var.clone(), RuntimeValue::Int32(index as i32));
+                        // Set the character variable
+                        self.environment.define(stmt.variable.clone(), RuntimeValue::String(ch.to_string()));
+                        
+                        // Execute the body
+                        let result = self.execute_block_stmt(&stmt.body);
+                        
+                        // Restore environment
+                        self.environment = parent_env;
+                        
+                        match result {
+                            Ok(_) => continue,
+                            Err(BuluError::Break) => break,
+                            Err(BuluError::Continue) => continue,
+                            Err(e) => return Err(e),
+                        }
+                    }
+                } else {
+                    // For loop with just character: for char in string
+                    for ch in s.chars() {
+                        // Create new scope for each iteration
+                        let parent_env = self.environment.clone();
+                        self.environment = Environment::with_parent(parent_env.clone());
+                        
+                        // Set the loop variable
+                        self.environment.define(stmt.variable.clone(), RuntimeValue::String(ch.to_string()));
+                        
+                        // Execute the body
+                        let result = self.execute_block_stmt(&stmt.body);
+                        
+                        // Restore environment
+                        self.environment = parent_env;
+                        
+                        match result {
+                            Ok(_) => continue,
+                            Err(BuluError::Break) => break,
+                            Err(BuluError::Continue) => continue,
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
+                Ok(RuntimeValue::Null)
+            }
+            _ => {
+                Err(BuluError::RuntimeError {
+                    message: format!("Cannot iterate over value of type: {:?}", iterable_value),
+                    file: self.current_file.clone(),
+                })
+            }
+        }
     }
 
     fn execute_match_stmt(&mut self, _stmt: &MatchStmt) -> Result<RuntimeValue> {
@@ -589,11 +774,11 @@ impl AstInterpreter {
     }
 
     fn execute_break_stmt(&mut self, _stmt: &BreakStmt) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+        Err(BuluError::Break)
     }
 
     fn execute_continue_stmt(&mut self, _stmt: &ContinueStmt) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+        Err(BuluError::Continue)
     }
 
     fn execute_defer_stmt(&mut self, _stmt: &DeferStmt) -> Result<RuntimeValue> {

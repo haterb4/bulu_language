@@ -43,7 +43,7 @@ This document outlines the implementation tasks for the Bulu programming languag
 
 ## Type System Implementation
 
-- [x] 5. Implement primitive type system
+- [ ] 5. Implement primitive type system
   - Create type definitions for all primitive types (int8, int16, int32, etc.)
   - Implement the `any` type with runtime type information
   - Implement type checking for basic operations
@@ -88,7 +88,7 @@ This document outlines the implementation tasks for the Bulu programming languag
   - Write unit tests for all control flow constructs
   - _Requirements: 3.5.1-3.5.9_
 
-- [x] 10. Implement pattern matching (match statement)
+- [ ] 10. Implement pattern matching (match statement)
   - Add match statement parsing with multiple patterns
   - Implement value matching, range matching, and type matching
   - Add support for match as expression

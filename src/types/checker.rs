@@ -430,7 +430,7 @@ impl TypeChecker {
     fn check_interface_declaration(&mut self, decl: &InterfaceDecl) -> Result<TypeId> {
         // Create a unique TypeId for this interface
         let interface_type_id = self.get_or_create_named_type_id(&decl.name, true);
-        
+
         // Store the interface declaration
         self.interfaces.insert(decl.name.clone(), decl.clone());
 
@@ -451,7 +451,7 @@ impl TypeChecker {
     fn check_struct_declaration(&mut self, decl: &StructDecl) -> Result<TypeId> {
         // Create a unique TypeId for this struct
         let struct_type_id = self.get_or_create_named_type_id(&decl.name, false);
-        
+
         // Store the struct declaration
         self.structs.insert(decl.name.clone(), decl.clone());
 
@@ -614,10 +614,16 @@ impl TypeChecker {
         // Check iterable expression
         let iterable_type = self.check_expression(&stmt.iterable)?;
 
-        // For now, assume any type is iterable (we'll implement proper checking later)
+        // Determine element type based on iterable type
         let element_type = match iterable_type {
             TypeId::String => TypeId::Char,
             TypeId::Array(_) | TypeId::Slice(_) => TypeId::Any, // Placeholder
+            TypeId::Any => {
+                // This could be a range (0..5) which returns Any for now
+                // For ranges, the element type is the same as the range bounds
+                // We'll assume Int32 for now since most ranges are integer ranges
+                TypeId::Int32
+            }
             _ => {
                 return Err(BuluError::TypeError {
                     file: None,
@@ -730,11 +736,14 @@ impl TypeChecker {
             Expression::Assignment(assign) => self.check_assignment_expression(assign),
             Expression::Array(array) => self.check_array_expression(array),
             Expression::Map(map) => self.check_map_expression(map),
-            Expression::StructLiteral(struct_lit) => self.check_struct_literal_expression(struct_lit),
+            Expression::StructLiteral(struct_lit) => {
+                self.check_struct_literal_expression(struct_lit)
+            }
             Expression::Cast(cast) => self.check_cast_expression(cast),
             Expression::TypeOf(typeof_expr) => self.check_typeof_expression(typeof_expr),
             Expression::Async(async_expr) => self.check_async_expression(async_expr),
             Expression::Await(await_expr) => self.check_await_expression(await_expr),
+            Expression::Range(range) => self.check_range_expression(range),
             Expression::Parenthesized(paren) => self.check_expression(&paren.expr),
             _ => {
                 // For now, return Any for unimplemented expression types
@@ -850,174 +859,215 @@ impl TypeChecker {
         match &*call.callee {
             // Handle direct function calls (e.g., func())
             Expression::Identifier(ident) => {
-            // Look up function in symbol table and clone the info to avoid borrow issues
-            let symbol_opt = self.lookup_symbol(&ident.name);
-            let func_info_opt = symbol_opt.and_then(|s| s.function_info.clone());
+                // Look up function in symbol table and clone the info to avoid borrow issues
+                let symbol_opt = self.lookup_symbol(&ident.name);
+                let func_info_opt = symbol_opt.and_then(|s| s.function_info.clone());
 
-            if let Some(func_info) = func_info_opt {
-                // For built-in functions like print, we're more lenient
-                if ident.name == "print" {
-                    // Print can take any number of arguments of any type
-                    for arg in &call.args {
-                        self.check_expression(arg)?;
+                if let Some(func_info) = func_info_opt {
+                    // For built-in functions like print, we're more lenient
+                    if ident.name == "print" {
+                        // Print can take any number of arguments of any type
+                        for arg in &call.args {
+                            self.check_expression(arg)?;
+                        }
+                        return Ok(TypeId::Any); // print doesn't return a value
                     }
-                    return Ok(TypeId::Any); // print doesn't return a value
-                }
 
-                // Handle println built-in function
-                if ident.name == "println" {
-                    // println can take any number of arguments of any type
-                    for arg in &call.args {
-                        self.check_expression(arg)?;
+                    // Handle println built-in function
+                    if ident.name == "println" {
+                        // println can take any number of arguments of any type
+                        for arg in &call.args {
+                            self.check_expression(arg)?;
+                        }
+                        return Ok(TypeId::Any); // println doesn't return a value
                     }
-                    return Ok(TypeId::Any); // println doesn't return a value
-                }
 
-                // Handle typeof built-in function
-                if ident.name == "typeof" {
-                    // typeof takes exactly one argument of any type
-                    if call.args.len() != 1 {
+                    // Handle typeof built-in function
+                    if ident.name == "typeof" {
+                        // typeof takes exactly one argument of any type
+                        if call.args.len() != 1 {
+                            return Err(BuluError::TypeError {
+                                file: None,
+                                message: format!(
+                                    "typeof() expects exactly 1 argument, got {}",
+                                    call.args.len()
+                                ),
+                                line: call.position.line,
+                                column: call.position.column,
+                            });
+                        }
+                        // Check the argument
+                        self.check_expression(&call.args[0])?;
+                        return Ok(TypeId::String); // typeof returns string
+                    }
+
+                    // Check argument count
+                    if call.args.len() != func_info.param_types.len() {
                         return Err(BuluError::TypeError {
                             file: None,
                             message: format!(
-                                "typeof() expects exactly 1 argument, got {}",
+                                "Function '{}' expects {} arguments, got {}",
+                                ident.name,
+                                func_info.param_types.len(),
                                 call.args.len()
                             ),
                             line: call.position.line,
                             column: call.position.column,
                         });
                     }
-                    // Check the argument
-                    self.check_expression(&call.args[0])?;
-                    return Ok(TypeId::String); // typeof returns string
-                }
 
-                // Check argument count
-                if call.args.len() != func_info.param_types.len() {
+                    // Check argument types
+                    for (i, (arg, expected_type)) in call
+                        .args
+                        .iter()
+                        .zip(func_info.param_types.iter())
+                        .enumerate()
+                    {
+                        let actual_type = self.check_expression(arg)?;
+                        if !self.is_type_compatible(actual_type, *expected_type) {
+                            return Err(BuluError::TypeError {
+                                file: None,
+                                message: format!(
+                                    "Argument {} to function '{}': expected {}, got {}",
+                                    i + 1,
+                                    ident.name,
+                                    self.type_name_for_error(*expected_type),
+                                    self.type_name_for_error(actual_type)
+                                ),
+                                line: call.position.line,
+                                column: call.position.column,
+                            });
+                        }
+                    }
+
+                    // Return the function's return type
+                    Ok(func_info.return_type.unwrap_or(TypeId::Any))
+                } else if self.lookup_symbol(&ident.name).is_some() {
+                    // Symbol exists but is not a function
                     return Err(BuluError::TypeError {
                         file: None,
-                        message: format!(
-                            "Function '{}' expects {} arguments, got {}",
-                            ident.name,
-                            func_info.param_types.len(),
-                            call.args.len()
-                        ),
+                        message: format!("'{}' is not a function", ident.name),
+                        line: call.position.line,
+                        column: call.position.column,
+                    });
+                } else {
+                    return Err(BuluError::TypeError {
+                        file: None,
+                        message: format!("Undefined function '{}'", ident.name),
                         line: call.position.line,
                         column: call.position.column,
                     });
                 }
-
-                // Check argument types
-                for (i, (arg, expected_type)) in call
-                    .args
-                    .iter()
-                    .zip(func_info.param_types.iter())
-                    .enumerate()
-                {
-                    let actual_type = self.check_expression(arg)?;
-                    if !self.is_type_compatible(actual_type, *expected_type) {
-                        return Err(BuluError::TypeError {
-                            file: None,
-                            message: format!(
-                                "Argument {} to function '{}': expected {}, got {}",
-                                i + 1,
-                                ident.name,
-                                self.type_name_for_error(*expected_type),
-                                self.type_name_for_error(actual_type)
-                            ),
-                            line: call.position.line,
-                            column: call.position.column,
-                        });
-                    }
-                }
-
-                // Return the function's return type
-                Ok(func_info.return_type.unwrap_or(TypeId::Any))
-            } else if self.lookup_symbol(&ident.name).is_some() {
-                // Symbol exists but is not a function
-                return Err(BuluError::TypeError {
-                    file: None,
-                    message: format!("'{}' is not a function", ident.name),
-                    line: call.position.line,
-                    column: call.position.column,
-                });
-            } else {
-                return Err(BuluError::TypeError {
-                    file: None,
-                    message: format!("Undefined function '{}'", ident.name),
-                    line: call.position.line,
-                    column: call.position.column,
-                });
-            }
             }
             Expression::MemberAccess(member_access) => {
-            // Handle method calls: obj.method()
-            let object_type = self.check_expression(&member_access.object)?;
+                // Handle method calls: obj.method()
+                let object_type = self.check_expression(&member_access.object)?;
 
-            // Check arguments
-            for arg in &call.args {
-                self.check_expression(arg)?;
-            }
+                // Check arguments
+                for arg in &call.args {
+                    self.check_expression(arg)?;
+                }
 
-            // Look up the method in the object's type
-            let type_name = self.get_type_name_from_expression(&member_access.object)?;
-            
-            match object_type {
-                TypeId::Struct(_) => {
-                    if let Some(struct_name) = type_name {
-                        if let Some(struct_decl) = self.structs.get(&struct_name).cloned() {
-                            // Look for the method in the struct
-                            for method in &struct_decl.methods {
-                                if method.name == member_access.member {
-                                    return match &method.return_type {
-                                        Some(return_type) => Ok(self.ast_type_to_type_id(return_type)),
-                                        None => Ok(TypeId::Void),
-                                    };
+                // Look up the method in the object's type
+                let type_name = self.get_type_name_from_expression(&member_access.object)?;
+                let type_name_for_error =
+                    type_name.clone().unwrap_or_else(|| "unknown".to_string());
+
+                match object_type {
+                    TypeId::Struct(_) => {
+                        if let Some(struct_name) = type_name.as_ref() {
+                            if let Some(struct_decl) = self.structs.get(struct_name).cloned() {
+                                // Look for the method in the struct
+                                for method in &struct_decl.methods {
+                                    if method.name == member_access.member {
+                                        return match &method.return_type {
+                                            Some(return_type) => {
+                                                Ok(self.ast_type_to_type_id(return_type))
+                                            }
+                                            None => Ok(TypeId::Void),
+                                        };
+                                    }
                                 }
-                            }
-                            
-                            // Check if struct implements any interface with this method
-                            let interfaces_clone = self.interfaces.clone();
-                            for (interface_name, interface_decl) in &interfaces_clone {
-                                if self.struct_implements_interface(&struct_name, interface_name) {
-                                    for method in &interface_decl.methods {
-                                        if method.name == member_access.member {
-                                            return match &method.return_type {
-                                                Some(return_type) => Ok(self.ast_type_to_type_id(return_type)),
-                                                None => Ok(TypeId::Void),
-                                            };
+
+                                // Check if struct implements any interface with this method
+                                let interfaces_clone = self.interfaces.clone();
+                                for (interface_name, interface_decl) in &interfaces_clone {
+                                    if self
+                                        .struct_implements_interface(&struct_name, interface_name)
+                                    {
+                                        for method in &interface_decl.methods {
+                                            if method.name == member_access.member {
+                                                return match &method.return_type {
+                                                    Some(return_type) => {
+                                                        Ok(self.ast_type_to_type_id(return_type))
+                                                    }
+                                                    None => Ok(TypeId::Void),
+                                                };
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
-                TypeId::Interface(_) => {
-                    if let Some(interface_name) = type_name {
-                        if let Some(interface_decl) = self.interfaces.get(&interface_name).cloned() {
-                            for method in &interface_decl.methods {
-                                if method.name == member_access.member {
-                                    return match &method.return_type {
-                                        Some(return_type) => Ok(self.ast_type_to_type_id(return_type)),
-                                        None => Ok(TypeId::Void),
-                                    };
+                    TypeId::Interface(_) => {
+                        if let Some(interface_name) = type_name.as_ref() {
+                            if let Some(interface_decl) =
+                                self.interfaces.get(interface_name).cloned()
+                            {
+                                for method in &interface_decl.methods {
+                                    if method.name == member_access.member {
+                                        return match &method.return_type {
+                                            Some(return_type) => {
+                                                Ok(self.ast_type_to_type_id(return_type))
+                                            }
+                                            None => Ok(TypeId::Void),
+                                        };
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                _ => {
-                    // Handle built-in methods for primitive types
-                    match member_access.member.as_str() {
-                        "toString" => return Ok(TypeId::String),
-                        _ => {}
+                    _ => {
+                        // Handle built-in methods for primitive types
+                        match member_access.member.as_str() {
+                            "toString" => return Ok(TypeId::String),
+                            _ => {}
+                        }
                     }
                 }
-            }
-            
-            // If method not found, return Any for now (could be an error)
-            Ok(TypeId::Any)
+
+                // If method not found, provide a helpful error message
+                match object_type {
+                    TypeId::Interface(_) => Err(BuluError::TypeError {
+                        file: None,
+                        message: format!(
+                            "Method '{}' not found in interface '{}'",
+                            member_access.member, type_name_for_error
+                        ),
+                        line: call.position.line,
+                        column: call.position.column,
+                    }),
+                    TypeId::Struct(_) => Err(BuluError::TypeError {
+                        file: None,
+                        message: format!(
+                            "Method '{}' not found in struct '{}'",
+                            member_access.member, type_name_for_error
+                        ),
+                        line: call.position.line,
+                        column: call.position.column,
+                    }),
+                    _ => Err(BuluError::TypeError {
+                        file: None,
+                        message: format!(
+                            "Method '{}' not found on type '{}'",
+                            member_access.member,
+                            self.type_name_for_error(object_type)
+                        ),
+                        line: call.position.line,
+                        column: call.position.column,
+                    }),
+                }
             }
             _ => {
                 // For other non-identifier callees, just check the expression
@@ -1039,7 +1089,7 @@ impl TypeChecker {
 
         // Get the type name from the object
         let type_name = self.get_type_name_from_expression(&access.object)?;
-        
+
         match object_type {
             TypeId::Interface(_) => {
                 // Look up the method in the specific interface
@@ -1066,7 +1116,7 @@ impl TypeChecker {
                                 return Ok(self.ast_type_to_type_id(&field.field_type));
                             }
                         }
-                        
+
                         // Then check struct's own methods
                         for method in &struct_decl.methods {
                             if method.name == access.member {
@@ -1076,7 +1126,7 @@ impl TypeChecker {
                                 };
                             }
                         }
-                        
+
                         // Finally check if struct implements any interface with this method
                         let interfaces_clone = self.interfaces.clone();
                         for (interface_name, interface_decl) in &interfaces_clone {
@@ -1084,7 +1134,9 @@ impl TypeChecker {
                                 for method in &interface_decl.methods {
                                     if method.name == access.member {
                                         return match &method.return_type {
-                                            Some(return_type) => Ok(self.ast_type_to_type_id(return_type)),
+                                            Some(return_type) => {
+                                                Ok(self.ast_type_to_type_id(return_type))
+                                            }
                                             None => Ok(TypeId::Void),
                                         };
                                     }
@@ -1306,24 +1358,27 @@ impl TypeChecker {
     }
 
     /// Type check a struct literal expression
-    fn check_struct_literal_expression(&mut self, struct_lit: &StructLiteralExpr) -> Result<TypeId> {
+    fn check_struct_literal_expression(
+        &mut self,
+        struct_lit: &StructLiteralExpr,
+    ) -> Result<TypeId> {
         // Check if the struct type exists
         if let Some(struct_decl) = self.structs.get(&struct_lit.type_name).cloned() {
             // Get or create the TypeId for this struct
             let struct_type_id = self.get_or_create_named_type_id(&struct_lit.type_name, false);
-            
+
             // Verify that all required fields are provided and have correct types
             for field in &struct_decl.fields {
                 let mut field_found = false;
-                
+
                 for field_init in &struct_lit.fields {
                     if field_init.name == field.name {
                         field_found = true;
-                        
+
                         // Check that the field value has the correct type
                         let value_type = self.check_expression(&field_init.value)?;
                         let expected_type = self.ast_type_to_type_id(&field.field_type);
-                        
+
                         if !PrimitiveType::is_assignable(value_type, expected_type) {
                             return Err(BuluError::TypeError {
                                 message: format!(
@@ -1340,7 +1395,7 @@ impl TypeChecker {
                         break;
                     }
                 }
-                
+
                 if !field_found {
                     return Err(BuluError::TypeError {
                         message: format!("Missing field '{}' in struct literal", field.name),
@@ -1350,28 +1405,31 @@ impl TypeChecker {
                     });
                 }
             }
-            
+
             // Check for extra fields that don't exist in the struct
             for field_init in &struct_lit.fields {
                 let mut field_exists = false;
-                
+
                 for field in &struct_decl.fields {
                     if field.name == field_init.name {
                         field_exists = true;
                         break;
                     }
                 }
-                
+
                 if !field_exists {
                     return Err(BuluError::TypeError {
-                        message: format!("Unknown field '{}' in struct '{}'", field_init.name, struct_lit.type_name),
+                        message: format!(
+                            "Unknown field '{}' in struct '{}'",
+                            field_init.name, struct_lit.type_name
+                        ),
                         line: field_init.position.line,
                         column: field_init.position.column,
                         file: None,
                     });
                 }
             }
-            
+
             Ok(struct_type_id)
         } else {
             Err(BuluError::TypeError {
@@ -1413,6 +1471,58 @@ impl TypeChecker {
 
         // typeof() always returns a string containing the type name
         Ok(TypeId::String)
+    }
+
+    /// Type check a range expression
+    fn check_range_expression(&mut self, range: &RangeExpr) -> Result<TypeId> {
+        // Check start and end expressions
+        let start_type = self.check_expression(&range.start)?;
+        let end_type = self.check_expression(&range.end)?;
+
+        // Both start and end should be numeric types
+        if !PrimitiveType::is_numeric_type_id(start_type) {
+            return Err(BuluError::TypeError {
+                file: None,
+                message: format!(
+                    "Range start must be numeric, got {}",
+                    PrimitiveType::type_name(start_type)
+                ),
+                line: range.position.line,
+                column: range.position.column,
+            });
+        }
+
+        if !PrimitiveType::is_numeric_type_id(end_type) {
+            return Err(BuluError::TypeError {
+                file: None,
+                message: format!(
+                    "Range end must be numeric, got {}",
+                    PrimitiveType::type_name(end_type)
+                ),
+                line: range.position.line,
+                column: range.position.column,
+            });
+        }
+
+        // Check step if present
+        if let Some(ref step) = range.step {
+            let step_type = self.check_expression(step)?;
+            if !PrimitiveType::is_numeric_type_id(step_type) {
+                return Err(BuluError::TypeError {
+                    file: None,
+                    message: format!(
+                        "Range step must be numeric, got {}",
+                        PrimitiveType::type_name(step_type)
+                    ),
+                    line: range.position.line,
+                    column: range.position.column,
+                });
+            }
+        }
+
+        // For now, return a special Range type ID
+        // We'll need to add this to the TypeId enum
+        Ok(TypeId::Any) // Placeholder for now
     }
 
     /// Type check an async expression

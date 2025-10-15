@@ -124,6 +124,7 @@ impl BuiltinRegistry {
         self.register("append", builtin_append);
         self.register("copy", builtin_copy);
         self.register("delete", builtin_delete);
+        self.register("__range_to_array", builtin_range_to_array);
     }
 
     /// Register I/O functions
@@ -634,6 +635,54 @@ pub fn builtin_delete(args: &[RuntimeValue]) -> Result<RuntimeValue> {
             message: "delete() first argument must be a map".to_string(),
         }),
     }
+}
+
+/// Convert range to array: __range_to_array(start, end, inclusive)
+pub fn builtin_range_to_array(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "__range_to_array requires exactly 3 arguments".to_string(),
+        });
+    }
+
+    let start = match &args[0] {
+        RuntimeValue::Int64(i) => *i,
+        RuntimeValue::Int32(i) => *i as i64,
+        RuntimeValue::Integer(i) => *i,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "Range start must be an integer".to_string(),
+        }),
+    };
+
+    let end = match &args[1] {
+        RuntimeValue::Int64(i) => *i,
+        RuntimeValue::Int32(i) => *i as i64,
+        RuntimeValue::Integer(i) => *i,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "Range end must be an integer".to_string(),
+        }),
+    };
+
+    let inclusive = match &args[2] {
+        RuntimeValue::Bool(b) => *b,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "Range inclusive flag must be boolean".to_string(),
+        }),
+    };
+
+    // Create array from range
+    let mut array = Vec::new();
+    let actual_end = if inclusive { end + 1 } else { end };
+    
+    for i in start..actual_end {
+        array.push(RuntimeValue::Int64(i));
+    }
+
+    Ok(RuntimeValue::Array(array))
 }
 
 // ============================================================================

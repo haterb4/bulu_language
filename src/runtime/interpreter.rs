@@ -331,6 +331,47 @@ impl Interpreter {
                 }
                 Ok(RuntimeValue::Null)
             }
+            "__range_to_array" => {
+                // Convert range to array: __range_to_array(start, end, inclusive)
+                if args.len() != 3 {
+                    return Err(BuluError::Other(
+                        "__range_to_array requires exactly 3 arguments".to_string(),
+                    ));
+                }
+
+                let start_val = self.evaluate_expression(&args[0])?;
+                let end_val = self.evaluate_expression(&args[1])?;
+                let inclusive_val = self.evaluate_expression(&args[2])?;
+
+                let start = match start_val {
+                    RuntimeValue::Int64(i) => i,
+                    RuntimeValue::Int32(i) => i as i64,
+                    RuntimeValue::Integer(i) => i,
+                    _ => return Err(BuluError::Other("Range start must be an integer".to_string())),
+                };
+
+                let end = match end_val {
+                    RuntimeValue::Int64(i) => i,
+                    RuntimeValue::Int32(i) => i as i64,
+                    RuntimeValue::Integer(i) => i,
+                    _ => return Err(BuluError::Other("Range end must be an integer".to_string())),
+                };
+
+                let inclusive = match inclusive_val {
+                    RuntimeValue::Bool(b) => b,
+                    _ => return Err(BuluError::Other("Range inclusive flag must be boolean".to_string())),
+                };
+
+                // Create array from range
+                let mut array = Vec::new();
+                let actual_end = if inclusive { end + 1 } else { end };
+                
+                for i in start..actual_end {
+                    array.push(RuntimeValue::Int64(i));
+                }
+
+                Ok(RuntimeValue::Array(array))
+            }
             _ => {
                 // Unknown function, return null for now
                 Ok(RuntimeValue::Null)
@@ -1228,12 +1269,12 @@ impl Interpreter {
         let mut current_block = "bb0".to_string();
         let mut _visited_blocks: std::collections::HashSet<String> =
             std::collections::HashSet::new();
-        let max_iterations = 50; // Protection contre les boucles infinies
+        let max_iterations = 100000; // Protection contre les boucles infinies
         let mut iterations = 0;
 
         loop {
             iterations += 1;
-            if iterations > max_iterations {
+            if iterations > max_iterations || false {
                 return Err(BuluError::Other(
                     "Maximum iterations exceeded - possible infinite loop".to_string(),
                 ));
@@ -2116,6 +2157,87 @@ impl Interpreter {
                     }
                 }
             }
+            IrOpcode::LogicalAnd => {
+                if instruction.operands.len() != 2 {
+                    return Err(BuluError::Other(
+                        "LogicalAnd instruction requires exactly two operands".to_string(),
+                    ));
+                }
+
+                let left = self.evaluate_value(&instruction.operands[0])?;
+                let right = self.evaluate_value(&instruction.operands[1])?;
+
+                let result = match (&left, &right) {
+                    (RuntimeValue::Bool(b1), RuntimeValue::Bool(b2)) => {
+                        RuntimeValue::Bool(*b1 && *b2)
+                    }
+                    _ => {
+                        return Err(BuluError::Other(format!(
+                            "Cannot perform logical AND on {:?} and {:?}",
+                            left, right
+                        )));
+                    }
+                };
+
+                if let Some(result_reg) = &instruction.result {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.registers.insert(result_reg.id, result);
+                    }
+                }
+            }
+            IrOpcode::LogicalOr => {
+                if instruction.operands.len() != 2 {
+                    return Err(BuluError::Other(
+                        "LogicalOr instruction requires exactly two operands".to_string(),
+                    ));
+                }
+
+                let left = self.evaluate_value(&instruction.operands[0])?;
+                let right = self.evaluate_value(&instruction.operands[1])?;
+
+                let result = match (&left, &right) {
+                    (RuntimeValue::Bool(b1), RuntimeValue::Bool(b2)) => {
+                        RuntimeValue::Bool(*b1 || *b2)
+                    }
+                    _ => {
+                        return Err(BuluError::Other(format!(
+                            "Cannot perform logical OR on {:?} and {:?}",
+                            left, right
+                        )));
+                    }
+                };
+
+                if let Some(result_reg) = &instruction.result {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.registers.insert(result_reg.id, result);
+                    }
+                }
+            }
+            IrOpcode::LogicalNot => {
+                if instruction.operands.len() != 1 {
+                    return Err(BuluError::Other(
+                        "LogicalNot instruction requires exactly one operand".to_string(),
+                    ));
+                }
+
+                let operand = self.evaluate_value(&instruction.operands[0])?;
+
+                let result = match &operand {
+                    RuntimeValue::Bool(b) => RuntimeValue::Bool(!b),
+                    _ => {
+                        return Err(BuluError::Other(format!(
+                            "Cannot perform logical NOT on {:?}",
+                            operand
+                        )));
+                    }
+                };
+
+                if let Some(result_reg) = &instruction.result {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.registers.insert(result_reg.id, result);
+                    }
+                }
+            }
             IrOpcode::Cast => {
                 if instruction.operands.len() != 2 {
                     return Err(BuluError::Other(
@@ -2280,6 +2402,164 @@ impl Interpreter {
                                 )));
                             }
                         }
+                    }
+                };
+
+                // Store result in register if specified
+                if let Some(result_reg) = &instruction.result {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.registers.insert(result_reg.id, result);
+                    }
+                }
+            }
+            IrOpcode::ArrayLength => {
+                if instruction.operands.len() != 1 {
+                    return Err(BuluError::Other(
+                        "ArrayLength instruction requires exactly one operand".to_string(),
+                    ));
+                }
+
+                let array = self.evaluate_value(&instruction.operands[0])?;
+                let length = match array {
+                    RuntimeValue::Array(ref arr) => arr.len() as i64,
+                    RuntimeValue::Slice(ref slice) => slice.len() as i64,
+                    RuntimeValue::String(ref s) => s.len() as i64,
+                    _ => {
+                        return Err(BuluError::Other(format!(
+                            "Cannot get length of {:?}",
+                            array
+                        )));
+                    }
+                };
+
+                // Store result in register if specified
+                if let Some(result_reg) = &instruction.result {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.registers.insert(result_reg.id, RuntimeValue::Int64(length));
+                    }
+                }
+            }
+            IrOpcode::Alloca => {
+                if instruction.operands.len() != 1 {
+                    return Err(BuluError::Other(
+                        "Alloca instruction requires exactly one operand".to_string(),
+                    ));
+                }
+
+                let size = self.evaluate_value(&instruction.operands[0])?;
+                let array_size = match size {
+                    RuntimeValue::Int32(s) => s as usize,
+                    RuntimeValue::Int64(s) => s as usize,
+                    RuntimeValue::Integer(s) => s as usize,
+                    _ => {
+                        return Err(BuluError::Other(format!(
+                            "Array size must be an integer, got {:?}",
+                            size
+                        )));
+                    }
+                };
+
+                // Create an empty array with the specified size
+                let array = vec![RuntimeValue::Null; array_size];
+
+                // Store result in register if specified
+                if let Some(result_reg) = &instruction.result {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.registers.insert(result_reg.id, RuntimeValue::Array(array));
+                    }
+                }
+            }
+            IrOpcode::Store => {
+                if instruction.operands.len() != 3 {
+                    return Err(BuluError::Other(
+                        "Store instruction requires exactly three operands".to_string(),
+                    ));
+                }
+
+                let array = self.evaluate_value(&instruction.operands[0])?;
+                let index = self.evaluate_value(&instruction.operands[1])?;
+                let value = self.evaluate_value(&instruction.operands[2])?;
+
+                let array_index = match index {
+                    RuntimeValue::Int32(i) => i as usize,
+                    RuntimeValue::Int64(i) => i as usize,
+                    RuntimeValue::Integer(i) => i as usize,
+                    _ => {
+                        return Err(BuluError::Other(format!(
+                            "Array index must be an integer, got {:?}",
+                            index
+                        )));
+                    }
+                };
+
+                // Find the register that contains the array and update it
+                if let IrValue::Register(reg) = &instruction.operands[0] {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        if let Some(RuntimeValue::Array(ref mut arr)) = frame.registers.get_mut(&reg.id) {
+                            if array_index < arr.len() {
+                                arr[array_index] = value;
+                            } else {
+                                return Err(BuluError::Other(format!(
+                                    "Array index {} out of bounds for array of length {}",
+                                    array_index, arr.len()
+                                )));
+                            }
+                        } else {
+                            return Err(BuluError::Other(
+                                "Store target is not an array".to_string()
+                            ));
+                        }
+                    }
+                }
+            }
+            IrOpcode::ArrayAccess => {
+                if instruction.operands.len() != 2 {
+                    return Err(BuluError::Other(
+                        "ArrayAccess instruction requires exactly two operands".to_string(),
+                    ));
+                }
+
+                let array = self.evaluate_value(&instruction.operands[0])?;
+                let index = self.evaluate_value(&instruction.operands[1])?;
+
+                let array_index = match index {
+                    RuntimeValue::Int32(i) => i as usize,
+                    RuntimeValue::Int64(i) => i as usize,
+                    RuntimeValue::Integer(i) => i as usize,
+                    _ => {
+                        return Err(BuluError::Other(format!(
+                            "Array index must be an integer, got {:?}",
+                            index
+                        )));
+                    }
+                };
+
+                let result = match array {
+                    RuntimeValue::Array(ref arr) => {
+                        if array_index < arr.len() {
+                            arr[array_index].clone()
+                        } else {
+                            return Err(BuluError::Other(format!(
+                                "Array index {} out of bounds for array of length {}",
+                                array_index, arr.len()
+                            )));
+                        }
+                    }
+                    RuntimeValue::Slice(ref slice) => {
+                        if array_index < slice.len() {
+                            slice[array_index].clone()
+                        } else {
+                            return Err(BuluError::Other(format!(
+                                "Slice index {} out of bounds for slice of length {}",
+                                array_index, slice.len()
+                            )));
+                        }
+                    }
+                    _ => {
+                        return Err(BuluError::Other(format!(
+                            "Cannot access index on {:?}",
+                            array
+                        )));
                     }
                 };
 

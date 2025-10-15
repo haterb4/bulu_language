@@ -1132,7 +1132,8 @@ impl Parser {
             // Literal patterns (check for range patterns first)
             TokenType::IntegerLiteral => {
                 // Check if this is a range pattern by looking ahead
-                if self.peek_ahead(1).map(|t| &t.token_type) == Some(&TokenType::DotDotDot)
+                if self.peek_ahead(1).map(|t| &t.token_type) == Some(&TokenType::DotDot)
+                    || self.peek_ahead(1).map(|t| &t.token_type) == Some(&TokenType::DotDotDot)
                     || self.peek_ahead(1).map(|t| &t.token_type) == Some(&TokenType::DotDotLess)
                 {
                     self.parse_range_pattern()
@@ -1150,7 +1151,8 @@ impl Parser {
 
             TokenType::FloatLiteral => {
                 // Check if this is a range pattern by looking ahead
-                if self.peek_ahead(1).map(|t| &t.token_type) == Some(&TokenType::DotDotDot)
+                if self.peek_ahead(1).map(|t| &t.token_type) == Some(&TokenType::DotDot)
+                    || self.peek_ahead(1).map(|t| &t.token_type) == Some(&TokenType::DotDotDot)
                     || self.peek_ahead(1).map(|t| &t.token_type) == Some(&TokenType::DotDotLess)
                 {
                     self.parse_range_pattern()
@@ -1261,8 +1263,10 @@ impl Parser {
             true
         } else if self.match_token(&TokenType::DotDotLess) {
             false
+        } else if self.match_token(&TokenType::DotDot) {
+            false  // 0..10 is exclusive like Rust
         } else {
-            return Err(self.error("Expected range operator (...) or (..<)"));
+            return Err(self.error("Expected range operator (..), (..<) or (...)"));
         };
 
         // Parse end value
@@ -1948,7 +1952,7 @@ impl Parser {
     fn parse_or(&mut self) -> Result<Expression> {
         let mut expr = self.parse_and()?;
 
-        while self.match_token(&TokenType::Or) {
+        while self.match_tokens(&[TokenType::Or, TokenType::LogicalOr]) {
             let pos = expr.position();
             let right = self.parse_and()?;
             expr = Expression::Binary(BinaryExpr {
@@ -1966,7 +1970,7 @@ impl Parser {
     fn parse_and(&mut self) -> Result<Expression> {
         let mut expr = self.parse_equality()?;
 
-        while self.match_token(&TokenType::And) {
+        while self.match_tokens(&[TokenType::And, TokenType::LogicalAnd]) {
             let pos = expr.position();
             let right = self.parse_equality()?;
             expr = Expression::Binary(BinaryExpr {
@@ -2037,8 +2041,9 @@ impl Parser {
     fn parse_range(&mut self) -> Result<Expression> {
         let mut expr = self.parse_term()?;
 
-        if self.match_tokens(&[TokenType::DotDotLess, TokenType::DotDotDot]) {
+        if self.match_tokens(&[TokenType::DotDot, TokenType::DotDotLess, TokenType::DotDotDot]) {
             let inclusive = match self.previous().token_type {
+                TokenType::DotDot => false,     // 0..10 (exclusive, like Rust)
                 TokenType::DotDotLess => false, // 0..<10 (exclusive)
                 TokenType::DotDotDot => true,   // 0...10 (inclusive)
                 _ => unreachable!(),
