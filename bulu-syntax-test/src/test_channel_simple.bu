@@ -1,0 +1,7 @@
+func main() {
+    println("Test channel simple")
+    
+    // Test avec make(chan)
+    let ch = make(chan)
+    println("Channel créé: " + ch.toString())
+}

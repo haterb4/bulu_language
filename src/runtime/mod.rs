@@ -5,7 +5,8 @@
 //! and error handling.
 
 pub mod gc;
-pub mod scheduler;
+// pub mod scheduler; // Removed - using new goroutine system
+pub mod goroutine;
 pub mod builtins;
 pub mod memory;
 pub mod error_handler;
@@ -21,7 +22,7 @@ pub mod ast_interpreter;
 #[cfg(test)]
 mod test_import_export;
 
-pub use scheduler::Scheduler;
+// pub use scheduler::Scheduler; // Removed - using new goroutine system
 pub use gc::GarbageCollector;
 pub use error_handler::{ErrorHandler, RuntimeError, ErrorType, ErrorFormatter};
 pub use channels::{Channel, ChannelRegistry, ChannelResult, SendResult};

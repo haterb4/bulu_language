@@ -1,0 +1,9 @@
+func main() {
+    println("Test 1: make([]int32)")
+    let arr = make([]int32)
+    println("Résultat: " + arr.toString())
+    
+    println("Test 2: make([]int32, 5)")
+    let arr2 = make([]int32, 5)
+    println("Résultat: " + arr2.toString())
+}

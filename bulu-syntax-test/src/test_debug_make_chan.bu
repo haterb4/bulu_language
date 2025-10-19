@@ -1,0 +1,6 @@
+// Test pour déboguer make(chan) spécifiquement
+func main() {
+    print("Test make(chan)")
+    let x = make(chan)
+    print("make(chan) fonctionne: " + x)
+}

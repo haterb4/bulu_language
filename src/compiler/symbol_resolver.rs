@@ -711,11 +711,26 @@ impl SymbolResolver {
 
     /// Check if a name is a built-in function or keyword
     fn is_builtin(&self, name: &str) -> bool {
-        matches!(
+        // Check exact matches first
+        if matches!(
             name,
             "print" | "println" | "len" | "append" | "make" | "clone" | "typeof" | "instanceof"
                 | "panic" | "recover" | "assert" | "input" | "sleep" | "timer" | "lock" | "toString"
-        )
+                // Primitive type identifiers
+                | "int8" | "int16" | "int32" | "int64"
+                | "uint8" | "uint16" | "uint32" | "uint64"
+                | "float32" | "float64" | "bool" | "char"
+                | "string" | "any" | "unknown" | "chan"
+        ) {
+            return true;
+        }
+        
+        // Check patterns for generated type identifiers
+        if name.starts_with("chan_") || name.starts_with("slice_") || name.starts_with("array_") || name.starts_with("map_") {
+            return true;
+        }
+        
+        false
     }
 
     /// Get the symbol table

@@ -1,0 +1,5 @@
+// Test simple pour vérifier si int32 est reconnu
+func main() {
+    print("Test simple")
+    print(int32)
+}

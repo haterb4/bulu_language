@@ -1,0 +1,17 @@
+func main() {
+    println("=== Test send/receive simple ===")
+    
+    // Créer un channel buffered
+    let ch = make(chan int32, 1)
+    println("Channel créé: " + ch.toString())
+    
+    // Envoyer une valeur
+    ch <- 42
+    println("Valeur 42 envoyée")
+    
+    // Recevoir la valeur
+    let received = <-ch
+    println("Valeur reçue: " + received.toString())
+    
+    println("Test terminé")
+}

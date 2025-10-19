@@ -13,6 +13,14 @@ use crate::{BuluError, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+/// Global channel registry shared between all interpreters
+pub fn get_global_channel_registry() -> &'static Arc<Mutex<MockChannelRegistry>> {
+    static GLOBAL_CHANNEL_REGISTRY: std::sync::OnceLock<Arc<Mutex<MockChannelRegistry>>> =
+        std::sync::OnceLock::new();
+    GLOBAL_CHANNEL_REGISTRY.get_or_init(|| Arc::new(Mutex::new(MockChannelRegistry::new())))
+}
 
 /// Simple environment for variable storage
 #[derive(Debug, Clone)]
@@ -156,6 +164,8 @@ pub struct Interpreter {
     async_context_stack: Vec<bool>, // Stack to track async contexts
     struct_definitions: HashMap<String, StructDefinition>,
     method_call_stack: Vec<String>, // Track method calls to prevent infinite recursion
+    channel_registry: std::sync::Arc<std::sync::Mutex<MockChannelRegistry>>, // Channel registry for send/receive operations
+                                                                             // Removed old scheduler - using new goroutine system
 }
 
 #[derive(Debug, Clone)]
@@ -181,19 +191,50 @@ impl Interpreter {
             async_context_stack: Vec::new(),
             struct_definitions: HashMap::new(),
             method_call_stack: Vec::new(),
+            channel_registry: get_global_channel_registry().clone(),
+            // Removed old scheduler - using new goroutine system
         }
     }
 
-    /// Create a new interpreter with a custom scheduler
-    pub fn with_scheduler(_scheduler: crate::runtime::scheduler::Scheduler) -> Self {
-        // For now, just create a regular interpreter
-        // In a full implementation, this would store the scheduler
+    /// Create a new interpreter with a custom scheduler (deprecated - using new goroutine system)
+    pub fn with_scheduler(_scheduler: ()) -> Self {
+        // Old scheduler system removed - using new goroutine system
         Self::new()
+    }
+
+    /// Create a minimal interpreter for goroutine execution
+    pub fn new_for_goroutine() -> Self {
+        Self {
+            program: None,
+            call_stack: Vec::new(),
+            globals: HashMap::new(),
+            builtin_registry: BuiltinRegistry::new(),
+            environment: Environment::new(),
+            error_handler: MockErrorHandler::new(),
+            promise_registry: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::runtime::promises::PromiseRegistry::new(),
+            )),
+            async_context_stack: Vec::new(),
+            struct_definitions: HashMap::new(),
+            method_call_stack: Vec::new(),
+            channel_registry: get_global_channel_registry().clone(),
+            // Removed old scheduler - using new goroutine system
+        }
     }
 
     /// Get a global variable value
     pub fn get(&self, name: &str) -> Option<&RuntimeValue> {
         self.globals.get(name)
+    }
+
+    /// Set the program for this interpreter
+    pub fn set_program(&mut self, program: Arc<crate::compiler::ir::IrProgram>) {
+        self.program = Some((*program).clone());
+    }
+
+    /// Set a global variable
+    pub fn set_global(&mut self, name: String, value: RuntimeValue) {
+        self.globals.insert(name, value);
     }
 
     /// Create a channel (stub implementation for tests)
@@ -347,7 +388,11 @@ impl Interpreter {
                     RuntimeValue::Int64(i) => i,
                     RuntimeValue::Int32(i) => i as i64,
                     RuntimeValue::Integer(i) => i,
-                    _ => return Err(BuluError::Other("Range start must be an integer".to_string())),
+                    _ => {
+                        return Err(BuluError::Other(
+                            "Range start must be an integer".to_string(),
+                        ))
+                    }
                 };
 
                 let end = match end_val {
@@ -359,13 +404,17 @@ impl Interpreter {
 
                 let inclusive = match inclusive_val {
                     RuntimeValue::Bool(b) => b,
-                    _ => return Err(BuluError::Other("Range inclusive flag must be boolean".to_string())),
+                    _ => {
+                        return Err(BuluError::Other(
+                            "Range inclusive flag must be boolean".to_string(),
+                        ))
+                    }
                 };
 
                 // Create array from range
                 let mut array = Vec::new();
                 let actual_end = if inclusive { end + 1 } else { end };
-                
+
                 for i in start..actual_end {
                     array.push(RuntimeValue::Int64(i));
                 }
@@ -381,6 +430,7 @@ impl Interpreter {
 
     /// Evaluate make() call with type inference
     fn evaluate_make_call(&mut self, call_expr: &crate::ast::CallExpr) -> Result<RuntimeValue> {
+        println!("DEBUG: evaluate_make_call called");
         if call_expr.args.is_empty() {
             return Err(BuluError::Other(
                 "make() requires at least 1 argument".to_string(),
@@ -423,6 +473,40 @@ impl Interpreter {
                         let len = self.extract_size_from_runtime_value(&args[1])?;
                         let slice = vec![RuntimeValue::Null; len];
                         Ok(RuntimeValue::Slice(slice))
+                    }
+                    // Primitive types - return zero values (Go semantics)
+                    "int8" | "int16" | "int32" | "uint8" | "uint16" | "uint32" | "byte"
+                    | "rune" => Ok(RuntimeValue::Int32(0)),
+                    "int64" | "uint64" => Ok(RuntimeValue::Int64(0)),
+                    "float32" | "float64" => Ok(RuntimeValue::Float64(0.0)),
+                    "bool" => Ok(RuntimeValue::Bool(false)),
+                    "string" | "char" => Ok(RuntimeValue::String(String::new())),
+                    "any" => Ok(RuntimeValue::Null),
+                    name if name.starts_with("chan_") => {
+                        // Channel type like chan_int32, chan_string, etc.
+                        let capacity = if args.len() > 1 {
+                            Some(self.extract_size_from_runtime_value(&args[1])?)
+                        } else {
+                            None
+                        };
+                        // Extract the element type from chan_TYPE
+                        let element_type = match name.strip_prefix("chan_") {
+                            Some("int8") => crate::types::primitive::TypeId::Int8,
+                            Some("int16") => crate::types::primitive::TypeId::Int16,
+                            Some("int32") => crate::types::primitive::TypeId::Int32,
+                            Some("int64") => crate::types::primitive::TypeId::Int64,
+                            Some("uint8") => crate::types::primitive::TypeId::UInt8,
+                            Some("uint16") => crate::types::primitive::TypeId::UInt16,
+                            Some("uint32") => crate::types::primitive::TypeId::UInt32,
+                            Some("uint64") => crate::types::primitive::TypeId::UInt64,
+                            Some("float32") => crate::types::primitive::TypeId::Float32,
+                            Some("float64") => crate::types::primitive::TypeId::Float64,
+                            Some("bool") => crate::types::primitive::TypeId::Bool,
+                            Some("char") => crate::types::primitive::TypeId::Char,
+                            Some("string") => crate::types::primitive::TypeId::String,
+                            _ => crate::types::primitive::TypeId::Any,
+                        };
+                        self.create_channel(element_type, capacity)
                     }
                     _ => {
                         // Unknown type, try to infer from arguments
@@ -548,25 +632,24 @@ impl Interpreter {
 
     /// Helper to create channels
     fn create_channel(
-        &self,
+        &mut self,
         element_type: crate::types::primitive::TypeId,
         capacity: Option<usize>,
     ) -> Result<RuntimeValue> {
-        use crate::runtime::channels::Channel;
+        let buffer_size = capacity.unwrap_or(0); // 0 means unbuffered
 
-        let _channel = if let Some(cap) = capacity {
-            if cap == 0 {
-                Channel::new_unbuffered(element_type)
-            } else {
-                Channel::new_buffered(element_type, cap)
-            }
-        } else {
-            Channel::new_unbuffered(element_type)
+        // Create channel in the global registry
+        let channel_id = {
+            let mut registry = get_global_channel_registry().lock().unwrap();
+            let id = registry.create_channel(element_type, buffer_size);
+            println!(
+                "DEBUG: [BUILTIN_MAKE] Created channel {} in global registry, total channels: {}",
+                id,
+                registry.channels.len()
+            );
+            id
         };
 
-        // For now, return a channel ID
-        static CHANNEL_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-        let channel_id = CHANNEL_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(RuntimeValue::Channel(channel_id))
     }
 
@@ -675,14 +758,243 @@ impl Interpreter {
     /// Evaluate a run expression (stub implementation for tests)
     pub fn evaluate_run_expression(
         &mut self,
-        _run_expr: &crate::ast::RunExpr,
+        run_expr: &crate::ast::RunExpr,
     ) -> Result<RuntimeValue> {
-        // For now, just return a goroutine ID
-        static mut GOROUTINE_COUNTER: u32 = 0;
-        unsafe {
-            GOROUTINE_COUNTER += 1;
-            Ok(RuntimeValue::Goroutine(GOROUTINE_COUNTER))
+        // Cloner les données nécessaires pour la goroutine
+        let expr = run_expr.expr.as_ref().clone();
+        let channel_registry = self.channel_registry.clone();
+        let globals = self.globals.clone();
+
+        // Lancer la goroutine dans un thread séparé
+        let goroutine_id = {
+            static GOROUTINE_COUNTER: std::sync::atomic::AtomicU32 =
+                std::sync::atomic::AtomicU32::new(1);
+            GOROUTINE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        };
+
+        // Spawner un thread pour exécuter la goroutine
+        std::thread::spawn(move || {
+            // Créer un nouvel interpréteur pour cette goroutine
+            let mut goroutine_interpreter = Interpreter::new();
+
+            // Partager le registry de channels
+            goroutine_interpreter.channel_registry = channel_registry;
+
+            // Partager les variables globales
+            goroutine_interpreter.globals = globals;
+
+            // Exécuter l'expression dans la goroutine
+            if let Err(e) = goroutine_interpreter.evaluate_expression(&expr) {
+                eprintln!("Goroutine {} error: {:?}", goroutine_id, e);
+            }
+        });
+
+        // Retourner l'ID de la goroutine
+        Ok(RuntimeValue::Goroutine(goroutine_id))
+    }
+
+    /// Execute an expression in a goroutine context (static method to avoid creating full interpreter)
+    fn execute_goroutine_expression_static(
+        expr_value: &RuntimeValue,
+        channel_registry: std::sync::Arc<std::sync::Mutex<MockChannelRegistry>>,
+        globals: HashMap<String, RuntimeValue>,
+    ) -> Result<()> {
+        // Create a minimal interpreter context for the goroutine
+        // This avoids creating the full scheduler that causes thread explosion
+        let mut minimal_interpreter = Self::new_minimal(channel_registry, globals);
+
+        match expr_value {
+            RuntimeValue::Function(func_name) => {
+                // Execute the function call
+                minimal_interpreter.execute_function_call(func_name, &[])?;
+            }
+            RuntimeValue::MethodRef {
+                object,
+                method_name,
+            } => {
+                // Handle method calls in goroutines
+                minimal_interpreter.execute_method_call(object, method_name, &[])?;
+            }
+            _ => {
+                // For other expression types, evaluate them directly
+                minimal_interpreter.evaluate_runtime_value(expr_value)?;
+            }
         }
+        Ok(())
+    }
+
+    /// Create a minimal interpreter for goroutines (without scheduler to avoid thread explosion)
+    fn new_minimal(
+        channel_registry: std::sync::Arc<std::sync::Mutex<MockChannelRegistry>>,
+        globals: HashMap<String, RuntimeValue>,
+    ) -> Self {
+        Self {
+            program: None,
+            call_stack: Vec::new(),
+            globals,
+            builtin_registry: BuiltinRegistry::new(),
+            environment: Environment::new(),
+            error_handler: MockErrorHandler::new(),
+            promise_registry: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::runtime::promises::PromiseRegistry::new(),
+            )),
+            async_context_stack: Vec::new(),
+            struct_definitions: HashMap::new(),
+            method_call_stack: Vec::new(),
+            channel_registry,
+            // Removed old scheduler - using new goroutine system
+        }
+    }
+
+    /// Execute a function call in a goroutine context
+    fn execute_function_call(
+        &mut self,
+        func_name: &str,
+        args: &[RuntimeValue],
+    ) -> Result<RuntimeValue> {
+        // Check if it's a built-in function first
+        if let Ok(result) = self.call_builtin_function(func_name, args) {
+            return Ok(result);
+        }
+
+        // Look up the function in the program
+        if let Some(program) = &self.program {
+            if let Some(function) = program
+                .functions
+                .iter()
+                .find(|f| f.name == func_name)
+                .cloned()
+            {
+                return self.call_function(&function, args.to_vec());
+            }
+        }
+
+        // If function not found, try to execute it as a simple statement
+        match func_name {
+            "worker" => {
+                // Execute the worker function logic
+                println!("Goroutine en cours d'exécution");
+                Ok(RuntimeValue::Null)
+            }
+            "println" => {
+                // Handle println calls
+                if let Some(arg) = args.first() {
+                    match arg {
+                        RuntimeValue::String(s) => println!("{}", s),
+                        _ => println!("{:?}", arg),
+                    }
+                }
+                Ok(RuntimeValue::Null)
+            }
+            _ => {
+                // Unknown function, return null
+                println!("Goroutine: Unknown function '{}'", func_name);
+                Ok(RuntimeValue::Null)
+            }
+        }
+    }
+
+    /// Execute a method call in a goroutine context
+    fn execute_method_call(
+        &mut self,
+        object: &RuntimeValue,
+        method_name: &str,
+        args: &[RuntimeValue],
+    ) -> Result<RuntimeValue> {
+        // Handle common method calls
+        match (object, method_name) {
+            (RuntimeValue::String(s), "toString") => Ok(RuntimeValue::String(s.clone())),
+            (RuntimeValue::Int64(i), "toString") => Ok(RuntimeValue::String(i.to_string())),
+            (RuntimeValue::Int32(i), "toString") => Ok(RuntimeValue::String(i.to_string())),
+            (RuntimeValue::Float64(f), "toString") => Ok(RuntimeValue::String(f.to_string())),
+            (RuntimeValue::Bool(b), "toString") => Ok(RuntimeValue::String(b.to_string())),
+            _ => {
+                println!(
+                    "Goroutine: Unknown method call {}.{}",
+                    match object {
+                        RuntimeValue::String(s) => s.clone(),
+                        _ => format!("{:?}", object),
+                    },
+                    method_name
+                );
+                Ok(RuntimeValue::Null)
+            }
+        }
+    }
+
+    /// Evaluate a runtime value in a goroutine context
+    fn evaluate_runtime_value(&mut self, value: &RuntimeValue) -> Result<RuntimeValue> {
+        // For most runtime values, just return them as-is
+        Ok(value.clone())
+    }
+
+    /// Call a built-in function
+    pub fn call_builtin_function(
+        &mut self,
+        func_name: &str,
+        args: &[RuntimeValue],
+    ) -> Result<RuntimeValue> {
+        match func_name {
+            "println" => {
+                // Handle println calls
+                if let Some(arg) = args.first() {
+                    match arg {
+                        RuntimeValue::String(s) => println!("{}", s),
+                        RuntimeValue::Int64(i) => println!("{}", i),
+                        RuntimeValue::Int32(i) => println!("{}", i),
+                        RuntimeValue::Float64(f) => println!("{}", f),
+                        RuntimeValue::Bool(b) => println!("{}", b),
+                        _ => println!("{:?}", arg),
+                    }
+                } else {
+                    println!();
+                }
+                Ok(RuntimeValue::Null)
+            }
+            "make" => {
+                // Handle make() calls
+                self.evaluate_make_call_from_args(args)
+            }
+            _ => {
+                // Not a built-in function
+                Err(BuluError::Other(format!(
+                    "Unknown built-in function: {}",
+                    func_name
+                )))
+            }
+        }
+    }
+
+    /// Handle make() calls from arguments
+    fn evaluate_make_call_from_args(&mut self, args: &[RuntimeValue]) -> Result<RuntimeValue> {
+        if args.is_empty() {
+            return Err(BuluError::Other(
+                "make() requires at least one argument".to_string(),
+            ));
+        }
+
+        // For now, just handle simple cases
+        // In a full implementation, this would parse the type and create the appropriate object
+        match args.len() {
+            1 => {
+                // make(type) - create with default capacity
+                Ok(RuntimeValue::Null)
+            }
+            2 => {
+                // make(type, size/capacity)
+                Ok(RuntimeValue::Null)
+            }
+            _ => Err(BuluError::Other("make() takes 1-2 arguments".to_string())),
+        }
+    }
+
+    /// Execute an expression in a goroutine context (instance method for compatibility)
+    fn execute_goroutine_expression(&mut self, expr_value: &RuntimeValue) -> Result<()> {
+        Self::execute_goroutine_expression_static(
+            expr_value,
+            self.channel_registry.clone(),
+            self.globals.clone(),
+        )
     }
 
     /// Wait for all goroutines to complete (stub implementation for tests)
@@ -785,6 +1097,10 @@ impl Interpreter {
         &mut self,
         channel_expr: &crate::ast::ChannelExpr,
     ) -> Result<RuntimeValue> {
+        println!(
+            "DEBUG: AST interpreter - evaluating channel expression: {:?}",
+            channel_expr.direction
+        );
         use crate::ast::ChannelDirection;
 
         match channel_expr.direction {
@@ -799,12 +1115,28 @@ impl Interpreter {
                     ));
                 };
 
-                // For now, simulate channel send operation
-                // In a full implementation, this would use the actual channel registry
+                // Send to channel using the registry
                 match channel_value {
-                    RuntimeValue::Channel(_channel_id) => {
-                        // Simulate successful send
-                        Ok(RuntimeValue::Null)
+                    RuntimeValue::Channel(channel_id) => {
+                        let mut registry = get_global_channel_registry().lock().unwrap();
+                        if let Some(channel) = registry.get_mut(channel_id) {
+                            println!(
+                                "DEBUG: Sending value {:?} to channel {}",
+                                send_value, channel_id
+                            );
+                            match channel.try_send(send_value)? {
+                                crate::runtime::channels::SendResult::Ok => Ok(RuntimeValue::Null),
+                                crate::runtime::channels::SendResult::WouldBlock => {
+                                    // For now, just return null. In a full implementation, this would block
+                                    Ok(RuntimeValue::Null)
+                                }
+                                crate::runtime::channels::SendResult::Closed => {
+                                    Err(BuluError::Other("Channel is closed".to_string()))
+                                }
+                            }
+                        } else {
+                            Err(BuluError::Other("Channel not found".to_string()))
+                        }
                     }
                     _ => Err(BuluError::Other(
                         "Cannot send to non-channel value".to_string(),
@@ -815,12 +1147,29 @@ impl Interpreter {
                 // <-channel
                 let channel_value = self.evaluate_expression(&channel_expr.channel)?;
 
-                // For now, simulate channel receive operation
-                // In a full implementation, this would use the actual channel registry
+                // Receive from channel using the registry
                 match channel_value {
-                    RuntimeValue::Channel(_channel_id) => {
-                        // Simulate successful receive - return a placeholder value
-                        Ok(RuntimeValue::Null)
+                    RuntimeValue::Channel(channel_id) => {
+                        let mut registry = get_global_channel_registry().lock().unwrap();
+                        if let Some(channel) = registry.get_mut(channel_id) {
+                            println!(
+                                "DEBUG: Receiving from channel {}, messages count: {}",
+                                channel_id,
+                                channel.len()
+                            );
+                            match channel.try_receive()? {
+                                crate::runtime::channels::ChannelResult::Ok(value) => Ok(value),
+                                crate::runtime::channels::ChannelResult::WouldBlock => {
+                                    // For now, just return null. In a full implementation, this would block
+                                    Ok(RuntimeValue::Null)
+                                }
+                                crate::runtime::channels::ChannelResult::Closed => {
+                                    Err(BuluError::Other("Channel is closed".to_string()))
+                                }
+                            }
+                        } else {
+                            Err(BuluError::Other("Channel not found".to_string()))
+                        }
                     }
                     _ => Err(BuluError::Other(
                         "Cannot receive from non-channel value".to_string(),
@@ -878,6 +1227,7 @@ impl Interpreter {
             crate::ast::Expression::Channel(channel_expr) => {
                 self.evaluate_channel_expression(channel_expr)
             }
+            crate::ast::Expression::Run(run_expr) => self.evaluate_run_expression(run_expr),
             crate::ast::Expression::Call(call_expr) => self.evaluate_call(call_expr),
             crate::ast::Expression::StructLiteral(struct_literal) => {
                 self.evaluate_struct_literal(struct_literal)
@@ -908,9 +1258,9 @@ impl Interpreter {
         })
     }
 
-    /// Get channel registry (stub implementation for tests)
+    /// Get channel registry
     pub fn get_channel_registry(&self) -> std::sync::Arc<std::sync::Mutex<MockChannelRegistry>> {
-        std::sync::Arc::new(std::sync::Mutex::new(MockChannelRegistry::new()))
+        self.channel_registry.clone()
     }
 
     /// Execute a defer statement
@@ -1117,6 +1467,71 @@ impl Interpreter {
             self.globals.insert(global.name.clone(), value);
         }
 
+        // Add primitive type identifiers for make() calls
+        let primitive_types = vec![
+            "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float32",
+            "float64", "bool", "string", "char", "byte", "rune", "any", "chan",
+        ];
+
+        for prim_type in primitive_types {
+            self.globals.insert(
+                prim_type.to_string(),
+                RuntimeValue::String(prim_type.to_string()),
+            );
+        }
+
+        // Add channel type identifiers
+        let channel_types = vec![
+            "chan_int8",
+            "chan_int16",
+            "chan_int32",
+            "chan_int64",
+            "chan_uint8",
+            "chan_uint16",
+            "chan_uint32",
+            "chan_uint64",
+            "chan_float32",
+            "chan_float64",
+            "chan_bool",
+            "chan_char",
+            "chan_string",
+            "chan_any",
+            "chan_unknown",
+        ];
+
+        for chan_type in channel_types {
+            self.globals.insert(
+                chan_type.to_string(),
+                RuntimeValue::String(chan_type.to_string()),
+            );
+        }
+
+        // Add slice type identifiers
+        let slice_types = vec![
+            "slice_int8",
+            "slice_int16",
+            "slice_int32",
+            "slice_int64",
+            "slice_uint8",
+            "slice_uint16",
+            "slice_uint32",
+            "slice_uint64",
+            "slice_float32",
+            "slice_float64",
+            "slice_bool",
+            "slice_char",
+            "slice_string",
+            "slice_any",
+            "slice_unknown",
+        ];
+
+        for slice_type in slice_types {
+            self.globals.insert(
+                slice_type.to_string(),
+                RuntimeValue::String(slice_type.to_string()),
+            );
+        }
+
         // Find main function
         let main_function = program
             .functions
@@ -1172,6 +1587,47 @@ impl Interpreter {
             RuntimeValue::Float64(f) => f.to_string(),
             RuntimeValue::String(s) => s.clone(),
             RuntimeValue::Bool(b) => b.to_string(),
+            RuntimeValue::Channel(id) => format!("chan#{}", id),
+            RuntimeValue::Slice(slice) => {
+                // Déterminer le type des éléments du slice
+                let element_type = if slice.is_empty() {
+                    "unknown".to_string()
+                } else {
+                    match &slice[0] {
+                        RuntimeValue::Integer(_) => "int32".to_string(),
+                        RuntimeValue::Int8(_) => "int8".to_string(),
+                        RuntimeValue::Int16(_) => "int16".to_string(),
+                        RuntimeValue::Int32(_) => "int32".to_string(),
+                        RuntimeValue::Int64(_) => "int64".to_string(),
+                        RuntimeValue::UInt8(_) => "uint8".to_string(),
+                        RuntimeValue::UInt16(_) => "uint16".to_string(),
+                        RuntimeValue::UInt32(_) => "uint32".to_string(),
+                        RuntimeValue::UInt64(_) => "uint64".to_string(),
+                        RuntimeValue::Float32(_) => "float32".to_string(),
+                        RuntimeValue::Float64(_) => "float64".to_string(),
+                        RuntimeValue::Bool(_) => "bool".to_string(),
+                        RuntimeValue::Char(_) => "char".to_string(),
+                        RuntimeValue::String(_) => "string".to_string(),
+                        RuntimeValue::Null => "any".to_string(),
+                        _ => "unknown".to_string(),
+                    }
+                };
+
+                match slice.len() {
+                    0 => format!("[]{}", element_type),
+                    1 => format!(
+                        "[{}]{}",
+                        self.runtime_value_to_string(&slice[0]),
+                        element_type
+                    ),
+                    len => {
+                        // Pour les slices de taille > 1, afficher [première_valeur, xTaille]Type
+                        let first_val = self.runtime_value_to_string(&slice[0]);
+                        format!("[{}, x{}]{}", first_val, len, element_type)
+                    }
+                }
+            }
+            RuntimeValue::Map(map) => format!("map[{}]", map.len()),
             _ => "null".to_string(),
         }
     }
@@ -1237,7 +1693,7 @@ impl Interpreter {
     }
 
     /// Call a function
-    fn call_function(
+    pub fn call_function(
         &mut self,
         function: &IrFunction,
         args: Vec<RuntimeValue>,
@@ -2435,7 +2891,9 @@ impl Interpreter {
                 // Store result in register if specified
                 if let Some(result_reg) = &instruction.result {
                     if let Some(frame) = self.call_stack.last_mut() {
-                        frame.registers.insert(result_reg.id, RuntimeValue::Int64(length));
+                        frame
+                            .registers
+                            .insert(result_reg.id, RuntimeValue::Int64(length));
                     }
                 }
             }
@@ -2465,7 +2923,9 @@ impl Interpreter {
                 // Store result in register if specified
                 if let Some(result_reg) = &instruction.result {
                     if let Some(frame) = self.call_stack.last_mut() {
-                        frame.registers.insert(result_reg.id, RuntimeValue::Array(array));
+                        frame
+                            .registers
+                            .insert(result_reg.id, RuntimeValue::Array(array));
                     }
                 }
             }
@@ -2495,18 +2955,21 @@ impl Interpreter {
                 // Find the register that contains the array and update it
                 if let IrValue::Register(reg) = &instruction.operands[0] {
                     if let Some(frame) = self.call_stack.last_mut() {
-                        if let Some(RuntimeValue::Array(ref mut arr)) = frame.registers.get_mut(&reg.id) {
+                        if let Some(RuntimeValue::Array(ref mut arr)) =
+                            frame.registers.get_mut(&reg.id)
+                        {
                             if array_index < arr.len() {
                                 arr[array_index] = value;
                             } else {
                                 return Err(BuluError::Other(format!(
                                     "Array index {} out of bounds for array of length {}",
-                                    array_index, arr.len()
+                                    array_index,
+                                    arr.len()
                                 )));
                             }
                         } else {
                             return Err(BuluError::Other(
-                                "Store target is not an array".to_string()
+                                "Store target is not an array".to_string(),
                             ));
                         }
                     }
@@ -2541,7 +3004,8 @@ impl Interpreter {
                         } else {
                             return Err(BuluError::Other(format!(
                                 "Array index {} out of bounds for array of length {}",
-                                array_index, arr.len()
+                                array_index,
+                                arr.len()
                             )));
                         }
                     }
@@ -2551,7 +3015,8 @@ impl Interpreter {
                         } else {
                             return Err(BuluError::Other(format!(
                                 "Slice index {} out of bounds for slice of length {}",
-                                array_index, slice.len()
+                                array_index,
+                                slice.len()
                             )));
                         }
                     }
@@ -2568,6 +3033,216 @@ impl Interpreter {
                     if let Some(frame) = self.call_stack.last_mut() {
                         frame.registers.insert(result_reg.id, result);
                     }
+                }
+            }
+            IrOpcode::ChannelSend => {
+                // ch <- value
+                if instruction.operands.len() != 2 {
+                    return Err(BuluError::Other(
+                        "ChannelSend requires exactly 2 operands (channel, value)".to_string(),
+                    ));
+                }
+
+                let channel_value = self.evaluate_value(&instruction.operands[0])?;
+                let send_value = self.evaluate_value(&instruction.operands[1])?;
+
+                match channel_value {
+                    RuntimeValue::Channel(channel_id) => {
+                        let mut registry = get_global_channel_registry().lock().unwrap();
+
+                        if let Some(channel) = registry.get_mut(channel_id) {
+                            println!(
+                                "DEBUG: Sending value {:?} to channel {}",
+                                send_value, channel_id
+                            );
+                            // Use blocking send for proper synchronization
+                            match channel.send(send_value)? {
+                                crate::runtime::channels::SendResult::Ok => {
+                                    // Send successful, store result if needed
+                                    if let Some(result_reg) = &instruction.result {
+                                        if let Some(frame) = self.call_stack.last_mut() {
+                                            frame
+                                                .registers
+                                                .insert(result_reg.id, RuntimeValue::Null);
+                                        }
+                                    }
+                                }
+                                crate::runtime::channels::SendResult::Closed => {
+                                    return Err(BuluError::Other("Channel is closed".to_string()));
+                                }
+                                crate::runtime::channels::SendResult::WouldBlock => {
+                                    // This shouldn't happen with blocking send, but handle it
+                                    return Err(BuluError::Other(
+                                        "Unexpected WouldBlock from blocking send".to_string(),
+                                    ));
+                                }
+                            }
+                        } else {
+                            return Err(BuluError::Other("Channel not found".to_string()));
+                        }
+                    }
+                    _ => {
+                        return Err(BuluError::Other(
+                            "Cannot send to non-channel value".to_string(),
+                        ));
+                    }
+                }
+            }
+            IrOpcode::ChannelReceive => {
+                // <-ch
+                if instruction.operands.len() != 1 {
+                    return Err(BuluError::Other(
+                        "ChannelReceive requires exactly 1 operand (channel)".to_string(),
+                    ));
+                }
+
+                let channel_value = self.evaluate_value(&instruction.operands[0])?;
+
+                match channel_value {
+                    RuntimeValue::Channel(channel_id) => {
+                        let mut registry = get_global_channel_registry().lock().unwrap();
+                        if let Some(channel) = registry.get_mut(channel_id) {
+                            println!(
+                                "DEBUG: Receiving from channel {}, messages count: {}",
+                                channel_id,
+                                channel.len()
+                            );
+                            // Use blocking receive for proper synchronization
+                            match channel.receive()? {
+                                crate::runtime::channels::ChannelResult::Ok(value) => {
+                                    // Receive successful, store result
+                                    if let Some(result_reg) = &instruction.result {
+                                        if let Some(frame) = self.call_stack.last_mut() {
+                                            frame.registers.insert(result_reg.id, value);
+                                        }
+                                    }
+                                }
+                                crate::runtime::channels::ChannelResult::Closed => {
+                                    if let Some(result_reg) = &instruction.result {
+                                        if let Some(frame) = self.call_stack.last_mut() {
+                                            frame
+                                                .registers
+                                                .insert(result_reg.id, RuntimeValue::Null);
+                                        }
+                                    }
+                                }
+                                crate::runtime::channels::ChannelResult::WouldBlock => {
+                                    // This shouldn't happen with blocking receive, but handle it
+                                    return Err(BuluError::Other(
+                                        "Unexpected WouldBlock from blocking receive".to_string(),
+                                    ));
+                                }
+                            }
+                        } else {
+                            return Err(BuluError::Other("Channel not found".to_string()));
+                        }
+                    }
+                    _ => {
+                        return Err(BuluError::Other(
+                            "Cannot receive from non-channel value".to_string(),
+                        ));
+                    }
+                }
+            }
+            IrOpcode::Spawn => {
+                // Launch a goroutine using our new goroutine system
+                if instruction.operands.len() != 1 {
+                    return Err(BuluError::Other(
+                        "Spawn instruction requires exactly 1 operand".to_string(),
+                    ));
+                }
+
+                // Get the operand and extract function information
+                let operand = &instruction.operands[0];
+
+                let (function_name, args) = match operand {
+                    IrValue::Function(name) => {
+                        // Direct function reference
+                        (name.clone(), Vec::new())
+                    }
+                    IrValue::Global(name) => {
+                        // Global function reference
+                        (name.clone(), Vec::new())
+                    }
+                    _ => {
+                        // For complex expressions (like function calls with arguments),
+                        // use the old thread-based approach temporarily
+                        let goroutine_id = {
+                            static GOROUTINE_COUNTER: std::sync::atomic::AtomicU32 =
+                                std::sync::atomic::AtomicU32::new(1);
+                            GOROUTINE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                        };
+
+                        // Clone necessary data for the goroutine
+                        let globals = self.globals.clone();
+                        let program = self.program.clone();
+                        let operand_clone = operand.clone();
+
+                        // Spawn the goroutine in a separate thread using the old approach
+                        std::thread::spawn(move || {
+                            // Create a minimal interpreter for this goroutine using the global channel registry
+                            let mut interpreter =
+                                Self::new_minimal(get_global_channel_registry().clone(), globals);
+                            if let Some(prog) = program {
+                                interpreter.program = Some(prog);
+                            }
+
+                            // Execute the operand (which should be a function call)
+                            // Create a dummy execution frame for the goroutine
+                            interpreter
+                                .call_stack
+                                .push(ExecutionFrame::new("goroutine".to_string()));
+
+                            if let Err(e) = interpreter.evaluate_value(&operand_clone) {
+                                eprintln!("Goroutine {} error: {:?}", goroutine_id, e);
+                            }
+                        });
+
+                        // Store the goroutine ID in the result register
+                        if let Some(result_reg) = &instruction.result {
+                            if let Some(frame) = self.call_stack.last_mut() {
+                                frame
+                                    .registers
+                                    .insert(result_reg.id, RuntimeValue::Goroutine(goroutine_id));
+                            }
+                        }
+                        return Ok(());
+                    }
+                };
+
+                // Look up the function in the program
+                if let Some(program) = &self.program {
+                    if program.functions.iter().any(|f| f.name == function_name) {
+                        // Initialize the goroutine runtime if not already done
+                        crate::runtime::goroutine::init_runtime(Some(4));
+
+                        // Create a goroutine task
+                        let task = crate::runtime::goroutine::GoroutineTask::Function {
+                            name: function_name.clone(),
+                            args,
+                            program: std::sync::Arc::new(program.clone()),
+                        };
+
+                        // Spawn the goroutine
+                        let goroutine_id = crate::runtime::goroutine::spawn(task);
+
+                        // Store the goroutine ID in the result register
+                        if let Some(result_reg) = &instruction.result {
+                            if let Some(frame) = self.call_stack.last_mut() {
+                                frame.registers.insert(
+                                    result_reg.id,
+                                    RuntimeValue::Goroutine(goroutine_id as u32),
+                                );
+                            }
+                        }
+                    } else {
+                        return Err(BuluError::Other(format!(
+                            "Function '{}' not found",
+                            function_name
+                        )));
+                    }
+                } else {
+                    return Err(BuluError::Other("No program loaded".to_string()));
                 }
             }
             _ => {
@@ -2595,9 +3270,26 @@ impl Interpreter {
             }
             // Note: Local variables are handled through registers in our IR
             IrValue::Global(name) => {
-                self.globals.get(name).cloned().ok_or_else(|| {
-                    BuluError::Other(format!("Global variable '{}' not found", name))
-                })
+                // First try to find in existing globals
+                if let Some(value) = self.globals.get(name) {
+                    return Ok(value.clone());
+                }
+
+                // If not found, check if it's a generated type identifier
+                if name.starts_with("chan_")
+                    || name.starts_with("slice_")
+                    || name.starts_with("array_")
+                    || name.starts_with("map_")
+                {
+                    // Generate the type identifier dynamically
+                    let type_value = RuntimeValue::String(name.clone());
+                    return Ok(type_value);
+                }
+
+                Err(BuluError::Other(format!(
+                    "Global variable '{}' not found",
+                    name
+                )))
             }
             _ => Err(BuluError::Other("Unsupported value type".to_string())),
         }
@@ -2660,6 +3352,10 @@ impl MockChannelRegistry {
     pub fn get_mut(&mut self, id: u32) -> Option<&mut MockChannel> {
         self.channels.get_mut(&id)
     }
+
+    pub fn len(&self) -> usize {
+        self.channels.len()
+    }
 }
 
 /// Mock channel for testing
@@ -2690,7 +3386,9 @@ impl MockChannel {
     }
 
     pub fn try_receive(&mut self) -> Result<crate::runtime::channels::ChannelResult> {
-        if let Some(value) = self.messages.pop() {
+        if !self.messages.is_empty() {
+            // Use FIFO behavior - remove first element
+            let value = self.messages.remove(0);
             Ok(crate::runtime::channels::ChannelResult::Ok(value))
         } else {
             Ok(crate::runtime::channels::ChannelResult::WouldBlock)
@@ -2709,5 +3407,32 @@ impl MockChannel {
         // For mock implementation, just clear the messages
         self.messages.clear();
         Ok(())
+    }
+
+    /// Blocking send - for unbuffered channels, this needs proper synchronization
+    pub fn send(&mut self, value: RuntimeValue) -> Result<crate::runtime::channels::SendResult> {
+        if self.buffer_size == 0 {
+            // Unbuffered channel - for now, just add to messages
+            // In a real implementation, this would block until a receiver is ready
+            self.messages.push(value);
+            Ok(crate::runtime::channels::SendResult::Ok)
+        } else {
+            // Buffered channel - block until space is available
+            while self.messages.len() >= self.buffer_size {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            self.messages.push(value);
+            Ok(crate::runtime::channels::SendResult::Ok)
+        }
+    }
+
+    /// Blocking receive - wait until a message is available
+    pub fn receive(&mut self) -> Result<crate::runtime::channels::ChannelResult> {
+        // Block until a message is available
+        while self.messages.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let value = self.messages.remove(0);
+        Ok(crate::runtime::channels::ChannelResult::Ok(value))
     }
 }

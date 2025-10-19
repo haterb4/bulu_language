@@ -1,0 +1,9 @@
+func main() {
+    // Test simple avec make et chan comme identifiant
+    let ch1 = make(chan)
+    println("Channel 1 créé")
+    
+    // Test avec make et un identifiant simple
+    let ch2 = make(chan)
+    println("Channel 2 créé")
+}

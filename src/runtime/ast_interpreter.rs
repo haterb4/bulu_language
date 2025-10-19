@@ -88,12 +88,41 @@ pub struct AstInterpreter {
 impl AstInterpreter {
     /// Create a new AST interpreter
     pub fn new() -> Self {
-        Self {
+        let mut interpreter = Self {
             environment: Environment::new(),
             module_resolver: ModuleResolver::new(),
             globals: Environment::new(),
             current_file: None,
+        };
+        
+        // Add built-in identifiers
+        interpreter.environment.define("chan".to_string(), RuntimeValue::String("chan".to_string()));
+        
+        // Add primitive type identifiers for make() calls
+        let primitive_types = vec![
+            "int8", "int16", "int32", "int64",
+            "uint8", "uint16", "uint32", "uint64", 
+            "float32", "float64", "bool", "string",
+            "char", "byte", "rune", "any"
+        ];
+        
+        for prim_type in primitive_types {
+            interpreter.environment.define(prim_type.to_string(), RuntimeValue::String(prim_type.to_string()));
         }
+        
+        // Add channel type identifiers
+        let channel_types = vec![
+            "chan_int8", "chan_int16", "chan_int32", "chan_int64",
+            "chan_uint8", "chan_uint16", "chan_uint32", "chan_uint64",
+            "chan_float32", "chan_float64", "chan_bool", "chan_char",
+            "chan_string", "chan_any", "chan_unknown"
+        ];
+        
+        for chan_type in channel_types {
+            interpreter.environment.define(chan_type.to_string(), RuntimeValue::String(chan_type.to_string()));
+        }
+        
+        interpreter
     }
 
     /// Create a new AST interpreter with a specific file context
@@ -418,6 +447,19 @@ impl AstInterpreter {
     }
 
     fn execute_call_expr(&mut self, expr: &CallExpr) -> Result<RuntimeValue> {
+        // Check if this is a built-in function call
+        if let Expression::Identifier(ident) = expr.callee.as_ref() {
+            match ident.name.as_str() {
+                "make" => return self.execute_make_call(expr),
+                "println" => return self.execute_println_call(expr),
+                "print" => return self.execute_print_call(expr),
+                "len" => return self.execute_len_call(expr),
+                "append" => return self.execute_append_call(expr),
+                "close" => return self.execute_close_call(expr),
+                _ => {}
+            }
+        }
+        
         // Get the function to call
         let function = self.execute_expression(&expr.callee)?;
         
@@ -796,6 +838,277 @@ impl AstInterpreter {
     /// Get the current environment (for testing)
     pub fn environment(&self) -> &Environment {
         &self.environment
+    }
+
+    // Built-in function implementations
+    
+    fn execute_make_call(&mut self, expr: &CallExpr) -> Result<RuntimeValue> {
+        if expr.args.is_empty() {
+            return Err(BuluError::RuntimeError {
+                message: "make() requires at least one argument".to_string(),
+                file: self.current_file.clone(),
+            });
+        }
+
+        // Check the first argument to determine what to create
+        match &expr.args[0] {
+            Expression::Identifier(ident) => {
+                // Handle channel type identifiers like "chan_int32", "chan_string", etc.
+                if ident.name.starts_with("chan_") {
+                    let capacity = if expr.args.len() > 1 {
+                        let cap_val = self.execute_expression(&expr.args[1])?;
+                        match cap_val {
+                            RuntimeValue::Int32(cap) => Some(cap as usize),
+                            RuntimeValue::Int64(cap) => Some(cap as usize),
+                            _ => return Err(BuluError::RuntimeError {
+                                message: "Channel capacity must be an integer".to_string(),
+                                file: self.current_file.clone(),
+                            }),
+                        }
+                    } else {
+                        None
+                    };
+                    return self.create_channel(capacity);
+                }
+                // Handle legacy "chan" identifier
+                else if ident.name == "chan" {
+                    // make(chan) - unbuffered channel with any type
+                    let capacity = if expr.args.len() > 1 {
+                        let cap_val = self.execute_expression(&expr.args[1])?;
+                        match cap_val {
+                            RuntimeValue::Int32(cap) => Some(cap as usize),
+                            RuntimeValue::Int64(cap) => Some(cap as usize),
+                            _ => return Err(BuluError::RuntimeError {
+                                message: "Channel capacity must be an integer".to_string(),
+                                file: self.current_file.clone(),
+                            }),
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    self.create_channel(capacity)
+                }
+                // Handle primitive types
+                else {
+                    match ident.name.as_str() {
+                        // Integer types - return zero value
+                        "int8" => Ok(RuntimeValue::Int32(0)),
+                        "int16" => Ok(RuntimeValue::Int32(0)),
+                        "int32" => Ok(RuntimeValue::Int32(0)),
+                        "int64" => Ok(RuntimeValue::Int64(0)),
+                        "uint8" => Ok(RuntimeValue::Int32(0)),
+                        "uint16" => Ok(RuntimeValue::Int32(0)),
+                        "uint32" => Ok(RuntimeValue::Int32(0)),
+                        "uint64" => Ok(RuntimeValue::Int64(0)),
+                        
+                        // Float types - return zero value
+                        "float32" => Ok(RuntimeValue::Float64(0.0)),
+                        "float64" => Ok(RuntimeValue::Float64(0.0)),
+                        
+                        // Boolean type - return false
+                        "bool" => Ok(RuntimeValue::Bool(false)),
+                        
+                        // String type - return empty string
+                        "string" => Ok(RuntimeValue::String(String::new())),
+                        
+                        // Character types
+                        "char" => Ok(RuntimeValue::String("\0".to_string())),
+                        "byte" => Ok(RuntimeValue::Int32(0)),
+                        "rune" => Ok(RuntimeValue::Int32(0)),
+                        
+                        // Any type - return null
+                        "any" => Ok(RuntimeValue::Null),
+                        
+                        // Slice types
+                        name if name.starts_with("[]") => {
+                            // Extract element type from slice notation
+                            let element_type = &name[2..];
+                            
+                            // Get size if provided
+                            let size = if expr.args.len() > 1 {
+                                let size_val = self.execute_expression(&expr.args[1])?;
+                                match size_val {
+                                    RuntimeValue::Int32(s) => s as usize,
+                                    RuntimeValue::Int64(s) => s as usize,
+                                    _ => return Err(BuluError::RuntimeError {
+                                        message: "Slice size must be an integer".to_string(),
+                                        file: self.current_file.clone(),
+                                    }),
+                                }
+                            } else {
+                                0
+                            };
+                            
+                            // Create slice with zero values
+                            let zero_value = self.get_zero_value_for_type(element_type)?;
+                            let mut elements = Vec::new();
+                            for _ in 0..size {
+                                elements.push(zero_value.clone());
+                            }
+                            
+                            Ok(RuntimeValue::Array(elements))
+                        }
+                        
+                        _ => Err(BuluError::RuntimeError {
+                            message: format!("Unknown make() type: {}", ident.name),
+                            file: self.current_file.clone(),
+                        })
+                    }
+                }
+            }
+            Expression::Call(call_expr) => {
+                // make(chan T) or make(chan T, capacity)
+                if let Expression::Identifier(ident) = call_expr.callee.as_ref() {
+                    if ident.name == "chan" {
+                        // Extract type from chan(T) call
+                        let _element_type = if !call_expr.args.is_empty() {
+                            // For now, ignore the type and create a generic channel
+                            &call_expr.args[0]
+                        } else {
+                            // Default to any type
+                            return self.create_channel(None);
+                        };
+                        
+                        let capacity = if expr.args.len() > 1 {
+                            let cap_val = self.execute_expression(&expr.args[1])?;
+                            match cap_val {
+                                RuntimeValue::Int32(cap) => Some(cap as usize),
+                                RuntimeValue::Int64(cap) => Some(cap as usize),
+                                _ => return Err(BuluError::RuntimeError {
+                                    message: "Channel capacity must be an integer".to_string(),
+                                    file: self.current_file.clone(),
+                                }),
+                            }
+                        } else {
+                            None
+                        };
+                        
+                        self.create_channel(capacity)
+                    } else {
+                        Err(BuluError::RuntimeError {
+                            message: format!("Unknown make() type: {}", ident.name),
+                            file: self.current_file.clone(),
+                        })
+                    }
+                } else {
+                    Err(BuluError::RuntimeError {
+                        message: "Invalid make() syntax".to_string(),
+                        file: self.current_file.clone(),
+                    })
+                }
+            }
+            _ => {
+                Err(BuluError::RuntimeError {
+                    message: "Invalid make() syntax".to_string(),
+                    file: self.current_file.clone(),
+                })
+            }
+        }
+    }
+
+    fn create_channel(&mut self, capacity: Option<usize>) -> Result<RuntimeValue> {
+        // Generate a unique channel ID
+        static CHANNEL_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+        let channel_id = CHANNEL_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        
+        // For now, just return the channel ID
+        // In a full implementation, this would create an actual channel and store it in a registry
+        Ok(RuntimeValue::Channel(channel_id))
+    }
+
+    fn get_zero_value_for_type(&self, type_name: &str) -> Result<RuntimeValue> {
+        match type_name {
+            "int8" | "int16" | "int32" | "uint8" | "uint16" | "uint32" | "byte" | "rune" => {
+                Ok(RuntimeValue::Int32(0))
+            }
+            "int64" | "uint64" => Ok(RuntimeValue::Int64(0)),
+            "float32" | "float64" => Ok(RuntimeValue::Float64(0.0)),
+            "bool" => Ok(RuntimeValue::Bool(false)),
+            "string" | "char" => Ok(RuntimeValue::String(String::new())),
+            "any" => Ok(RuntimeValue::Null),
+            _ => Ok(RuntimeValue::Null), // Default for unknown types
+        }
+    }
+
+    fn execute_println_call(&mut self, expr: &CallExpr) -> Result<RuntimeValue> {
+        let mut output = String::new();
+        for (i, arg) in expr.args.iter().enumerate() {
+            if i > 0 {
+                output.push(' ');
+            }
+            let value = self.execute_expression(arg)?;
+            output.push_str(&self.value_to_string(&value));
+        }
+        println!("{}", output);
+        Ok(RuntimeValue::Null)
+    }
+
+    fn execute_print_call(&mut self, expr: &CallExpr) -> Result<RuntimeValue> {
+        let mut output = String::new();
+        for (i, arg) in expr.args.iter().enumerate() {
+            if i > 0 {
+                output.push(' ');
+            }
+            let value = self.execute_expression(arg)?;
+            output.push_str(&self.value_to_string(&value));
+        }
+        print!("{}", output);
+        Ok(RuntimeValue::Null)
+    }
+
+    fn execute_len_call(&mut self, expr: &CallExpr) -> Result<RuntimeValue> {
+        if expr.args.len() != 1 {
+            return Err(BuluError::RuntimeError {
+                message: "len() requires exactly one argument".to_string(),
+                file: self.current_file.clone(),
+            });
+        }
+
+        let value = self.execute_expression(&expr.args[0])?;
+        match value {
+            RuntimeValue::String(s) => Ok(RuntimeValue::Int32(s.len() as i32)),
+            RuntimeValue::Array(arr) => Ok(RuntimeValue::Int32(arr.len() as i32)),
+            _ => Err(BuluError::RuntimeError {
+                message: "len() can only be called on strings and arrays".to_string(),
+                file: self.current_file.clone(),
+            }),
+        }
+    }
+
+    fn execute_append_call(&mut self, _expr: &CallExpr) -> Result<RuntimeValue> {
+        // TODO: Implement append
+        Ok(RuntimeValue::Null)
+    }
+
+    fn execute_close_call(&mut self, _expr: &CallExpr) -> Result<RuntimeValue> {
+        // TODO: Implement close
+        Ok(RuntimeValue::Null)
+    }
+
+    fn value_to_string(&self, value: &RuntimeValue) -> String {
+        match value {
+            RuntimeValue::Int32(i) => i.to_string(),
+            RuntimeValue::Int64(i) => i.to_string(),
+            RuntimeValue::Float32(f) => f.to_string(),
+            RuntimeValue::Float64(f) => f.to_string(),
+            RuntimeValue::Bool(b) => b.to_string(),
+            RuntimeValue::String(s) => s.clone(),
+            RuntimeValue::Char(c) => c.to_string(),
+            RuntimeValue::Null => "null".to_string(),
+            RuntimeValue::Channel(id) => format!("channel({})", id),
+            RuntimeValue::Array(arr) => {
+                let elements: Vec<String> = arr.iter().map(|v| self.value_to_string(v)).collect();
+                format!("[{}]", elements.join(", "))
+            }
+            RuntimeValue::Map(map) => {
+                let entries: Vec<String> = map.iter()
+                    .map(|(k, v)| format!("{}: {}", k, self.value_to_string(v)))
+                    .collect();
+                format!("{{{}}}", entries.join(", "))
+            }
+            _ => format!("{:?}", value),
+        }
     }
 
     /// Get the global environment (for testing)

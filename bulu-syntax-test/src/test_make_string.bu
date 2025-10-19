@@ -1,0 +1,5 @@
+func main() {
+    // Test avec make("chan")
+    let ch = make(int32)
+    println("Channel créé: " + ch.toString())
+}

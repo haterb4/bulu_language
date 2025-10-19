@@ -1,0 +1,10 @@
+struct Person {
+    name: string
+    age: uint32
+}
+
+func main() {
+    println("Test make avec struct personnalisé")
+    let arr = make([]Person)
+    println("Résultat: " + arr.toString())
+}

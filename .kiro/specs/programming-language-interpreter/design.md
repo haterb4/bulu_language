@@ -691,64 +691,339 @@ let future = run compute(1000000)
 let result = await future
 ```
 
-### 2.12 Channels
+### 2.12 Channels and Make Built-in
+
+#### 2.12.1 Channel Creation with make()
+
+The `make()` built-in function creates channels exactly like in Go:
 
 ```
-// Create channel using make() built-in
-let ch = make(chan int32)         // unbuffered channel
-let buffered = make(chan string, 10) // buffered (capacity 10)
+// Unbuffered channels (synchronous)
+let ch = make(chan int32)         // Blocks until receiver ready
+let strCh = make(chan string)     // Blocks until receiver ready
 
-// Type annotations
-let ch: chan int32                // unbuffered
-let buffered: chan string         // type only, create with channel()
-let sendOnly: chan<- int32        // send-only
-let recvOnly: <-chan int32        // receive-only
+// Buffered channels (asynchronous up to capacity)
+let buffered = make(chan int32, 10)    // Can hold 10 values before blocking
+let smallBuf = make(chan string, 1)    // Can hold 1 value before blocking
 
-// Send to channel
+// Channel type annotations
+let ch: chan int32                // Bidirectional channel
+let sendOnly: chan<- int32        // Send-only channel
+let recvOnly: <-chan int32        // Receive-only channel
+```
+
+#### 2.12.2 Channel Operations
+
+```
+// Send operation (blocks if channel full or no receiver for unbuffered)
 ch <- 42
+strCh <- "hello"
 
-// Receive from channel
-let value = <-ch
+// Receive operation (blocks if channel empty)
+let value = <-ch           // Blocks until value available
+let msg = <-strCh          // Blocks until value available
 
-// Non-blocking receive with select
-select {
-    val := <-ch -> {
-        print("Received: " + val)
-    }
-    _ -> {
-        print("No data available")
-    }
+// Receive with ok flag (like Go)
+let value, ok = <-ch       // ok is false if channel closed and empty
+if ok {
+    print("Received: " + value)
+} else {
+    print("Channel closed")
 }
 
-// Channel in producer-consumer
+// Close channel
+close(ch)                  // No more values can be sent
+close(strCh)              // Receivers will get zero value + false
+```
+
+#### 2.12.3 Channel Behavior (Go Semantics)
+
+**Unbuffered Channels:**
+- Send blocks until receiver ready
+- Receive blocks until sender ready
+- Synchronous communication (rendezvous)
+
+**Buffered Channels:**
+- Send blocks only when buffer full
+- Receive blocks only when buffer empty
+- Asynchronous up to buffer capacity
+
+**Closed Channels:**
+- Sending to closed channel panics
+- Receiving from closed channel returns zero value + false
+- Closing already closed channel panics
+
+```
+// Producer-Consumer pattern
 func producer(ch: chan<- int32) {
     for i in 0..<10 {
-        ch <- i
+        ch <- i                    // Send value
         print("Sent: " + i)
     }
-    close(ch)
+    close(ch)                      // Signal completion
 }
 
 func consumer(ch: <-chan int32) {
-    for value in ch {  // Iterates until channel closes
+    for {
+        let value, ok = <-ch       // Receive with closed check
+        if not ok {
+            break                  // Channel closed
+        }
+        print("Received: " + value)
+    }
+}
+
+// Alternative: range over channel (stops when closed)
+func consumer2(ch: <-chan int32) {
+    for value in ch {              // Automatically stops when closed
         print("Received: " + value)
     }
 }
 
 func main() {
-    let ch = make(chan int32)
-    run producer(ch)
-    consumer(ch)  // Blocks until channel closes
-}
-
-// Bidirectional channel
-func processor(input: <-chan int32, output: chan<- int32) {
-    for value in input {
-        output <- value * 2
-    }
-    close(output)
+    let ch = make(chan int32, 5)   // Buffered channel
+    run producer(ch)               // Start producer goroutine
+    consumer(ch)                   // Consume in main goroutine
 }
 ```
+
+#### 2.12.4 Make Built-in for All Types (Go Semantics)
+
+The `make()` built-in works with channels, slices, and maps exactly like Go:
+
+```
+// Channels
+let ch1 = make(chan int32)         // Unbuffered channel
+let ch2 = make(chan string, 10)    // Buffered channel with capacity 10
+
+// Slices
+let slice1 = make([]int32, 5)      // Slice with length 5, capacity 5
+let slice2 = make([]int32, 5, 10)  // Slice with length 5, capacity 10
+let slice3 = make([]string, 0, 100) // Empty slice with capacity 100
+
+// Maps
+let map1 = make(map[string]int32)  // Empty map
+let map2 = make(map[int32]string)  // Empty map with different types
+
+// Zero values for make() with primitive types (Go compatibility)
+let i = make(int32)                // 0
+let f = make(float64)              // 0.0
+let b = make(bool)                 // false
+let s = make(string)               // ""
+
+// All integer types
+let i8 = make(int8)                // 0
+let i16 = make(int16)              // 0
+let i64 = make(int64)              // 0
+let u8 = make(uint8)               // 0
+let u16 = make(uint16)             // 0
+let u32 = make(uint32)             // 0
+let u64 = make(uint64)             // 0
+
+// Float types
+let f32 = make(float32)            // 0.0
+
+// Character and byte types
+let c = make(char)                 // '\0'
+let by = make(byte)                // 0
+let r = make(rune)                 // 0
+
+// Any type
+let a = make(any)                  // null
+```
+
+#### 2.12.5 Channel Directional Types
+
+```
+// Function parameters with directional channels
+func sender(ch: chan<- int32) {    // Can only send
+    ch <- 42
+    // let x = <-ch                // Compile error: cannot receive
+}
+
+func receiver(ch: <-chan int32) {  // Can only receive
+    let value = <-ch
+    // ch <- 42                    // Compile error: cannot send
+}
+
+func processor(in: <-chan int32, out: chan<- int32) {
+    for value in in {
+        out <- value * 2           // Transform and forward
+    }
+    close(out)
+}
+
+// Bidirectional channels can be passed to directional parameters
+func main() {
+    let ch = make(chan int32)      // Bidirectional
+    run sender(ch)                 // Implicitly converts to chan<-
+    run receiver(ch)               // Implicitly converts to <-chan
+}
+```
+
+#### 2.12.6 Channel Integration with Select
+
+```
+func multiplexer(ch1: <-chan string, ch2: <-chan int32, quit: <-chan bool) {
+    for {
+        select {
+            msg := <-ch1 -> {
+                print("String: " + msg)
+            }
+            num := <-ch2 -> {
+                print("Number: " + num)
+            }
+            <-quit -> {
+                print("Quitting")
+                return
+            }
+            _ -> {
+                // Default case (non-blocking)
+                print("No messages")
+                sleep(100)
+            }
+        }
+    }
+}
+
+// Timeout pattern
+func fetchWithTimeout(ch: <-chan string): string {
+    let timeout = timer(5000)      // 5 second timeout
+    
+    select {
+        data := <-ch -> {
+            return data
+        }
+        <-timeout -> {
+            return ""              // Timeout occurred
+        }
+    }
+}
+```
+
+#### 2.12.7 Channel Implementation Details
+
+**Internal Structure:**
+- Unbuffered: Direct goroutine-to-goroutine handoff
+- Buffered: Circular buffer with head/tail pointers
+- Closed flag and waiting goroutine queues
+- Type-safe element storage
+
+**Memory Management:**
+- Channels are reference types (heap allocated)
+- Garbage collected when no references remain
+- Buffer memory managed automatically
+
+**Concurrency Safety:**
+- All channel operations are thread-safe
+- Uses internal mutexes and condition variables
+- Lock-free fast paths for common cases
+
+#### 2.12.8 Technical Implementation Specification
+
+**Channel Runtime Structure:**
+```rust
+struct Channel<T> {
+    buffer: Option<VecDeque<T>>,     // None for unbuffered, Some for buffered
+    capacity: usize,                  // 0 for unbuffered, N for buffered
+    closed: bool,                     // Channel closed flag
+    send_queue: VecDeque<Sender<T>>,  // Waiting senders (unbuffered)
+    recv_queue: VecDeque<Receiver<T>>, // Waiting receivers
+    mutex: Mutex<()>,                 // Protects channel state
+    send_cond: Condvar,               // Notifies waiting senders
+    recv_cond: Condvar,               // Notifies waiting receivers
+}
+```
+
+**Operation Semantics:**
+
+*Send Operation (`ch <- value`):*
+1. Acquire channel mutex
+2. If channel closed: panic
+3. If unbuffered and receiver waiting: direct handoff
+4. If buffered and space available: add to buffer
+5. Otherwise: block sender until space/receiver available
+
+*Receive Operation (`value = <-ch`):*
+1. Acquire channel mutex
+2. If buffered and data available: return from buffer
+3. If unbuffered and sender waiting: direct handoff
+4. If channel closed and empty: return zero value + false
+5. Otherwise: block receiver until data/close available
+
+*Close Operation (`close(ch)`):*
+1. Acquire channel mutex
+2. If already closed: panic
+3. Set closed flag
+4. Wake all waiting receivers (they get zero value + false)
+5. Panic any waiting senders
+
+**Integration with Goroutine Scheduler:**
+- Blocked goroutines are parked and removed from scheduler
+- Channel operations wake parked goroutines
+- Select statement uses channel readiness polling
+
+#### 2.12.9 Make Built-in Implementation Specification
+
+**Parser Integration:**
+The parser must recognize type expressions in `make()` calls:
+
+```
+make(chan T)           // Channel type
+make(chan T, N)        // Buffered channel
+make([]T, len)         // Slice with length
+make([]T, len, cap)    // Slice with length and capacity
+make(map[K]V)          // Map type
+make(PrimitiveType)    // Zero value of primitive type
+```
+
+**Runtime Implementation:**
+```rust
+fn execute_make_call(args: &[Expression]) -> Result<RuntimeValue> {
+    match args.len() {
+        1 => {
+            // make(Type) - create zero value or empty collection
+            match parse_type(&args[0]) {
+                Type::Channel(elem_type) => create_unbuffered_channel(elem_type),
+                Type::Slice(elem_type) => create_empty_slice(elem_type),
+                Type::Map(key_type, val_type) => create_empty_map(key_type, val_type),
+                Type::Primitive(prim_type) => create_zero_value(prim_type),
+                _ => error("Invalid type for make()"),
+            }
+        },
+        2 => {
+            // make(Type, size_or_capacity)
+            let size = evaluate_expression(&args[1])?;
+            match parse_type(&args[0]) {
+                Type::Channel(elem_type) => create_buffered_channel(elem_type, size),
+                Type::Slice(elem_type) => create_slice_with_length(elem_type, size),
+                _ => error("Invalid 2-argument make() call"),
+            }
+        },
+        3 => {
+            // make([]T, length, capacity)
+            let length = evaluate_expression(&args[1])?;
+            let capacity = evaluate_expression(&args[2])?;
+            match parse_type(&args[0]) {
+                Type::Slice(elem_type) => create_slice_with_length_capacity(elem_type, length, capacity),
+                _ => error("Invalid 3-argument make() call"),
+            }
+        },
+        _ => error("make() requires 1-3 arguments"),
+    }
+}
+```
+
+**Zero Value Semantics (Go Compatible):**
+- Numeric types: 0
+- Boolean: false
+- String: ""
+- Pointers/References: null
+- Slices: empty slice (length 0, capacity 0)
+- Maps: empty map
+- Channels: nil (must use make to create)
+- Structs: all fields set to their zero values
+- Arrays: all elements set to zero value of element type
 
 ### 2.13 Select (Channel Multiplexing)
 

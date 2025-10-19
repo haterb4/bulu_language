@@ -2385,14 +2385,94 @@ impl Parser {
         let pos = callee.position();
 
         if !self.check(&TokenType::RightParen) {
-            // First argument should be a type expression
-            // For now, we'll parse it as a regular expression and handle it in the interpreter
-            // In a full implementation, we'd have special type expression parsing here
-
-            loop {
-                args.push(self.parse_expression()?);
-                if !self.match_token(&TokenType::Comma) {
-                    break;
+            // Check if first argument is a channel type
+            if self.check(&TokenType::Chan) {
+                // Parse chan T as a type and create a special identifier for it
+                let chan_type = self.parse_type()?;
+                
+                // Create a special identifier that represents the channel type
+                let type_name = match chan_type {
+                    Type::Channel(ref ch_type) => {
+                        format!("chan_{}", self.type_to_string(&ch_type.element_type))
+                    }
+                    _ => "chan_any".to_string(),
+                };
+                
+                args.push(Expression::Identifier(IdentifierExpr {
+                    name: type_name,
+                    position: self.current_position(),
+                }));
+                
+                // Check for additional arguments (like capacity)
+                if self.match_token(&TokenType::Comma) {
+                    loop {
+                        args.push(self.parse_expression()?);
+                        if !self.match_token(&TokenType::Comma) {
+                            break;
+                        }
+                    }
+                }
+            } else if self.check(&TokenType::Identifier) {
+                // Check if this is a primitive type identifier
+                let current_token = self.peek();
+                let type_name = current_token.lexeme.clone();
+                let position = current_token.position;
+                
+                // Check if it's a primitive type
+                if self.is_primitive_type(&type_name) {
+                    // Consume the type identifier
+                    self.advance();
+                        
+                        // Create an identifier expression for the type
+                        args.push(Expression::Identifier(IdentifierExpr {
+                            name: type_name,
+                            position,
+                        }));
+                        
+                        // Check for additional arguments (like size for slices)
+                        if self.match_token(&TokenType::Comma) {
+                            loop {
+                                args.push(self.parse_expression()?);
+                                if !self.match_token(&TokenType::Comma) {
+                                    break;
+                                }
+                            }
+                        }
+                } else {
+                    // Parse as regular expression
+                    loop {
+                        args.push(self.parse_expression()?);
+                        if !self.match_token(&TokenType::Comma) {
+                            break;
+                        }
+                    }
+                }
+            } else if self.check(&TokenType::LeftBracket) {
+                // Handle slice types like []int32
+                let slice_type = self.parse_type()?;
+                let type_name = self.type_to_string(&slice_type);
+                
+                args.push(Expression::Identifier(IdentifierExpr {
+                    name: type_name,
+                    position: self.current_position(),
+                }));
+                
+                // Check for additional arguments (like size)
+                if self.match_token(&TokenType::Comma) {
+                    loop {
+                        args.push(self.parse_expression()?);
+                        if !self.match_token(&TokenType::Comma) {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                // Parse regular expressions
+                loop {
+                    args.push(self.parse_expression()?);
+                    if !self.match_token(&TokenType::Comma) {
+                        break;
+                    }
                 }
             }
         }
@@ -2406,6 +2486,52 @@ impl Parser {
             args,
             position: pos,
         }))
+    }
+
+    /// Check if a string represents a primitive type
+    fn is_primitive_type(&self, type_name: &str) -> bool {
+        matches!(type_name, 
+            "int8" | "int16" | "int32" | "int64" | 
+            "uint8" | "uint16" | "uint32" | "uint64" |
+            "float32" | "float64" | "bool" | "string" |
+            "char" | "byte" | "rune" | "any"
+        )
+    }
+
+    /// Convert a type to a string representation
+    fn type_to_string(&self, type_info: &Type) -> String {
+        match type_info {
+            Type::Int8 => "int8".to_string(),
+            Type::Int16 => "int16".to_string(),
+            Type::Int32 => "int32".to_string(),
+            Type::Int64 => "int64".to_string(),
+            Type::UInt8 => "uint8".to_string(),
+            Type::UInt16 => "uint16".to_string(),
+            Type::UInt32 => "uint32".to_string(),
+            Type::UInt64 => "uint64".to_string(),
+            Type::Float32 => "float32".to_string(),
+            Type::Float64 => "float64".to_string(),
+            Type::Bool => "bool".to_string(),
+            Type::Char => "char".to_string(),
+            Type::String => "string".to_string(),
+            Type::Any => "any".to_string(),
+            Type::Named(name) => name.clone(),
+            Type::Slice(slice_type) => {
+                format!("slice_{}", self.type_to_string(&slice_type.element_type))
+            }
+            Type::Array(array_type) => {
+                format!("array_{}", self.type_to_string(&array_type.element_type))
+            }
+            Type::Channel(channel_type) => {
+                format!("chan_{}", self.type_to_string(&channel_type.element_type))
+            }
+            Type::Map(map_type) => {
+                format!("map_{}_{}", 
+                    self.type_to_string(&map_type.key_type),
+                    self.type_to_string(&map_type.value_type))
+            }
+            _ => "unknown".to_string(),
+        }
     }
 
     /// Parse primary expression
@@ -2525,6 +2651,16 @@ impl Parser {
                         position: pos,
                     }))
                 }
+            }
+            
+            // Allow 'chan' keyword to be used as an identifier in certain contexts (like make(chan))
+            TokenType::Chan => {
+                let name = "chan".to_string();
+                self.advance();
+                Ok(Expression::Identifier(IdentifierExpr {
+                    name,
+                    position: pos,
+                }))
             }
 
             TokenType::LeftBracket => self.parse_array_literal(),
@@ -2827,6 +2963,43 @@ impl Parser {
                         element_types: types,
                     }))
                 }
+            }
+            TokenType::Chan => {
+                // Channel type: chan T, chan<- T, <-chan T
+                self.advance(); // consume 'chan'
+                
+                let direction = if self.match_token(&TokenType::LeftArrow) {
+                    // chan<- T (send-only)
+                    ChannelDirection::Send
+                } else {
+                    // chan T (bidirectional)
+                    ChannelDirection::Bidirectional
+                };
+                
+                // Check if there's a type after chan, if not default to 'any'
+                let element_type = if self.check(&TokenType::RightParen) || self.check(&TokenType::Comma) || self.is_at_end() {
+                    // No type specified, default to 'any'
+                    Box::new(Type::Any)
+                } else {
+                    Box::new(self.parse_type()?)
+                };
+                
+                Ok(Type::Channel(ChannelType {
+                    element_type,
+                    direction,
+                }))
+            }
+            TokenType::LeftArrow => {
+                // <-chan T (receive-only)
+                self.advance(); // consume '<-'
+                self.consume(&TokenType::Chan, "Expected 'chan' after '<-'")?;
+                
+                let element_type = Box::new(self.parse_type()?);
+                
+                Ok(Type::Channel(ChannelType {
+                    element_type,
+                    direction: ChannelDirection::Receive,
+                }))
             }
             _ => Err(self.error("Expected type")),
         }

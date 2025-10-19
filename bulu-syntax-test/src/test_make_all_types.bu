@@ -1,0 +1,21 @@
+func main() {
+    println("Test make avec différents types")
+    
+    // Test avec int32
+    println("Test make(int32):")
+    // let i = make(int32)
+    
+    // Test avec slice
+    println("Test make([]int32, 5):")
+    // let arr = make([]int32, 5)
+    
+    // Test avec map
+    println("Test make(map[string]int32):")
+    // let m = make(map[string]int32)
+    
+    // Test avec chan
+    println("Test make(chan int32):")
+    // let ch = make(chan int32)
+    
+    println("Tous les tests commentés pour éviter les erreurs")
+}

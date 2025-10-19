@@ -1291,6 +1291,66 @@ impl IrGenerator {
                 Ok(IrValue::Register(result_register))
             }
 
+            Expression::Channel(channel_expr) => {
+                use crate::ast::ChannelDirection;
+                
+                match channel_expr.direction {
+                    ChannelDirection::Send => {
+                        // ch <- value
+                        let channel_val = self.generate_expression(&channel_expr.channel)?;
+                        let value_val = if let Some(ref value_expr) = channel_expr.value {
+                            self.generate_expression(value_expr)?
+                        } else {
+                            return Err(BuluError::Other("Send operation requires a value".to_string()));
+                        };
+                        
+                        let result_register = self.new_register();
+                        
+                        self.emit_instruction(IrInstruction {
+                            opcode: IrOpcode::ChannelSend,
+                            result: Some(result_register),
+                            operands: vec![channel_val, value_val],
+                            position: channel_expr.position,
+                        });
+                        
+                        Ok(IrValue::Register(result_register))
+                    }
+                    ChannelDirection::Receive => {
+                        // <-ch
+                        let channel_val = self.generate_expression(&channel_expr.channel)?;
+                        let result_register = self.new_register();
+                        
+                        self.emit_instruction(IrInstruction {
+                            opcode: IrOpcode::ChannelReceive,
+                            result: Some(result_register),
+                            operands: vec![channel_val],
+                            position: channel_expr.position,
+                        });
+                        
+                        Ok(IrValue::Register(result_register))
+                    }
+                    ChannelDirection::Bidirectional => {
+                        // This shouldn't happen in expressions
+                        Err(BuluError::Other("Bidirectional channel direction not supported in expressions".to_string()))
+                    }
+                }
+            }
+
+            Expression::Run(run_expr) => {
+                // Generate IR for goroutine spawn
+                let expr_val = self.generate_expression(&run_expr.expr)?;
+                let result_register = self.new_register();
+                
+                self.emit_instruction(IrInstruction {
+                    opcode: IrOpcode::Spawn,
+                    result: Some(result_register),
+                    operands: vec![expr_val],
+                    position: run_expr.position,
+                });
+                
+                Ok(IrValue::Register(result_register))
+            }
+
             _ => {
                 // For any remaining expression types, return null
                 Ok(IrValue::Constant(IrConstant::Null))

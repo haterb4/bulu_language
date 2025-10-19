@@ -1,0 +1,6 @@
+// Test pour déboguer make() simple
+func main() {
+    print("Test make simple")
+    let x = make(chan)
+    print("make(chan) fonctionne: " + x)
+}

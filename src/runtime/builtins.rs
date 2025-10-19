@@ -105,6 +105,8 @@ impl BuiltinRegistry {
         self.register("uint64", builtin_uint64);
         self.register("float32", builtin_float32);
         self.register("float64", builtin_float64);
+        self.register("byte", builtin_int8);
+        self.register("rune", builtin_int8);
         self.register("bool", builtin_bool);
         self.register("char", builtin_char);
         self.register("string", builtin_string);
@@ -436,6 +438,7 @@ fn estimate_value_size(value: &RuntimeValue) -> usize {
         RuntimeValue::UInt64(_) => 8,
         RuntimeValue::Float32(_) => 4,
         RuntimeValue::Float64(_) => 8,
+        RuntimeValue::Byte(_) => 1,
         RuntimeValue::Bool(_) => 1,
         RuntimeValue::Char(_) => 4,
         RuntimeValue::String(s) => s.len(),
@@ -452,6 +455,7 @@ fn estimate_value_size(value: &RuntimeValue) -> usize {
 /// Built-in make function with Go-like type syntax
 /// This function should be called with proper type information from the parser
 pub fn builtin_make(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+
     // This function should not be called directly for type-based make() calls
     // The interpreter's evaluate_make_call() handles proper type-based make() syntax
     // This function is kept for backward compatibility with non-type-based calls
@@ -461,6 +465,143 @@ pub fn builtin_make(args: &[RuntimeValue]) -> Result<RuntimeValue> {
             file: None,
             message: "make() expects at least 1 argument".to_string(),
         });
+    }
+
+    // Check if the first argument is a type identifier
+    if let RuntimeValue::String(type_name) = &args[0] {
+        // Handle slice types
+        if type_name.starts_with("slice_") {
+            let len = if args.len() > 1 {
+                extract_size_arg(&args[1], "slice length")?
+            } else {
+                0 // Empty slice by default
+            };
+            
+            let cap = if args.len() > 2 {
+                extract_size_arg(&args[2], "slice capacity")?
+            } else {
+                len // Capacity equals length by default
+            };
+            
+            // Create slice with specified length, filled with default values for the type
+            let default_value = get_default_value_for_slice_type(type_name);
+            let slice = vec![default_value; len];
+            return Ok(RuntimeValue::Slice(slice));
+        }
+        
+        // Handle channel types
+        if type_name.starts_with("chan_") {
+            let capacity = if args.len() > 1 {
+                Some(extract_size_arg(&args[1], "channel capacity")?)
+            } else {
+                None
+            };
+            
+            // Extract the element type from chan_TYPE
+            let element_type = match type_name.strip_prefix("chan_") {
+                Some("int8") => TypeId::Int8,
+                Some("int16") => TypeId::Int16,
+                Some("int32") => TypeId::Int32,
+                Some("int64") => TypeId::Int64,
+                Some("uint8") => TypeId::UInt8,
+                Some("uint16") => TypeId::UInt16,
+                Some("uint32") => TypeId::UInt32,
+                Some("uint64") => TypeId::UInt64,
+                Some("float32") => TypeId::Float32,
+                Some("float64") => TypeId::Float64,
+                Some("byte") => TypeId::Int8,
+                Some("bool") => TypeId::Bool,
+                Some("char") => TypeId::Char,
+                Some("string") => TypeId::String,
+                _ => TypeId::Any,
+            };
+            
+            return builtin_make_chan(element_type, &args[1..]);
+        }
+        
+        // Handle other type names
+        match type_name.as_str() {
+            "chan" => {
+                // Untyped channel (chan any)
+                let capacity = if args.len() > 1 {
+                    Some(extract_size_arg(&args[1], "channel capacity")?)
+                } else {
+                    None
+                };
+                return builtin_make_chan(TypeId::Any, &args[1..]);
+            }
+            // Primitive types - return zero values
+            "int8" => {
+                return Ok(RuntimeValue::Int8(0));
+            }
+            "int16" => {
+                return Ok(RuntimeValue::Int16(0));
+            }
+            "int32" => {
+                return Ok(RuntimeValue::Int32(0));
+            }
+            "uint8" => {
+                return Ok(RuntimeValue::UInt8(0));
+            }
+            "uint16" => {
+                return Ok(RuntimeValue::UInt16(0));
+            }
+            "uint32" => {
+                return Ok(RuntimeValue::UInt32(0));
+            }
+            "byte" => {
+                return Ok(RuntimeValue::Byte(0));
+            }
+            "int64" => {
+                return Ok(RuntimeValue::Int64(0));
+            }
+            "uint64" => {
+                return Ok(RuntimeValue::UInt64(0));
+            }
+            "float32" => {
+                return Ok(RuntimeValue::Float32(0.0));
+            }
+            "float64" => {
+                return Ok(RuntimeValue::Float64(0.0));
+            }
+            "bool" => {
+                return Ok(RuntimeValue::Bool(false));
+            }
+            "string" | "char" => {
+                return Ok(RuntimeValue::String(String::new()));
+            }
+            "any" => {
+                return Ok(RuntimeValue::Null);
+            }
+            _ => {}
+        }
+    }
+
+    // Handle generic slice types (slice_TypeName)
+    if let RuntimeValue::String(type_name) = &args[0] {
+        if type_name.starts_with("slice_") {
+            let len = if args.len() > 1 {
+                extract_size_arg(&args[1], "slice length")?
+            } else {
+                0 // Empty slice by default
+            };
+            
+            // Create slice with specified length, filled with zero values
+            let slice = vec![RuntimeValue::Null; len];
+            return Ok(RuntimeValue::Slice(slice));
+        }
+        
+        // Handle generic channel types (chan_TypeName)
+        if type_name.starts_with("chan_") {
+            let capacity = if args.len() > 1 {
+                Some(extract_size_arg(&args[1], "channel capacity")?)
+            } else {
+                None
+            };
+            
+            // For unknown channel types, default to Any
+            return builtin_make_chan(TypeId::Any, &args[1..]);
+        }
     }
 
     // For direct builtin calls without type information, we can only infer from patterns
@@ -487,6 +628,33 @@ pub fn builtin_make(args: &[RuntimeValue]) -> Result<RuntimeValue> {
             file: None,
             message: "make() takes 1-3 arguments".to_string(),
         }),
+    }
+}
+
+/// Get default value for a slice type
+fn get_default_value_for_slice_type(slice_type: &str) -> RuntimeValue {
+    if let Some(element_type) = slice_type.strip_prefix("slice_") {
+        match element_type {
+            "int8" => RuntimeValue::Int8(0),
+            "int16" => RuntimeValue::Int16(0),
+            "int32" => RuntimeValue::Int32(0),
+            "int64" => RuntimeValue::Int64(0),
+            "uint8" => RuntimeValue::UInt8(0),
+            "uint16" => RuntimeValue::UInt16(0),
+            "uint32" => RuntimeValue::UInt32(0),
+            "uint64" => RuntimeValue::UInt64(0),
+            "float32" => RuntimeValue::Float32(0.0),
+            "float64" => RuntimeValue::Float64(0.0),
+            "byte" => RuntimeValue::Byte(0),
+            "bool" => RuntimeValue::Bool(false),
+            "char" => RuntimeValue::Char('\0'),
+            "string" => RuntimeValue::String(String::new()),
+            "any" | "unknown" => RuntimeValue::Null,
+            // For user-defined types (structs, interfaces), use Null as placeholder
+            _ => RuntimeValue::Null,
+        }
+    } else {
+        RuntimeValue::Null
     }
 }
 
@@ -1707,22 +1875,15 @@ pub fn builtin_make_chan(element_type: TypeId, args: &[RuntimeValue]) -> Result<
         None
     };
 
-    // Create channel and return channel ID
-    use crate::runtime::channels::Channel;
+    // Create channel in the global registry
+    let buffer_size = capacity.unwrap_or(0);
+    let channel_id = {
+        let mut registry = crate::runtime::interpreter::get_global_channel_registry().lock().unwrap();
+        let id = registry.create_channel(element_type, buffer_size);
 
-    let _channel = if let Some(cap) = capacity {
-        if cap == 0 {
-            Channel::new_unbuffered(element_type)
-        } else {
-            Channel::new_buffered(element_type, cap)
-        }
-    } else {
-        Channel::new_unbuffered(element_type)
+        id
     };
-
-    // Return a channel ID (in a full implementation, we'd use a proper channel registry)
-    static CHANNEL_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-    let channel_id = CHANNEL_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    
     Ok(RuntimeValue::Channel(channel_id))
 }
 
