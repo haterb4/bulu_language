@@ -1,5 +1,0 @@
-func main() {
-    // Test simple de déclaration de type channel
-    let ch: chan int32
-    println("Test type channel")
-}

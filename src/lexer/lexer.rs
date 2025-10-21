@@ -216,11 +216,7 @@ impl Lexer {
                 if self.match_char('=') {
                     self.make_token(TokenType::NotEqual, start_pos)
                 } else {
-                    return Err(self.lex_error(
-                        "Unexpected character '!'".to_string(),
-                        start_pos.line,
-                        start_pos.column,
-                    ));
+                    self.make_token(TokenType::Bang, start_pos)
                 }
             }
             '<' => {

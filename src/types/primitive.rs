@@ -602,6 +602,7 @@ pub enum RuntimeValue {
     MethodRef {
         object: Box<RuntimeValue>,
         method_name: String,
+        source_register: Option<u32>, // Track the register that contains the original struct
     },
 
     // Struct instances

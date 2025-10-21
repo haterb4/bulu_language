@@ -26,6 +26,10 @@ pub struct SymbolInfo {
     pub position: crate::lexer::token::Position,
     /// Function signature information (only for functions)
     pub function_signature: Option<FunctionSignature>,
+    /// Type information for variables and constants
+    pub type_info: Option<Type>,
+    /// Whether the symbol is mutable (for variables)
+    pub is_mutable: bool,
 }
 
 /// Information about an imported symbol
@@ -38,6 +42,10 @@ pub struct ImportedSymbolInfo {
     pub position: crate::lexer::token::Position,
     /// Function signature information (only for functions)
     pub function_signature: Option<FunctionSignature>,
+    /// Type information for variables and constants
+    pub type_info: Option<Type>,
+    /// Whether the symbol is mutable (for variables)
+    pub is_mutable: bool,
 }
 
 /// Type of symbol
@@ -168,6 +176,8 @@ impl SymbolResolver {
                         is_exported: func.is_exported,
                         position: func.position,
                         function_signature,
+                        type_info: None,
+                        is_mutable: false,
                     };
                     self.symbol_table.local_symbols.insert(func.name.clone(), symbol.clone());
                     
@@ -188,6 +198,8 @@ impl SymbolResolver {
                         is_exported: var.is_exported,
                         position: var.position,
                         function_signature: None,
+                        type_info: var.type_annotation.clone(),
+                        is_mutable: !var.is_const,
                     };
                     self.symbol_table.local_symbols.insert(var.name.clone(), symbol.clone());
                     
@@ -202,6 +214,8 @@ impl SymbolResolver {
                         is_exported: struct_decl.is_exported,
                         position: struct_decl.position,
                         function_signature: None,
+                        type_info: None,
+                        is_mutable: false,
                     };
                     self.symbol_table.local_symbols.insert(struct_decl.name.clone(), symbol.clone());
                     
@@ -216,6 +230,8 @@ impl SymbolResolver {
                         is_exported: interface.is_exported,
                         position: interface.position,
                         function_signature: None,
+                        type_info: None,
+                        is_mutable: false,
                     };
                     self.symbol_table.local_symbols.insert(interface.name.clone(), symbol.clone());
                     
@@ -230,6 +246,8 @@ impl SymbolResolver {
                         is_exported: false, // Type aliases don't have explicit export in current AST
                         position: type_alias.position,
                         function_signature: None,
+                        type_info: Some(type_alias.target_type.clone()),
+                        is_mutable: false,
                     };
                     self.symbol_table.local_symbols.insert(type_alias.name.clone(), symbol);
                 }
@@ -271,6 +289,8 @@ impl SymbolResolver {
                     is_exported: true,
                     position: func.position,
                     function_signature,
+                    type_info: None,
+                    is_mutable: false,
                 };
                 self.symbol_table.exported_symbols.insert(func.name.clone(), symbol);
             }
@@ -287,6 +307,8 @@ impl SymbolResolver {
                     is_exported: true,
                     position: var.position,
                     function_signature: None,
+                    type_info: var.type_annotation.clone(),
+                    is_mutable: !var.is_const,
                 };
                 self.symbol_table.exported_symbols.insert(var.name.clone(), symbol);
             }
@@ -317,6 +339,8 @@ impl SymbolResolver {
                         is_exported: true,
                         position: item.position,
                         function_signature: None, // TODO: Extract function signature from module exports
+                        type_info: self.extract_type_info_from_module(&module, &item.name),
+                        is_mutable: false, // Re-exported items are not mutable by default
                     };
                     self.symbol_table.exported_symbols.insert(symbol.name.clone(), symbol);
                 } else {
@@ -340,6 +364,8 @@ impl SymbolResolver {
                     is_exported: true,
                     position: import_stmt.position,
                     function_signature: None, // TODO: Extract function signature from module exports
+                    type_info: self.extract_type_info_from_module(&module, name),
+                    is_mutable: false, // Re-exported items are not mutable by default
                 };
                 self.symbol_table.exported_symbols.insert(name.clone(), symbol);
             }
@@ -379,9 +405,11 @@ impl SymbolResolver {
                         name: symbol_name.clone(),
                         original_name: item.name.clone(),
                         module_path: import_stmt.path.clone(),
-                        symbol_type,
+                        symbol_type: symbol_type.clone(),
                         position: item.position,
                         function_signature,
+                        type_info: self.extract_type_info_from_module(&module, &item.name),
+                        is_mutable: symbol_type == SymbolType::Variable,
                     };
                     self.symbol_table.imported_symbols.insert(symbol_name.clone(), imported_symbol);
                 } else {
@@ -405,6 +433,8 @@ impl SymbolResolver {
                 symbol_type: SymbolType::Module,
                 position: import_stmt.position,
                 function_signature: None,
+                type_info: None,
+                is_mutable: false,
             };
             self.symbol_table.imported_symbols.insert(alias.clone(), imported_symbol);
         } else {
@@ -421,9 +451,11 @@ impl SymbolResolver {
                     name: name.clone(),
                     original_name: name.clone(),
                     module_path: import_stmt.path.clone(),
-                    symbol_type,
+                    symbol_type: symbol_type.clone(),
                     position: import_stmt.position,
                     function_signature,
+                    type_info: self.extract_type_info_from_module(&module, name),
+                    is_mutable: symbol_type == SymbolType::Variable,
                 };
                 self.symbol_table.imported_symbols.insert(name.clone(), imported_symbol);
             }
@@ -532,6 +564,8 @@ impl SymbolResolver {
                     is_exported: var_decl.is_exported,
                     position: var_decl.position,
                     function_signature: None,
+                    type_info: var_decl.type_annotation.clone(),
+                    is_mutable: !var_decl.is_const,
                 };
                 self.define_local_symbol(var_decl.name.clone(), symbol);
             }
@@ -547,6 +581,8 @@ impl SymbolResolver {
                         is_exported: false,
                         position: param.position,
                         function_signature: None,
+                        type_info: Some(param.param_type.clone()),
+                        is_mutable: true,
                     };
                     self.define_local_symbol(param.name.clone(), symbol);
                 }
@@ -591,6 +627,8 @@ impl SymbolResolver {
                     is_exported: false,
                     position: crate::lexer::token::Position::new(0, 0, 0), // TODO: get actual position
                     function_signature: None,
+                    type_info: None, // Type will be inferred from iterable
+                    is_mutable: true,
                 };
                 self.define_local_symbol(for_stmt.variable.clone(), var_symbol);
                 
@@ -601,6 +639,8 @@ impl SymbolResolver {
                         is_exported: false,
                         position: crate::lexer::token::Position::new(0, 0, 0), // TODO: get actual position
                         function_signature: None,
+                        type_info: Some(Type::Int32), // Index is always int32
+                        is_mutable: true,
                     };
                     self.define_local_symbol(index_var.clone(), index_symbol);
                 }
@@ -714,13 +754,27 @@ impl SymbolResolver {
         // Check exact matches first
         if matches!(
             name,
-            "print" | "println" | "len" | "append" | "make" | "clone" | "typeof" | "instanceof"
-                | "panic" | "recover" | "assert" | "input" | "sleep" | "timer" | "lock" | "toString"
-                // Primitive type identifiers
-                | "int8" | "int16" | "int32" | "int64"
-                | "uint8" | "uint16" | "uint32" | "uint64"
-                | "float32" | "float64" | "bool" | "char"
-                | "string" | "any" | "unknown" | "chan"
+            // I/O functions
+            "print" | "println" | "printf" | "input"
+            // Type conversion functions
+            | "int8" | "int16" | "int32" | "int64"
+            | "uint8" | "uint16" | "uint32" | "uint64"
+            | "float32" | "float64" | "bool" | "char" | "string"
+            // Memory functions
+            | "len" | "cap" | "clone" | "sizeof"
+            // Collection functions
+            | "make" | "append" | "copy" | "delete"
+            // Utility functions
+            | "typeof" | "instanceof" | "panic" | "assert" | "recover"
+            // Channel functions
+            | "close"
+            // Synchronization functions
+            | "lock" | "sleep" | "yield" | "timer"
+            | "atomic_load" | "atomic_store" | "atomic_add" | "atomic_sub"
+            // Additional utility functions
+            | "toString"
+            // Type identifiers
+            | "any" | "unknown" | "chan"
         ) {
             return true;
         }
@@ -759,6 +813,28 @@ impl SymbolResolver {
         } else {
             None
         }
+    }
+
+    /// Extract type information from a module for a specific symbol
+    fn extract_type_info_from_module(&self, module: &crate::runtime::module::Module, symbol_name: &str) -> Option<Type> {
+        // Try to find the symbol in the module's AST and extract its type
+        let ast = &module.ast;
+        for statement in &ast.statements {
+            match statement {
+                Statement::VariableDecl(var_decl) if var_decl.name == symbol_name => {
+                    return var_decl.type_annotation.clone();
+                }
+                Statement::Export(export_stmt) => {
+                    if let Statement::VariableDecl(var_decl) = export_stmt.item.as_ref() {
+                        if var_decl.name == symbol_name {
+                            return var_decl.type_annotation.clone();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 }
 

@@ -1,5 +1,0 @@
-// Main entry point for the Bulu program
-
-func main() {
-    println("Hello, Bulu!")
-}

@@ -345,6 +345,18 @@ pub fn builtin_len(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Array(arr) => Ok(RuntimeValue::Int32(arr.len() as i32)),
         RuntimeValue::Slice(slice) => Ok(RuntimeValue::Int32(slice.len() as i32)),
         RuntimeValue::Map(map) => Ok(RuntimeValue::Int32(map.len() as i32)),
+        RuntimeValue::Channel(channel_id) => {
+            // Get channel length from global registry
+            let registry = crate::runtime::interpreter::get_global_channel_registry().lock().unwrap();
+            if let Some(channel) = registry.get(*channel_id) {
+                Ok(RuntimeValue::Int32(channel.len() as i32))
+            } else {
+                Err(BuluError::RuntimeError {
+                    file: None,
+                    message: "Channel not found".to_string(),
+                })
+            }
+        }
         _ => Err(BuluError::RuntimeError {
             file: None,
             message: format!("len() not supported for type: {:?}", args[0].get_type()),
@@ -361,9 +373,26 @@ pub fn builtin_cap(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         });
     }
 
-    // For now, return 0 for all types
-    // In a full implementation, this would handle slices and channels
-    Ok(RuntimeValue::Int32(0))
+    match &args[0] {
+        RuntimeValue::Slice(slice) => Ok(RuntimeValue::Int32(slice.capacity() as i32)),
+        RuntimeValue::Array(arr) => Ok(RuntimeValue::Int32(arr.len() as i32)), // Arrays have fixed capacity
+        RuntimeValue::Channel(channel_id) => {
+            // Get channel capacity from global registry
+            let registry = crate::runtime::interpreter::get_global_channel_registry().lock().unwrap();
+            if let Some(channel) = registry.get(*channel_id) {
+                Ok(RuntimeValue::Int32(channel.capacity() as i32))
+            } else {
+                Err(BuluError::RuntimeError {
+                    file: None,
+                    message: "Channel not found".to_string(),
+                })
+            }
+        }
+        _ => Err(BuluError::RuntimeError {
+            file: None,
+            message: format!("cap() not supported for type: {:?}", args[0].get_type()),
+        }),
+    }
 }
 
 /// Deep clone a value

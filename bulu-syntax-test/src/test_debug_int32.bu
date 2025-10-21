@@ -1,6 +1,0 @@
-// Test pour déboguer int32
-func main() {
-    print("Test debug")
-    // Juste référencer int32 sans make()
-    print("int32 existe")
-}

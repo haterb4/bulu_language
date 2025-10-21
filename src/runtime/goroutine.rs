@@ -205,8 +205,18 @@ impl GoroutineRuntime {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let goroutine = Goroutine::new(id, task);
 
-        // Add to global queue
-        {
+        // Try to add to a local queue first for better cache locality
+        if !self.local_queues.is_empty() {
+            let queue_index = (id as usize) % self.local_queues.len();
+            if let Ok(mut queue) = self.local_queues[queue_index].try_lock() {
+                queue.push(goroutine);
+            } else {
+                // If local queue is locked, add to global queue
+                let mut queue = self.global_queue.lock().unwrap();
+                queue.push(goroutine);
+            }
+        } else {
+            // No local queues, add to global queue
             let mut queue = self.global_queue.lock().unwrap();
             queue.push(goroutine);
         }
@@ -305,7 +315,7 @@ impl GoroutineRuntime {
         println!("Goroutine worker {} shutting down", worker_id);
     }
 
-    /// Execute a single goroutine
+    /// Execute a single goroutine with better error handling
     fn execute_goroutine(goroutine: &mut Goroutine) -> Result<RuntimeValue> {
         match &goroutine.task {
             GoroutineTask::Function { name, args, program } => {
@@ -313,12 +323,26 @@ impl GoroutineRuntime {
                 let mut interpreter = crate::runtime::interpreter::Interpreter::new_for_goroutine();
                 interpreter.set_program(program.clone());
                 
-                // Execute the function
+                // Execute the function with proper error handling
                 if let Some(function) = program.functions.iter().find(|f| f.name == *name) {
-                    interpreter.call_function(function, args.clone())
+                    // Use a safer execution method that handles register context properly
+                    match interpreter.execute_function_safely(function, args.clone()) {
+                        Ok(result) => Ok(result),
+                        Err(e) => {
+                            // Log the error but don't panic the goroutine
+                            eprintln!("Goroutine {} function execution error: {:?}", goroutine.id, e);
+                            Ok(RuntimeValue::Null)
+                        }
+                    }
                 } else {
                     // Try built-in functions
-                    interpreter.call_builtin_function(name, args)
+                    match interpreter.call_builtin_function(name, args) {
+                        Ok(result) => Ok(result),
+                        Err(e) => {
+                            eprintln!("Goroutine {} builtin function error: {:?}", goroutine.id, e);
+                            Ok(RuntimeValue::Null)
+                        }
+                    }
                 }
             }
             GoroutineTask::Closure { function, captured_vars, args } => {
@@ -330,15 +354,27 @@ impl GoroutineRuntime {
                     interpreter.set_global(name.clone(), value.clone());
                 }
                 
-                // Execute the closure
-                interpreter.call_function(function, args.clone())
+                // Execute the closure with error handling
+                match interpreter.execute_function_safely(function, args.clone()) {
+                    Ok(result) => Ok(result),
+                    Err(e) => {
+                        eprintln!("Goroutine {} closure execution error: {:?}", goroutine.id, e);
+                        Ok(RuntimeValue::Null)
+                    }
+                }
             }
             GoroutineTask::Expression { expr } => {
                 // Execute simple expression
                 match expr {
                     RuntimeValue::Function(func_name) => {
                         let mut interpreter = crate::runtime::interpreter::Interpreter::new_for_goroutine();
-                        interpreter.call_builtin_function(func_name, &[])
+                        match interpreter.call_builtin_function(func_name, &[]) {
+                            Ok(result) => Ok(result),
+                            Err(e) => {
+                                eprintln!("Goroutine {} expression error: {:?}", goroutine.id, e);
+                                Ok(RuntimeValue::Null)
+                            }
+                        }
                     }
                     _ => Ok(expr.clone())
                 }
@@ -348,7 +384,19 @@ impl GoroutineRuntime {
 
     /// Get runtime statistics
     pub fn stats(&self) -> RuntimeStats {
-        self.stats.lock().unwrap().clone()
+        let mut stats = self.stats.lock().unwrap().clone();
+        stats.worker_threads = self.num_workers;
+        stats
+    }
+
+    /// Get the number of worker threads
+    pub fn worker_count(&self) -> usize {
+        self.num_workers
+    }
+
+    /// Get the number of local queues
+    pub fn queue_count(&self) -> usize {
+        self.local_queues.len()
     }
 
     /// Shutdown the runtime
@@ -386,7 +434,10 @@ pub fn init_runtime(num_workers: Option<usize>) {
 /// Get the global goroutine runtime
 pub fn get_runtime() -> &'static GoroutineRuntime {
     unsafe {
-        GLOBAL_RUNTIME.as_ref().expect("Goroutine runtime not initialized. Call init_runtime() first.")
+        match GLOBAL_RUNTIME.as_ref() {
+            Some(runtime) => runtime,
+            None => panic!("Goroutine runtime not initialized. Call init_runtime() first.")
+        }
     }
 }
 

@@ -70,6 +70,11 @@ impl TypeChecker {
         checker
     }
 
+    /// Add built-in functions to the global scope (public method for re-adding after imports)
+    pub fn add_builtin_functions_after_import(&mut self) {
+        self.add_builtin_functions();
+    }
+
     /// Add built-in functions to the global scope
     fn add_builtin_functions(&mut self) {
         let builtin_functions = vec![
@@ -172,7 +177,7 @@ impl TypeChecker {
                 global_scope.insert(name.to_string(), symbol);
             }
             
-            // Add builtin functions
+            // Add builtin functions (force insert to overwrite any conflicting imports)
             for (name, param_types, return_type) in builtin_functions {
                 let symbol = Symbol {
                     name: name.to_string(),
@@ -184,6 +189,7 @@ impl TypeChecker {
                         return_type,
                     }),
                 };
+                // Force insert to ensure builtin functions are always available
                 global_scope.insert(name.to_string(), symbol);
             }
             
@@ -832,7 +838,9 @@ impl TypeChecker {
     /// Type check an identifier expression
     fn check_identifier_expression(&self, ident: &IdentifierExpr) -> Result<TypeId> {
         match self.lookup_symbol(&ident.name) {
-            Some(symbol) => Ok(symbol.type_id),
+            Some(symbol) => {
+                Ok(symbol.type_id)
+            },
             None => {
                 // Check if it's a generated type identifier for make()
                 if let Some(base_type) = self.extract_base_type_from_generated(&ident.name) {
@@ -878,7 +886,6 @@ impl TypeChecker {
             "uint8" | "uint16" | "uint32" | "uint64" |
             "float32" | "float64" | "bool" | "char" |
             "string" | "any" | "unknown" => {
-                println!("DEBUG: '{}' is a primitive type", type_name);
                 true
             }
             _ => {
@@ -1601,14 +1608,8 @@ impl TypeChecker {
                     }
                 }
 
-                if !field_found {
-                    return Err(BuluError::TypeError {
-                        message: format!("Missing field '{}' in struct literal", field.name),
-                        line: struct_lit.position.line,
-                        column: struct_lit.position.column,
-                        file: None,
-                    });
-                }
+                // Field not found is OK - it will get a default value
+                // We don't need to error here anymore
             }
 
             // Check for extra fields that don't exist in the struct
@@ -1643,6 +1644,35 @@ impl TypeChecker {
                 column: struct_lit.position.column,
                 file: None,
             })
+        }
+    }
+
+    /// Get the default value for a type
+    fn get_default_value_for_type(&self, type_id: TypeId) -> crate::types::primitive::RuntimeValue {
+        use crate::types::primitive::RuntimeValue;
+        
+        match type_id {
+            TypeId::Int8 => RuntimeValue::Int8(0),
+            TypeId::Int16 => RuntimeValue::Int16(0),
+            TypeId::Int32 => RuntimeValue::Int32(0),
+            TypeId::Int64 => RuntimeValue::Int64(0),
+            TypeId::UInt8 => RuntimeValue::UInt8(0),
+            TypeId::UInt16 => RuntimeValue::UInt16(0),
+            TypeId::UInt32 => RuntimeValue::UInt32(0),
+            TypeId::UInt64 => RuntimeValue::UInt64(0),
+            TypeId::Float32 => RuntimeValue::Float32(0.0),
+            TypeId::Float64 => RuntimeValue::Float64(0.0),
+            TypeId::Bool => RuntimeValue::Bool(false),
+            TypeId::Char => RuntimeValue::Char('\0'),
+            TypeId::String => RuntimeValue::String(String::new()),
+            TypeId::Struct(_) => {
+                // For structs, create an empty struct (all fields will get default values)
+                RuntimeValue::Struct {
+                    name: "".to_string(),
+                    fields: std::collections::HashMap::new(),
+                }
+            }
+            _ => RuntimeValue::Null, // For any other type, use null as default
         }
     }
 
@@ -1832,6 +1862,25 @@ impl TypeChecker {
     ) {
         let symbol_table = symbol_resolver.symbol_table();
 
+        // First, import struct declarations from loaded modules
+        for module in symbol_resolver.get_loaded_modules() {
+            for statement in &module.ast.statements {
+                match statement {
+                    Statement::StructDecl(struct_decl) if struct_decl.is_exported => {
+                        // Add the struct declaration to our structs collection
+                        self.structs.insert(struct_decl.name.clone(), struct_decl.clone());
+                    }
+                    Statement::Export(export_stmt) => {
+                        // Check if this is an exported struct
+                        if let Statement::StructDecl(struct_decl) = export_stmt.item.as_ref() {
+                            self.structs.insert(struct_decl.name.clone(), struct_decl.clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         // Only import imported symbols (not local symbols, as they are handled by the TypeChecker itself)
         for (name, imported_symbol) in &symbol_table.imported_symbols {
             let symbol = match imported_symbol.symbol_type {
@@ -1872,27 +1921,43 @@ impl TypeChecker {
                     }
                 }
                 crate::compiler::symbol_resolver::SymbolType::Variable => {
+                    let type_id = if let Some(ref type_info) = imported_symbol.type_info {
+                        self.ast_type_to_type_id(type_info)
+                    } else {
+                        TypeId::Any // Fallback if no type info available
+                    };
+                    
                     Symbol {
                         name: name.clone(),
-                        type_id: TypeId::Any, // TODO: Infer actual type
-                        is_mutable: true,
+                        type_id,
+                        is_mutable: imported_symbol.is_mutable,
                         position: imported_symbol.position,
                         function_info: None,
                     }
                 }
                 crate::compiler::symbol_resolver::SymbolType::Constant => {
+                    let type_id = if let Some(ref type_info) = imported_symbol.type_info {
+                        self.ast_type_to_type_id(type_info)
+                    } else {
+                        // Fallback to the old method if no type info available
+                        self.infer_constant_type_from_modules(name, symbol_resolver)
+                            .unwrap_or(TypeId::Any)
+                    };
+                    
                     Symbol {
                         name: name.clone(),
-                        type_id: TypeId::Any, // TODO: Infer actual type
+                        type_id,
                         is_mutable: false,
                         position: imported_symbol.position,
                         function_info: None,
                     }
                 }
                 crate::compiler::symbol_resolver::SymbolType::Struct => {
+                    // Create a proper TypeId for the imported struct
+                    let struct_type_id = self.get_or_create_named_type_id(name, false);
                     Symbol {
                         name: name.clone(),
-                        type_id: TypeId::Struct(0), // Use placeholder ID
+                        type_id: struct_type_id,
                         is_mutable: false,
                         position: imported_symbol.position,
                         function_info: None,
@@ -1907,13 +1972,21 @@ impl TypeChecker {
                         function_info: None,
                     }
                 }
-                crate::compiler::symbol_resolver::SymbolType::TypeAlias => Symbol {
-                    name: name.clone(),
-                    type_id: TypeId::Any,
-                    is_mutable: false,
-                    position: imported_symbol.position,
-                    function_info: None,
-                },
+                crate::compiler::symbol_resolver::SymbolType::TypeAlias => {
+                    let type_id = if let Some(ref type_info) = imported_symbol.type_info {
+                        self.ast_type_to_type_id(type_info)
+                    } else {
+                        TypeId::Any
+                    };
+                    
+                    Symbol {
+                        name: name.clone(),
+                        type_id,
+                        is_mutable: false,
+                        position: imported_symbol.position,
+                        function_info: None,
+                    }
+                }
                 crate::compiler::symbol_resolver::SymbolType::Module => Symbol {
                     name: name.clone(),
                     type_id: TypeId::Any,
@@ -1927,6 +2000,49 @@ impl TypeChecker {
             if let Some(global_scope) = self.scopes.first_mut() {
                 global_scope.insert(name.clone(), symbol);
             }
+        }
+    }
+
+    /// Infer the type of a constant from loaded modules
+    fn infer_constant_type_from_modules(
+        &mut self,
+        constant_name: &str,
+        symbol_resolver: &crate::compiler::symbol_resolver::SymbolResolver,
+    ) -> Option<TypeId> {
+        // Search through loaded modules to find the constant declaration
+        for module in symbol_resolver.get_loaded_modules() {
+            for statement in &module.ast.statements {
+                match statement {
+                    Statement::VariableDecl(var_decl) if var_decl.is_const && var_decl.name == constant_name => {
+                        // Found the constant declaration, extract its type
+                        if let Some(ref type_annotation) = var_decl.type_annotation {
+                            return Some(self.ast_type_to_type_id(type_annotation));
+                        } else if let Some(ref initializer) = var_decl.initializer {
+                            // Infer type from initializer
+                            return Some(self.infer_type_from_expression(initializer));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        None
+    }
+    
+    /// Infer type from an expression (simplified version)
+    fn infer_type_from_expression(&self, expr: &Expression) -> TypeId {
+        match expr {
+            Expression::Literal(lit) => {
+                match &lit.value {
+                    crate::ast::LiteralValue::Integer(_) => TypeId::Int32,
+                    crate::ast::LiteralValue::Float(_) => TypeId::Float64,
+                    crate::ast::LiteralValue::String(_) => TypeId::String,
+                    crate::ast::LiteralValue::Boolean(_) => TypeId::Bool,
+                    crate::ast::LiteralValue::Char(_) => TypeId::Char,
+                    crate::ast::LiteralValue::Null => TypeId::Any,
+                }
+            }
+            _ => TypeId::Any, // For complex expressions, default to Any
         }
     }
 

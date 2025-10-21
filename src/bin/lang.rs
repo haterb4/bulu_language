@@ -50,18 +50,24 @@ fn main() -> Result<()> {
         )
         .subcommand(
             Command::new("run")
-                .about("Build and run the current project or a specific file")
+                .about("Run a Bulu program (bytecode by default, source with --source)")
                 .arg(
                     Arg::new("file")
-                        .help("Bulu source file to run (optional)")
+                        .help("Bulu file to run (bytecode or source)")
                         .value_name("FILE")
                         .index(1)
                         .required(false),
                 )
                 .arg(
+                    Arg::new("source")
+                        .long("source")
+                        .help("Treat input as source code instead of bytecode")
+                        .action(clap::ArgAction::SetTrue),
+                )
+                .arg(
                     Arg::new("release")
                         .long("release")
-                        .help("Run in release mode")
+                        .help("Run in release mode (only for source)")
                         .action(clap::ArgAction::SetTrue),
                 ),
         )
@@ -335,7 +341,8 @@ fn main() -> Result<()> {
         Some(("run", sub_matches)) => {
             let file = sub_matches.get_one::<String>("file");
             let release = sub_matches.get_flag("release");
-            run_project(file, release)
+            let is_source = sub_matches.get_flag("source");
+            run_project(file, release, is_source)
         }
         Some(("test", sub_matches)) => {
             let verbose = sub_matches.get_flag("verbose");
@@ -503,20 +510,32 @@ fn find_project_entrypoint() -> Result<PathBuf> {
     ))
 }
 
-fn run_project(file: Option<&String>, release: bool) -> Result<()> {
+fn run_project(file: Option<&String>, _release: bool, is_source: bool) -> Result<()> {
     if let Some(file_path) = file {
-        // Run a specific file directly (like bulu_run)
+        // Run a specific file
         let path = Path::new(file_path);
         if !path.exists() {
             return Err(BuluError::Other(format!("File '{}' not found", file_path)));
         }
         
-        execute_source_file(path)?;
+        if is_source {
+            // Treat as source code
+            execute_source_file(path)?;
+        } else {
+            // Treat as bytecode (default)
+            execute_bytecode_file(path)?;
+        }
         Ok(())
     } else {
         // No file specified - look for project entrypoint
-        let entrypoint = find_project_entrypoint()?;
-        execute_source_file(&entrypoint)?;
+        if is_source {
+            let entrypoint = find_project_entrypoint()?;
+            execute_source_file(&entrypoint)?;
+        } else {
+            // Look for compiled bytecode in target/debug
+            let bytecode_path = find_project_bytecode()?;
+            execute_bytecode_file(&bytecode_path)?;
+        }
         Ok(())
     }
 }
@@ -557,6 +576,9 @@ fn execute_source_file(path: &Path) -> Result<RuntimeValue> {
 
     // Import symbols from the symbol resolver
     type_checker.import_symbols_from_resolver(&symbol_resolver);
+    
+    // Re-add builtin functions to ensure they're not overwritten
+    type_checker.add_builtin_functions_after_import();
 
     type_checker.check(&ast)?;
 
@@ -586,6 +608,237 @@ fn execute_source_file(path: &Path) -> Result<RuntimeValue> {
     let mut interpreter = Interpreter::new();
     interpreter.load_program(combined_ir_program);
     interpreter.execute()
+}
+
+/// Execute a Bulu executable or bytecode file
+fn execute_bytecode_file(path: &Path) -> Result<RuntimeValue> {
+    // Check if it's a bytecode file (.buc extension)
+    if path.extension().map_or(false, |ext| ext == "buc") {
+        // Execute bytecode with Rust interpreter
+        execute_bytecode_with_interpreter(path)
+    } else if is_native_executable(path) {
+        // Execute the native binary directly
+        execute_native_binary(path)
+    } else {
+        // Try to detect file type by reading header
+        if let Ok(content) = std::fs::read(path) {
+            if content.len() >= 4 && &content[0..4] == b"BULU" {
+                // It's bytecode, execute with interpreter
+                execute_bytecode_with_interpreter(path)
+            } else {
+                // Assume it's a native executable
+                execute_native_binary(path)
+            }
+        } else {
+            Err(BuluError::Other(format!("Cannot read file: {}", path.display())))
+        }
+    }
+}
+
+/// Check if a file is a native executable
+fn is_native_executable(path: &Path) -> bool {
+    // Check if file is executable
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            let permissions = metadata.permissions();
+            return permissions.mode() & 0o111 != 0; // Check if any execute bit is set
+        }
+    }
+    
+    #[cfg(windows)]
+    {
+        // On Windows, check if it has .exe extension or is executable
+        if path.extension().map_or(false, |ext| ext == "exe") {
+            return true;
+        }
+    }
+    
+    // Try to read the file header to detect if it's a native binary
+    if let Ok(mut file) = std::fs::File::open(path) {
+        use std::io::Read;
+        let mut header = [0u8; 4];
+        if file.read_exact(&mut header).is_ok() {
+            // Check for ELF magic number (Linux)
+            if header == [0x7f, 0x45, 0x4c, 0x46] {
+                return true;
+            }
+            // Check for PE magic number (Windows) - would be at offset 0x3c, but this is a simple check
+            if header[0..2] == [0x4d, 0x5a] { // MZ header
+                return true;
+            }
+            // Check for Mach-O magic numbers (macOS)
+            if header == [0xfe, 0xed, 0xfa, 0xce] || header == [0xfe, 0xed, 0xfa, 0xcf] {
+                return true;
+            }
+        }
+    }
+    
+    false
+}
+
+/// Execute bytecode with the Rust interpreter
+fn execute_bytecode_with_interpreter(path: &Path) -> Result<RuntimeValue> {
+    // Read bytecode file
+    let bytecode = std::fs::read(path)
+        .map_err(|e| BuluError::Other(format!("Failed to read bytecode file: {}", e)))?;
+    
+    // Validate bytecode header
+    if bytecode.len() < 4 || &bytecode[0..4] != b"BULU" {
+        return Err(BuluError::Other("Invalid bytecode format".to_string()));
+    }
+    
+    // Create and run interpreter
+    let mut interpreter = Interpreter::new();
+    
+    // For now, we'll create a simple bytecode execution
+    // This is a placeholder - in a real implementation, we'd parse and execute the bytecode
+    println!("Executing Bulu bytecode...");
+    
+    // Parse the bytecode and execute it
+    execute_simple_bytecode(&bytecode)
+}
+
+/// Simple bytecode executor (placeholder implementation)
+fn execute_simple_bytecode(bytecode: &[u8]) -> Result<RuntimeValue> {
+    if bytecode.len() < 8 {
+        return Err(BuluError::Other("Bytecode too short".to_string()));
+    }
+    
+    let mut pc = 8; // Skip header (BULU + version + reserved + function count)
+    
+    while pc < bytecode.len() {
+        if pc >= bytecode.len() {
+            break;
+        }
+        
+        let opcode = bytecode[pc];
+        pc += 1;
+        
+        match opcode {
+            0x06 => { // LOAD_STRING
+                if pc + 4 > bytecode.len() {
+                    break;
+                }
+                let len = u32::from_le_bytes([
+                    bytecode[pc], bytecode[pc + 1], bytecode[pc + 2], bytecode[pc + 3]
+                ]) as usize;
+                pc += 4;
+                
+                if pc + len > bytecode.len() {
+                    break;
+                }
+                let string_data = &bytecode[pc..pc + len];
+                let string = String::from_utf8_lossy(string_data);
+                print!("{}", string);
+                pc += len;
+            }
+            0x40 => { // PRINTLN
+                println!();
+            }
+            0x30 => { // RETURN
+                break;
+            }
+            _ => {
+                // Skip unknown opcodes
+            }
+        }
+    }
+    
+    Ok(RuntimeValue::Null)
+}
+
+/// Execute a native binary
+fn execute_native_binary(path: &Path) -> Result<RuntimeValue> {
+    use std::process::Command;
+    
+    let output = Command::new(path)
+        .output()
+        .map_err(|e| BuluError::Other(format!("Failed to execute binary: {}", e)))?;
+    
+    // Print stdout
+    if !output.stdout.is_empty() {
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+    }
+    
+    // Print stderr
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    
+    // Check exit status
+    if !output.status.success() {
+        return Err(BuluError::Other(format!(
+            "Program exited with code: {}", 
+            output.status.code().unwrap_or(-1)
+        )));
+    }
+    
+    // Return a dummy value since native executables don't return RuntimeValue
+    Ok(RuntimeValue::Null)
+}
+
+/// Find the compiled executable or bytecode for the current project
+fn find_project_bytecode() -> Result<PathBuf> {
+    let current_dir = std::env::current_dir()
+        .map_err(|e| BuluError::Other(format!("Failed to get current directory: {}", e)))?;
+    
+    // Get project name from directory name
+    let project_name = current_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("main");
+    
+    // First, look for bytecode files (.buc) - these are generated in debug mode
+    let bytecode_path = current_dir.join(format!("{}.buc", project_name));
+    if bytecode_path.exists() {
+        return Ok(bytecode_path);
+    }
+    
+    let debug_bytecode_path = current_dir.join("target").join("debug").join(format!("{}.buc", project_name));
+    if debug_bytecode_path.exists() {
+        return Ok(debug_bytecode_path);
+    }
+    
+    // Then look for native executables - these are generated in release mode
+    let executable_path = current_dir.join(project_name);
+    if executable_path.exists() {
+        return Ok(executable_path);
+    }
+    
+    let debug_path = current_dir.join("target").join("debug").join(project_name);
+    if debug_path.exists() {
+        return Ok(debug_path);
+    }
+    
+    let release_path = current_dir.join("target").join("release").join(project_name);
+    if release_path.exists() {
+        return Ok(release_path);
+    }
+    
+    // Also check with .exe extension on Windows
+    #[cfg(windows)]
+    {
+        let exe_path = current_dir.join(format!("{}.exe", project_name));
+        if exe_path.exists() {
+            return Ok(exe_path);
+        }
+        
+        let debug_exe_path = current_dir.join("target").join("debug").join(format!("{}.exe", project_name));
+        if debug_exe_path.exists() {
+            return Ok(debug_exe_path);
+        }
+        
+        let release_exe_path = current_dir.join("target").join("release").join(format!("{}.exe", project_name));
+        if release_exe_path.exists() {
+            return Ok(release_exe_path);
+        }
+    }
+    
+    Err(BuluError::Other(format!(
+        "No compiled executable or bytecode found. Run 'langc build' first to compile the project."
+    )))
 }
 
 fn run_tests(verbose: bool, coverage: bool, filter: Option<&str>) -> Result<()> {

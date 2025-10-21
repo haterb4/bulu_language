@@ -2150,9 +2150,10 @@ impl Parser {
             }));
         }
 
-        if self.match_tokens(&[TokenType::Not, TokenType::Minus, TokenType::Plus]) {
+        if self.match_tokens(&[TokenType::Not, TokenType::Bang, TokenType::Minus, TokenType::Plus]) {
             let operator = match self.previous().token_type {
                 TokenType::Not => UnaryOperator::Not,
+                TokenType::Bang => UnaryOperator::Not,
                 TokenType::Minus => UnaryOperator::Minus,
                 TokenType::Plus => UnaryOperator::Plus,
                 _ => unreachable!(),

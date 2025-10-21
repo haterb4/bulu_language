@@ -1,5 +1,0 @@
-func main() {
-    // Test pour voir comment les arguments sont parsés
-    println("Test avec deux arguments")
-    // Cette syntaxe devrait échouer si chan et int32 sont parsés séparément
-}

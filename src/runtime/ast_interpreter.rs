@@ -83,6 +83,8 @@ pub struct AstInterpreter {
     globals: Environment,
     /// Current file being executed (for relative imports)
     current_file: Option<String>,
+    /// Struct definitions for type checking and default values
+    struct_definitions: HashMap<String, StructDecl>,
 }
 
 impl AstInterpreter {
@@ -93,6 +95,7 @@ impl AstInterpreter {
             module_resolver: ModuleResolver::new(),
             globals: Environment::new(),
             current_file: None,
+            struct_definitions: HashMap::new(),
         };
         
         // Add built-in identifiers
@@ -204,9 +207,11 @@ impl AstInterpreter {
 
     /// Execute struct declaration
     fn execute_struct_decl(&mut self, decl: &StructDecl) -> Result<RuntimeValue> {
-        // For now, just store struct as a placeholder
-        let struct_value = RuntimeValue::String(format!("struct:{}", decl.name));
+        // Store the complete struct definition for later use
+        self.struct_definitions.insert(decl.name.clone(), decl.clone());
         
+        // Store struct as a type identifier in the environment
+        let struct_value = RuntimeValue::String(format!("struct:{}", decl.name));
         self.environment.define(decl.name.clone(), struct_value.clone());
 
         // If exported, also add to globals
@@ -640,10 +645,61 @@ impl AstInterpreter {
         Ok(RuntimeValue::Null)
     }
 
-    fn execute_struct_literal_expr(&mut self, _expr: &StructLiteralExpr) -> Result<RuntimeValue> {
-        // For now, return a placeholder
-        // In a full implementation, this would create a struct instance
-        Ok(RuntimeValue::Null)
+    fn execute_struct_literal_expr(&mut self, expr: &StructLiteralExpr) -> Result<RuntimeValue> {
+        // Debug: print available struct definitions
+        println!("Available struct definitions: {:?}", self.struct_definitions.keys().collect::<Vec<_>>());
+        println!("Looking for struct: {}", expr.type_name);
+        
+        // Get the struct definition
+        let struct_def = self.struct_definitions.get(&expr.type_name)
+            .ok_or_else(|| BuluError::RuntimeError {
+                message: format!("Unknown struct type '{}'", expr.type_name),
+                file: None,
+            })?;
+
+        let mut fields = HashMap::new();
+
+        // First, set default values for all fields
+        for field in &struct_def.fields {
+            let default_value = self.get_default_value_for_type(&field.field_type);
+            fields.insert(field.name.clone(), default_value);
+        }
+
+        // Then, override with provided values
+        for field_init in &expr.fields {
+            let field_value = self.execute_expression(&field_init.value)?;
+            fields.insert(field_init.name.clone(), field_value);
+        }
+
+        Ok(RuntimeValue::Struct {
+            name: expr.type_name.clone(),
+            fields,
+        })
+    }
+
+    /// Get default value for a given type
+    fn get_default_value_for_type(&self, field_type: &Type) -> RuntimeValue {
+        match field_type {
+            Type::Int8 => RuntimeValue::Int8(0),
+            Type::Int16 => RuntimeValue::Int16(0),
+            Type::Int32 => RuntimeValue::Int32(0),
+            Type::Int64 => RuntimeValue::Int64(0),
+            Type::UInt8 => RuntimeValue::UInt8(0),
+            Type::UInt16 => RuntimeValue::UInt16(0),
+            Type::UInt32 => RuntimeValue::UInt32(0),
+            Type::UInt64 => RuntimeValue::UInt64(0),
+            Type::Float32 => RuntimeValue::Float32(0.0),
+            Type::Float64 => RuntimeValue::Float64(0.0),
+            Type::Bool => RuntimeValue::Bool(false),
+            Type::Char => RuntimeValue::Char('\0'),
+            Type::String => RuntimeValue::String(String::new()),
+            Type::Any => RuntimeValue::Null,
+            Type::Void => RuntimeValue::Null,
+            Type::Array(_) => RuntimeValue::Array(Vec::new()),
+            Type::Slice(_) => RuntimeValue::Slice(Vec::new()),
+            Type::Map(_) => RuntimeValue::Map(HashMap::new()),
+            _ => RuntimeValue::Null, // For complex types, default to null
+        }
     }
 
     // Stub implementations for other statements
