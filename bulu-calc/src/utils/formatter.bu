@@ -1,0 +1,41 @@
+// Utilitaires de formatage
+export struct NumberFormatter {
+    decimalPlaces: int32
+    
+
+    
+    func formatFloat(value: float64): string {
+        // Formatage simple (la vraie implémentation nécessiterait plus de logique)
+        return value.toString()
+    }
+    
+    func formatInteger(value: int64): string {
+        return value.toString()
+    }
+    
+    func formatPercentage(value: float64): string {
+        return (value * 100.0).toString() + "%"
+    }
+    
+    func formatCurrency(value: float64, symbol: string): string {
+        return symbol + " " + this.formatFloat(value)
+    }
+}
+
+export struct DisplayFormatter {
+    func formatResult(operation: string, result: float64): string {
+        return operation + " = " + result.toString()
+    }
+    
+    func formatError(message: string): string {
+        return "ERREUR: " + message
+    }
+    
+    func formatTitle(title: string): string {
+        return "=== " + title + " ==="
+    }
+    
+    func formatSeparator(): string {
+        return "----------------------------------------"
+    }
+}

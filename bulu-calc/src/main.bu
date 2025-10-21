@@ -1,0 +1,116 @@
+import { Calculator } from "./calculator/calculator.bu"
+import { ScientificCalculator } from "./calculator/scientific.bu"
+import { MathConstants, PI, E } from "./math/constants.bu"
+import { DisplayFormatter } from "./utils/formatter.bu"
+import { InputValidator } from "./utils/validator.bu"
+import { MathOperations } from "./math/operations.bu"
+
+func main() {
+    let formatter = DisplayFormatter{}
+    
+    println(formatter.formatTitle("BULU CALCULATOR - Version Avancée"))
+    println("")
+    
+    // Test de la calculatrice de base
+    println("=== Calculatrice de Base ===")
+    let calc = Calculator{
+        lastResult: 0.0,
+        validator: InputValidator{},
+        formatter: NumberFormatter{ decimalPlaces: 2 },
+    }
+    
+    println("Tests des opérations de base:")
+    calc.add(15.5, 24.3)
+    calc.subtract(50.0, 18.7)
+    calc.multiply(7.5, 8.2)
+    calc.divide(100.0, 4.0)
+    calc.modulo(17, 5)
+    
+    println("")
+    println("Tests des opérations sur le dernier résultat:")
+    println("Dernier résultat: " + calc.getLastResult().toString())
+    calc.addToLast(10.0)
+    calc.multiplyLast(2.0)
+    
+    println("")
+    println("Tests des fonctions utilitaires:")
+    println("abs(-15.5) = " + calc.abs(-15.5).toString())
+    println("min(10.2, 7.8) = " + calc.min(10.2, 7.8).toString())
+    println("max(10.2, 7.8) = " + calc.max(10.2, 7.8).toString())
+    println("average(10.0, 20.0) = " + calc.average(10.0, 20.0).toString())
+    
+    println("")
+    println(formatter.formatSeparator())
+    
+    // Test de la calculatrice scientifique
+    println("=== Calculatrice Scientifique ===")
+    // use ScientificCalculator{} instead of ScientificCalculator.new()
+    // or create a way to do ScientificCalculator()
+    // or ScientificCalculator({field: value, field: value}) where {field: value, field: value} should be the fields of 
+    // the struct to be initialized
+    let sciCalc = ScientificCalculator{}
+    sciCalc.mathOps = MathOperations{precision: 2}
+    
+    println("Tests des opérations scientifiques:")
+    sciCalc.power(2.0, 8)
+    sciCalc.sqrt(64.0)
+    sciCalc.factorial(6)
+    sciCalc.fibonacci(10)
+    
+    println("")
+    println("Tests des fonctions trigonométriques:")
+    let constants2 = MathConstants{}
+    let angle = constants2.degToRad(30.0)
+    sciCalc.sin(angle)
+    sciCalc.cos(angle)
+    
+    println("")
+    println("Tests de la mémoire:")
+    sciCalc.memoryStore(42.0)
+    let memValue = sciCalc.memoryRecall()
+    sciCalc.memoryAdd(8.0)
+    sciCalc.memoryRecall()
+    sciCalc.memoryClear()
+    
+    println("")
+    println("=== Constantes Mathématiques ===")
+    let constants = MathConstants{}
+    println("π = " + constants.getPi().toString())
+    println("e = " + constants.getE().toString())
+    println("φ (nombre d'or) = " + constants.getGoldenRatio().toString())
+    println("√2 = " + constants.getSqrt2().toString())
+    
+    println("")
+    println("Conversions d'angles:")
+    println("90° en radians = " + constants.degToRad(90.0).toString())
+    println("π radians en degrés = " + constants.radToDeg(PI).toString())
+    
+    println("")
+    println(formatter.formatSeparator())
+    
+    // Démonstration d'opérations complexes
+    println("=== Calculs Complexes ===")
+    
+    println("Calcul de l'aire d'un cercle (r=5):")
+    let radius = 5.0
+    let area = PI * sciCalc.power(radius, 2)
+    println("Aire = π × r² = " + PI.toString() + " × " + radius.toString() + "² = " + area.toString())
+    
+    println("")
+    println("Suite de Fibonacci (premiers termes):")
+    for i in 0..8 {
+        let fib = sciCalc.fibonacci(i)
+        println("F(" + i.toString() + ") = " + fib.toString())
+    }
+    
+    println("")
+    println("Factorielles:")
+    for i in 1..8 {
+        let fact = sciCalc.factorial(i)
+        println(i.toString() + "! = " + fact.toString())
+    }
+    
+    println("")
+    println(formatter.formatTitle("Calculs terminés avec succès!"))
+    println("Merci d'avoir utilisé Bulu Calculator!")
+}

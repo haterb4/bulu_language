@@ -1,0 +1,121 @@
+// Calculatrice scientifique
+import { MathOperations } from "../math/operations.bu"
+import { MathConstants, PI, E } from "../math/constants.bu"
+
+export struct ScientificCalculator {
+    mathOps: MathOperations
+    constants: MathConstants
+    memory: float64
+    
+    
+    // Opérations de base
+    func add(a: float64, b: float64): float64 {
+        let result = this.mathOps.add(a, b)
+        this.addToHistory(a.toString() + " + " + b.toString() + " = " + result.toString())
+        return result
+    }
+    
+    func subtract(a: float64, b: float64): float64 {
+        let result = this.mathOps.subtract(a, b)
+        this.addToHistory(a.toString() + " - " + b.toString() + " = " + result.toString())
+        return result
+    }
+    
+    func multiply(a: float64, b: float64): float64 {
+        let result = this.mathOps.multiply(a, b)
+        this.addToHistory(a.toString() + " × " + b.toString() + " = " + result.toString())
+        return result
+    }
+    
+    func divide(a: float64, b: float64): float64 {
+        let result = this.mathOps.divide(a, b)
+        this.addToHistory(a.toString() + " ÷ " + b.toString() + " = " + result.toString())
+        return result
+    }
+    
+    // Opérations scientifiques
+    func power(base: float64, exponent: int32): float64 {
+        println("Runningpower on sci")
+        let result = this.mathOps.power(base, exponent)
+        this.addToHistory(base.toString() + "^" + exponent.toString() + " = " + result.toString())
+        return result
+    }
+    
+    func sqrt(x: float64): float64 {
+        let result = this.mathOps.sqrt(x)
+        this.addToHistory("√" + x.toString() + " = " + result.toString())
+        return result
+    }
+    
+    func factorial(n: int32): int64 {
+        let result = this.mathOps.factorial(n)
+        this.addToHistory(n.toString() + "! = " + result.toString())
+        return result
+    }
+    
+    func fibonacci(n: int32): int64 {
+        let result = this.mathOps.fibonacci(n)
+        this.addToHistory("fib(" + n.toString() + ") = " + result.toString())
+        return result
+    }
+    
+    // Fonctions trigonométriques (approximations simples)
+    func sin(x: float64): float64 {
+        // Approximation de Taylor pour sin(x)
+        let result = x - (this.mathOps.power(x, 3) / 6.0) + (this.mathOps.power(x, 5) / 120.0)
+        this.addToHistory("sin(" + x.toString() + ") ≈ " + result.toString())
+        return result
+    }
+    
+    func cos(x: float64): float64 {
+        // Approximation de Taylor pour cos(x)
+        let result = 1.0 - (this.mathOps.power(x, 2) / 2.0) + (this.mathOps.power(x, 4) / 24.0)
+        this.addToHistory("cos(" + x.toString() + ") ≈ " + result.toString())
+        return result
+    }
+    
+    // Gestion de la mémoire
+    func memoryStore(value: float64) {
+        this.memory = value
+        this.addToHistory("M = " + value.toString())
+    }
+    
+    func memoryRecall(): float64 {
+        this.addToHistory("MR = " + this.memory.toString())
+        return this.memory
+    }
+    
+    func memoryClear() {
+        this.memory = 0.0
+        this.addToHistory("MC")
+    }
+    
+    func memoryAdd(value: float64) {
+        this.memory = this.memory + value
+        this.addToHistory("M+ " + value.toString() + " = " + this.memory.toString())
+    }
+    
+    // Gestion de l'historique
+    func addToHistory(operation: string) {
+        // Simuler l'ajout à l'historique
+        println("Historique: " + operation)
+    }
+    
+    func printHistory() {
+        println("=== Historique des calculs ===")
+        println("(Historique affiché en temps réel)")
+    }
+    
+    func clearHistory() {
+        this.addToHistory("Historique effacé")
+    }
+    
+    // Constantes
+    func getPi(): float64 {
+        return this.constants.getPi()
+    }
+    
+    func getE(): float64 {
+        return this.constants.getE()
+    }
+}

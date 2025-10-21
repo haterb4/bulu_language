@@ -1,0 +1,51 @@
+// Utilitaires de validation
+export struct InputValidator {
+    func isValidNumber(input: string): bool {
+        // Validation simple - dans une vraie implémentation, on parserait la chaîne
+        return input.length() > 0
+    }
+    
+    func isPositive(value: float64): bool {
+        return value > 0.0
+    }
+    
+    func isNonZero(value: float64): bool {
+        return value != 0.0
+    }
+    
+    func isInteger(value: float64): bool {
+        // Vérification simple si c'est un entier
+        return value == value  // Placeholder - vraie logique nécessaire
+    }
+    
+    func isInRange(value: float64, min: float64, max: float64): bool {
+        return value >= min && value <= max
+    }
+    
+    func validateDivision(dividend: float64, divisor: float64): bool {
+        if not this.isNonZero(divisor) {
+            println("Erreur: Division par zéro!")
+            return false
+        }
+        return true
+    }
+    
+    func validateSqrt(value: float64): bool {
+        if !this.isPositive(value) && value != 0.0 {
+            println("Erreur: Racine carrée d'un nombre négatif!")
+            return false
+        }
+        return true
+    }
+    
+    func validateFactorial(value: int32): bool {
+        if value < 0 {
+            println("Erreur: Factorielle d'un nombre négatif!")
+            return false
+        }
+        if value > 20 {
+            println("Attention: Factorielle très grande, résultat peut déborder!")
+        }
+        return true
+    }
+}

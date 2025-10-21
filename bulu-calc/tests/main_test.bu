@@ -1,0 +1,18 @@
+// Point d'entrée principal pour tous les tests
+import { runAllTests } from "./calculator_test.bu"
+import { runMathTests } from "./math_test.bu"
+
+func main() {
+    println("🧪 BULU CALCULATOR - SUITE DE TESTS")
+    println("=====================================")
+    println()
+    
+    // Exécuter tous les tests
+    runAllTests()
+    println()
+    runMathTests()
+    
+    println()
+    println("🎉 TOUS LES TESTS SONT PASSÉS AVEC SUCCÈS!")
+    println("Le projet Bulu Calculator fonctionne correctement.")
+}

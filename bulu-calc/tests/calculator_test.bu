@@ -1,0 +1,74 @@
+// Tests pour la calculatrice de base
+import { Calculator } from "../src/calculator/calculator.bu"
+
+func testBasicOperations() {
+    let calc = Calculator.new()
+    
+    // Test addition
+    let result = calc.add(5.0, 3.0)
+    assert(result == 8.0, "Addition test failed")
+    
+    // Test soustraction
+    result = calc.subtract(10.0, 4.0)
+    assert(result == 6.0, "Subtraction test failed")
+    
+    // Test multiplication
+    result = calc.multiply(6.0, 7.0)
+    assert(result == 42.0, "Multiplication test failed")
+    
+    // Test division
+    result = calc.divide(15.0, 3.0)
+    assert(result == 5.0, "Division test failed")
+    
+    println("✓ Tests des opérations de base réussis")
+}
+
+func testUtilityFunctions() {
+    let calc = Calculator.new()
+    
+    // Test valeur absolue
+    let result = calc.abs(-5.5)
+    assert(result == 5.5, "Absolute value test failed")
+    
+    // Test min/max
+    assert(calc.min(3.0, 7.0) == 3.0, "Min test failed")
+    assert(calc.max(3.0, 7.0) == 7.0, "Max test failed")
+    
+    // Test moyenne
+    assert(calc.average(4.0, 6.0) == 5.0, "Average test failed")
+    
+    println("✓ Tests des fonctions utilitaires réussis")
+}
+
+func testLastResultOperations() {
+    let calc = Calculator.new()
+    
+    // Initialiser avec une valeur
+    calc.add(10.0, 5.0)  // lastResult = 15.0
+    
+    // Test opérations sur le dernier résultat
+    let result = calc.addToLast(5.0)  // 15.0 + 5.0 = 20.0
+    assert(result == 20.0, "Add to last test failed")
+    
+    result = calc.multiplyLast(2.0)  // 20.0 * 2.0 = 40.0
+    assert(result == 40.0, "Multiply last test failed")
+    
+    println("✓ Tests des opérations sur le dernier résultat réussis")
+}
+
+func runAllTests() {
+    println("=== Exécution des Tests de la Calculatrice ===")
+    
+    testBasicOperations()
+    testUtilityFunctions()
+    testLastResultOperations()
+    
+    println("✅ Tous les tests sont passés avec succès!")
+}
+
+// Fonction d'assertion simple
+func assert(condition: bool, message: string) {
+    if !condition {
+        panic("ASSERTION FAILED: " + message)
+    }
+}

@@ -1,0 +1,111 @@
+// Calculatrice de base améliorée
+import { InputValidator } from "../utils/validator.bu"
+import { NumberFormatter } from "../utils/formatter.bu"
+
+export struct Calculator {
+    validator: InputValidator
+    formatter: NumberFormatter
+    lastResult: float64
+    
+    func new(): Calculator {
+        return Calculator{
+            validator: InputValidator{},
+            formatter: NumberFormatter{ decimalPlaces: 2 },
+            lastResult: 0.0
+        }
+    }
+    
+    // Opérations de base avec validation
+    func add(a: float64, b: float64): float64 {
+        let result = a + b
+        this.lastResult = result
+        println("Addition: " + a.toString() + " + " + b.toString() + " = " + result.toString())
+        return result
+    }
+    
+    func subtract(a: float64, b: float64): float64 {
+        let result = a - b
+        this.lastResult = result
+        println("Soustraction: " + a.toString() + " - " + b.toString() + " = " + result.toString())
+        return result
+    }
+    
+    func multiply(a: float64, b: float64): float64 {
+        let result = a * b
+        this.lastResult = result
+        println("Multiplication: " + a.toString() + " × " + b.toString() + " = " + result.toString())
+        return result
+    }
+    
+    func divide(a: float64, b: float64): float64 {
+        if not this.validator.validateDivision(a, b) {
+            return 0.0
+        }
+        let result = a / b
+        this.lastResult = result
+        println("Division: " + a.toString() + " ÷ " + b.toString() + " = " + result.toString())
+        return result
+    }
+    
+    func modulo(a: int32, b: int32): int32 {
+        if b == 0 {
+            println("Erreur: Modulo par zéro!")
+            return 0
+        }
+        let result = a % b
+        println("Modulo: " + a.toString() + " % " + b.toString() + " = " + result.toString())
+        return result
+    }
+    
+    // Opérations sur le dernier résultat
+    func addToLast(value: float64): float64 {
+        return this.add(this.lastResult, value)
+    }
+    
+    func subtractFromLast(value: float64): float64 {
+        return this.subtract(this.lastResult, value)
+    }
+    
+    func multiplyLast(value: float64): float64 {
+        return this.multiply(this.lastResult, value)
+    }
+    
+    func divideLast(value: float64): float64 {
+        return this.divide(this.lastResult, value)
+    }
+    
+    func getLastResult(): float64 {
+        return this.lastResult
+    }
+    
+    func clearLastResult() {
+        this.lastResult = 0.0
+        println("Dernier résultat effacé")
+    }
+    
+    // Opérations utilitaires
+    func abs(value: float64): float64 {
+        if value < 0.0 {
+            return -value
+        }
+        return value
+    }
+    
+    func min(a: float64, b: float64): float64 {
+        if a < b {
+            return a
+        }
+        return b
+    }
+    
+    func max(a: float64, b: float64): float64 {
+        if a > b {
+            return a
+        }
+        return b
+    }
+    
+    func average(a: float64, b: float64): float64 {
+        return (a + b) / 2.0
+    }
+}

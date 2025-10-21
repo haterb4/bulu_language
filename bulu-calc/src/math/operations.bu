@@ -1,0 +1,88 @@
+// Module pour les opérations mathématiques avancées
+export struct MathOperations {
+    precision: int32
+    
+    func new(precision: int32): MathOperations {
+        return MathOperations{ precision: precision }
+    }
+    
+    // Opérations de base
+    func add(a: float64, b: float64): float64 {
+        return a + b
+    }
+    
+    func subtract(a: float64, b: float64): float64 {
+        return a - b
+    }
+    
+    func multiply(a: float64, b: float64): float64 {
+        return a * b
+    }
+    
+    func divide(a: float64, b: float64): float64 {
+        if b == 0.0 {
+            panic("Division par zéro!")
+        }
+        return a / b
+    }
+    
+    // Opérations avancées
+    func power(base: float64, exponent: int32): float64 {
+        if exponent == 0 {
+            return 1.0
+        }
+        
+        let result = base
+        for i in 1..exponent {
+            result = result * base
+        }
+        return result
+    }
+    
+    func sqrt(x: float64): float64 {
+        if x < 0.0 {
+            panic("Racine carrée d'un nombre négatif!")
+        }
+        
+        // Méthode de Newton-Raphson simplifiée
+        let guess = x / 2.0
+        for i in 1..10 {
+            guess = (guess + x / guess) / 2.0
+        }
+        return guess
+    }
+    
+    func factorial(n: int32): int64 {
+        if n < 0 {
+            panic("Factorielle d'un nombre négatif!")
+        }
+        if n <= 1 {
+            return 1
+        }
+        
+        let result: int64 = 1
+        for i in 2..n+1 {
+            result = result * i
+        }
+        return result
+    }
+    
+    func fibonacci(n: int32): int64 {
+        if n <= 0 {
+            return 0
+        }
+        if n == 1 {
+            return 1
+        }
+        
+        let a: int64 = 0
+        let b: int64 = 1
+        
+        for i in 2..n+1 {
+            let temp = a + b
+            a = b
+            b = temp
+        }
+        return b
+    }
+}

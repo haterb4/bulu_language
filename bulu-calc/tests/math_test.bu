@@ -1,0 +1,81 @@
+// Tests pour les opérations mathématiques
+import { MathOperations } from "../src/math/operations.bu"
+import { MathConstants } from "../src/math/constants.bu"
+
+func testMathOperations() {
+    let mathOps = MathOperations{ precision: 10 }
+    
+    // Test puissance
+    let result = mathOps.power(2.0, 3)
+    assert(result == 8.0, "Power test failed: 2^3 should be 8")
+    
+    // Test racine carrée
+    result = mathOps.sqrt(9.0)
+    // Approximation acceptable pour sqrt
+    assert(result > 2.9 && result < 3.1, "Square root test failed")
+    
+    // Test factorielle
+    let factResult = mathOps.factorial(5)
+    assert(factResult == 120, "Factorial test failed: 5! should be 120")
+    
+    // Test Fibonacci
+    let fibResult = mathOps.fibonacci(6)
+    assert(fibResult == 8, "Fibonacci test failed: F(6) should be 8")
+    
+    println("✓ Tests des opérations mathématiques réussis")
+}
+
+func testMathConstants() {
+    let constants = MathConstants{}
+    
+    // Test des constantes (approximations)
+    let pi = constants.getPi()
+    assert(pi > 3.14 && pi < 3.15, "Pi constant test failed")
+    
+    let e = constants.getE()
+    assert(e > 2.71 && e < 2.72, "E constant test failed")
+    
+    // Test conversions d'angles
+    let radians = constants.degToRad(180.0)
+    assert(radians > 3.14 && radians < 3.15, "Degree to radian conversion failed")
+    
+    let degrees = constants.radToDeg(pi)
+    assert(degrees > 179.0 && degrees < 181.0, "Radian to degree conversion failed")
+    
+    println("✓ Tests des constantes mathématiques réussis")
+}
+
+func testEdgeCases() {
+    let mathOps = MathOperations{ precision: 10 }
+    
+    // Test factorielle de 0
+    let result = mathOps.factorial(0)
+    assert(result == 1, "Factorial of 0 should be 1")
+    
+    // Test Fibonacci de 0 et 1
+    assert(mathOps.fibonacci(0) == 0, "Fibonacci of 0 should be 0")
+    assert(mathOps.fibonacci(1) == 1, "Fibonacci of 1 should be 1")
+    
+    // Test puissance avec exposant 0
+    let powerResult = mathOps.power(5.0, 0)
+    assert(powerResult == 1.0, "Any number to power 0 should be 1")
+    
+    println("✓ Tests des cas limites réussis")
+}
+
+func runMathTests() {
+    println("=== Exécution des Tests Mathématiques ===")
+    
+    testMathOperations()
+    testMathConstants()
+    testEdgeCases()
+    
+    println("✅ Tous les tests mathématiques sont passés!")
+}
+
+// Fonction d'assertion simple
+func assert(condition: bool, message: string) {
+    if !condition {
+        panic("ASSERTION FAILED: " + message)
+    }
+}
