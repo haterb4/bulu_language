@@ -1,0 +1,17 @@
+func main() {
+    println("=== Test de Slicing Complet ===")
+    let arr = [1, 2, 3, 4, 5]
+    println("Array original: [1, 2, 3, 4, 5]")
+    
+    // Test différents types de slicing
+    let slice1 = arr[1:3]
+    println("arr[1:3]: " + slice1.toString())
+    
+    let slice2 = arr[0:2]
+    println("arr[0:2]: " + slice2.toString())
+    
+    let slice3 = arr[2:5]
+    println("arr[2:5]: " + slice3.toString())
+    
+    println("=== Test terminé avec succès ! ===")
+}
