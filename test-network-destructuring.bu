@@ -1,0 +1,14 @@
+func main() {
+    println("=== Test de destructuration réseau ===")
+    
+    // Simuler un résultat de recv_from
+    let result = {bytesRead: 42, fromAddr: "127.0.0.1:8080"}
+    
+    // Test de destructuration
+    let {bytesRead, fromAddr} = result
+    
+    println("Bytes lus: " + bytesRead.toString())
+    println("Adresse source: " + fromAddr)
+    
+    println("✅ Test réussi!")
+}

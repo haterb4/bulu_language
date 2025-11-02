@@ -1,0 +1,4 @@
+func main() {
+    let {field1} = {field1: 42};
+    print("Hello");
+}

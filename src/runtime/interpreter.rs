@@ -3160,7 +3160,8 @@ impl Interpreter {
                 let object = self.evaluate_value(&instruction.operands[0])?;
                 let member_name = match &instruction.operands[1] {
                     IrValue::Global(name) => name,
-                    _ => return Err(BuluError::Other("Member name must be a global".to_string())),
+                    IrValue::Constant(IrConstant::String(name)) => name,
+                    _ => return Err(BuluError::Other("Member name must be a global or string constant".to_string())),
                 };
 
 
@@ -3291,15 +3292,22 @@ impl Interpreter {
                     }
                 };
 
-                // Create an empty array with the specified size
-                let array = vec![RuntimeValue::Null; array_size];
+                // Create an empty array with the specified size, or a map if size is 0
+                let value = if array_size == 0 {
+                    // Size 0 indicates a map allocation
+                    RuntimeValue::Struct {
+                        name: String::new(),
+                        fields: std::collections::HashMap::new(),
+                    }
+                } else {
+                    // Non-zero size indicates an array allocation
+                    RuntimeValue::Array(vec![RuntimeValue::Null; array_size])
+                };
 
                 // Store result in register if specified
                 if let Some(result_reg) = &instruction.result {
                     if let Some(frame) = self.call_stack.last_mut() {
-                        frame
-                            .registers
-                            .insert(result_reg.id, RuntimeValue::Array(array));
+                        frame.registers.insert(result_reg.id, value);
                     }
                 }
             }
@@ -3365,6 +3373,38 @@ impl Interpreter {
                                     ));
                                 }
                             }
+                        }
+                    }
+                }
+            }
+            IrOpcode::MapInsert => {
+                if instruction.operands.len() != 3 {
+                    return Err(BuluError::Other(
+                        "MapInsert instruction requires exactly three operands".to_string(),
+                    ));
+                }
+
+                let key = self.evaluate_value(&instruction.operands[1])?;
+                let value = self.evaluate_value(&instruction.operands[2])?;
+
+                // Convert key to string
+                let key_str = match key {
+                    RuntimeValue::String(s) => s,
+                    RuntimeValue::Integer(i) => i.to_string(),
+                    RuntimeValue::Int32(i) => i.to_string(),
+                    RuntimeValue::Int64(i) => i.to_string(),
+                    RuntimeValue::Float64(f) => f.to_string(),
+                    RuntimeValue::Bool(b) => b.to_string(),
+                    _ => return Err(BuluError::Other("Map keys must be convertible to strings".to_string())),
+                };
+
+                // Insert into the map (struct)
+                if let IrValue::Register(reg) = &instruction.operands[0] {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        if let Some(RuntimeValue::Struct { fields, .. }) = frame.registers.get_mut(&reg.id) {
+                            fields.insert(key_str, value);
+                        } else {
+                            return Err(BuluError::Other("MapInsert target is not a struct".to_string()));
                         }
                     }
                 }

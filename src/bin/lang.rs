@@ -604,11 +604,10 @@ fn execute_source_file(path: &Path) -> Result<RuntimeValue> {
         combined_ir_program.interfaces.extend(module_ir.interfaces);
     }
 
-    // Execute with AST interpreter for better feature support
-    use bulu::runtime::ast_interpreter::AstInterpreter;
-    let mut ast_interpreter = AstInterpreter::new();
-    ast_interpreter.set_current_file(file_path);
-    ast_interpreter.execute_program(&ast)
+    // Execute with interpreter
+    let mut interpreter = Interpreter::new();
+    interpreter.load_program(combined_ir_program);
+    interpreter.execute()
 }
 
 /// Execute a Bulu executable or bytecode file

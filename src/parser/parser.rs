@@ -3206,8 +3206,16 @@ impl Parser {
                     break;
                 }
 
-                // Parse key
-                let key = self.parse_expression()?;
+                // Parse key - handle identifiers as string literals
+                let key = if self.check(&TokenType::Identifier) {
+                    let ident = self.advance().clone();
+                    Expression::Literal(LiteralExpr {
+                        value: LiteralValue::String(ident.lexeme),
+                        position: ident.position,
+                    })
+                } else {
+                    self.parse_expression()?
+                };
 
                 // Skip newlines
                 while self.match_token(&TokenType::Newline) {}

@@ -1693,7 +1693,22 @@ impl TypeChecker {
             return Ok(TypeId::Map(0)); // Empty map
         }
 
-        // Check first entry to determine key and value types
+        // Check if all keys are string literals (object literal pattern)
+        let is_object_literal = map.entries.iter().all(|entry| {
+            matches!(entry.key, Expression::Literal(ref lit) if matches!(lit.value, LiteralValue::String(_)))
+        });
+
+        if is_object_literal {
+            // For object literals, allow mixed value types
+            for entry in &map.entries {
+                self.check_expression(&entry.key)?;
+                self.check_expression(&entry.value)?;
+            }
+            // Return a generic map type for object literals
+            return Ok(TypeId::Map(0));
+        }
+
+        // For regular maps, enforce type consistency
         let first_entry = &map.entries[0];
         let key_type = self.check_expression(&first_entry.key)?;
         let value_type = self.check_expression(&first_entry.value)?;
@@ -2452,6 +2467,12 @@ impl TypeChecker {
                                 column: 0,
                                 file: None,
                             });
+                        }
+                    }
+                    TypeId::Map(_) => {
+                        // For Map type (object literals), assume all fields exist and extract their types from the map
+                        for field_pattern in &struct_pattern.fields {
+                            self.check_pattern_and_add_variables(&field_pattern.pattern, TypeId::Any)?;
                         }
                     }
                     TypeId::Any => {
