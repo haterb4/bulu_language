@@ -1,0 +1,226 @@
+// Bulu Network Ping-Pong Example
+// Tests TCP and UDP networking functionality
+
+import { TcpServer, TcpConnection, UdpConnection, NetAddr } from "std/net"
+import { sleep } from "std/time"
+
+func main() {
+    println("=== BULU NETWORK PING-PONG DEMO ===")
+    println("")
+    
+    // Test TCP Ping-Pong
+    println("🔗 Testing TCP Ping-Pong...")
+    testTcpPingPong()
+    
+    println("")
+    
+    // Test UDP Ping-Pong  
+    println("📡 Testing UDP Ping-Pong...")
+    testUdpPingPong()
+    
+    println("")
+    println("✅ All network tests completed!")
+}
+
+func testTcpPingPong() {
+    let port = 8080
+    let addr = NetAddr.localhost_ipv4(port)
+    
+    println("Starting TCP server on localhost:" + port.toString())
+    
+    // Start TCP server in a goroutine
+    run runTcpServer(addr)
+    
+    // Give server time to start
+    sleep(100) // 100ms
+    
+    // Connect as client and send ping-pong messages
+    runTcpClient(addr)
+}
+
+func runTcpServer(addr: NetAddr) {
+    let server = TcpServer.bind(addr)
+    if server.isError() {
+        println("❌ Failed to bind TCP server: " + server.error().toString())
+        return
+    }
+    
+    println("✅ TCP Server listening on " + addr.toString())
+    
+    // Accept one connection for demo
+    let conn = server.accept()
+    if conn.isError() {
+        println("❌ Failed to accept connection: " + conn.error().toString())
+        return
+    }
+    
+    println("📞 Client connected from " + conn.peer_addr().toString())
+    
+    // Ping-pong loop
+    for i in 0..5 {
+        // Read ping from client
+        let buffer = make([]byte, 1024)
+        let bytesRead = conn.read(buffer)
+        if bytesRead.isError() {
+            println("❌ Error reading from client: " + bytesRead.error().toString())
+            break
+        }
+        
+        let message = string(buffer[0:bytesRead])
+        println("📨 Server received: " + message)
+        
+        // Send pong back
+        let pongMessage = "PONG " + i.toString()
+        let bytesWritten = conn.write(pongMessage.bytes())
+        if bytesWritten.isError() {
+            println("❌ Error writing to client: " + bytesWritten.error().toString())
+            break
+        }
+        
+        println("📤 Server sent: " + pongMessage)
+    }
+    
+    conn.close()
+    println("🔌 TCP Server connection closed")
+}
+
+func runTcpClient(addr: NetAddr) {
+    println("🔗 Connecting to TCP server...")
+    
+    let conn = TcpConnection.connect(addr)
+    if conn.isError() {
+        println("❌ Failed to connect to server: " + conn.error().toString())
+        return
+    }
+    
+    println("✅ Connected to server at " + addr.toString())
+    
+    // Ping-pong loop
+    for i in 0..5 {
+        // Send ping
+        let pingMessage = "PING " + i.toString()
+        let bytesWritten = conn.write(pingMessage.bytes())
+        if bytesWritten.isError() {
+            println("❌ Error writing to server: " + bytesWritten.error().toString())
+            break
+        }
+        
+        println("📤 Client sent: " + pingMessage)
+        
+        // Read pong response
+        let buffer = make([]byte, 1024)
+        let bytesRead = conn.read(buffer)
+        if bytesRead.isError() {
+            println("❌ Error reading from server: " + bytesRead.error().toString())
+            break
+        }
+        
+        let message = string(buffer[0:bytesRead])
+        println("📨 Client received: " + message)
+        
+        // Small delay between messages
+        sleep(50) // 50ms
+    }
+    
+    conn.close()
+    println("🔌 TCP Client connection closed")
+}
+
+func testUdpPingPong() {
+    let serverPort = 8081
+    let clientPort = 8082
+    let serverAddr = NetAddr.localhost_ipv4(serverPort)
+    let clientAddr = NetAddr.localhost_ipv4(clientPort)
+    
+    println("Starting UDP ping-pong between ports " + serverPort.toString() + " and " + clientPort.toString())
+    
+    // Start UDP server in a goroutine
+    run runUdpServer(serverAddr, clientAddr)
+
+    
+    // Give server time to start
+    sleep(100) // 100ms
+    
+    // Run UDP client
+    runUdpClient(clientAddr, serverAddr)
+}
+
+func runUdpServer(serverAddr: NetAddr, clientAddr: NetAddr) {
+    let socket = UdpConnection.bind(serverAddr)
+    if socket.isError() {
+        println("❌ Failed to bind UDP server: " + socket.error().toString())
+        return
+    }
+    
+    println("✅ UDP Server listening on " + serverAddr.toString())
+    
+    // Ping-pong loop
+    for i in 0..5 {
+        // Read ping from client
+        let buffer = make([]byte, 1024)
+        let result = socket.recv_from(buffer)
+        if result.isError() {
+            println("❌ Error reading UDP message: " + result.error().toString())
+            break
+        }
+        //just for test
+        let a, b : int64;
+        let a: int64, b: int32, c: string;
+        // continue, with the example
+        let {bytesRead, fromAddr} = result;
+        let message = string(buffer[0:bytesRead]);
+        println("📨 UDP Server received from " + fromAddr.toString() + ": " + message);
+        
+        // Send pong back
+        let pongMessage = "UDP_PONG " + i.toString()
+        let bytesSent = socket.send_to(pongMessage.bytes(), clientAddr)
+        if bytesSent.isError() {
+            println("❌ Error sending UDP message: " + bytesSent.error().toString())
+            break
+        }
+        
+        println("📤 UDP Server sent: " + pongMessage)
+    }
+    
+    println("🔌 UDP Server finished")
+}
+
+func runUdpClient(clientAddr: NetAddr, serverAddr: NetAddr) {
+    let socket = UdpConnection.bind(clientAddr)
+    if socket.isError() {
+        println("❌ Failed to bind UDP client: " + socket.error().toString())
+        return
+    }
+    
+    println("✅ UDP Client bound to " + clientAddr.toString())
+    
+    // Ping-pong loop
+    for i in 0..5 {
+        // Send ping
+        let pingMessage = "UDP_PING " + i.toString()
+        let bytesSent = socket.send_to(pingMessage.bytes(), serverAddr)
+        if bytesSent.isError() {
+            println("❌ Error sending UDP message: " + bytesSent.error().toString())
+            break
+        }
+        
+        println("📤 UDP Client sent: " + pingMessage)
+        
+        // Read pong response
+        let buffer = make([]byte, 1024)
+        let result = socket.recv_from(buffer)
+        if result.isError() {
+            println("❌ Error reading UDP response: " + result.error().toString())
+            break
+        }
+        
+        let (bytesRead, fromAddr) = result
+        let message = string(buffer[0:bytesRead])
+        println("📨 UDP Client received from " + fromAddr.toString() + ": " + message)
+        
+        // Small delay between messages
+        sleep(50) // 50ms
+    }
+    
+    println("🔌 UDP Client finished")
+}

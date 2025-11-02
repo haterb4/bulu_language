@@ -18,6 +18,9 @@ pub struct Program {
 pub enum Statement {
     // Declarations
     VariableDecl(VariableDecl),
+    DestructuringDecl(DestructuringDecl),
+    MultipleVariableDecl(MultipleVariableDecl),
+    MultipleAssignment(MultipleAssignmentStmt),
     FunctionDecl(FunctionDecl),
     StructDecl(StructDecl),
     InterfaceDecl(InterfaceDecl),
@@ -120,6 +123,43 @@ pub struct VariableDecl {
     pub initializer: Option<Expression>,
     pub doc_comment: Option<Vec<crate::lexer::token::Token>>,
     pub is_exported: bool,
+    pub position: Position,
+}
+
+/// Destructuring variable declaration: let {a, b} = obj
+#[derive(Debug, Clone, PartialEq)]
+pub struct DestructuringDecl {
+    pub is_const: bool,
+    pub pattern: Pattern,
+    pub initializer: Expression,
+    pub doc_comment: Option<Vec<crate::lexer::token::Token>>,
+    pub is_exported: bool,
+    pub position: Position,
+}
+
+/// Multiple variable declaration: let a, b: int64
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultipleVariableDecl {
+    pub is_const: bool,
+    pub declarations: Vec<SingleVariableDecl>,
+    pub doc_comment: Option<Vec<crate::lexer::token::Token>>,
+    pub is_exported: bool,
+    pub position: Position,
+}
+
+/// Single variable in a multiple declaration
+#[derive(Debug, Clone, PartialEq)]
+pub struct SingleVariableDecl {
+    pub name: String,
+    pub type_annotation: Option<Type>,
+    pub initializer: Option<Expression>,
+}
+
+/// Multiple assignment statement: a, b = b, a
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultipleAssignmentStmt {
+    pub targets: Vec<Expression>,
+    pub values: Vec<Expression>,
     pub position: Position,
 }
 
@@ -911,6 +951,9 @@ impl HasPosition for Statement {
             Statement::Export(node) => node.position,
             Statement::Expression(node) => node.position,
             Statement::Block(node) => node.position,
+            Statement::DestructuringDecl(node) => node.position,
+            Statement::MultipleVariableDecl(node) => node.position,
+            Statement::MultipleAssignment(node) => node.position,
         }
     }
 }

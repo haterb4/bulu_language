@@ -1,0 +1,18 @@
+--- a/src/ast/visitor.rs
++++ b/src/ast/visitor.rs
+@@ -155,6 +155,8 @@ pub fn walk_statement<T, V: Visitor<T>>(visitor: &mut V, statement: &Statement)
+     match statement {
+         Statement::VariableDecl(decl) => visitor.visit_variable_decl(decl),
++        Statement::DestructuringDecl(_) => {}, // TODO: implement visitor for destructuring decl
++        Statement::MultipleVariableDecl(_) => {}, // TODO: implement visitor for multiple variable decl
+         Statement::FunctionDecl(decl) => visitor.visit_function_decl(decl),
+         Statement::StructDecl(decl) => visitor.visit_struct_decl(decl),
+         Statement::InterfaceDecl(decl) => visitor.visit_interface_decl(decl),
+@@ -213,6 +215,8 @@ pub fn walk_statement_mut<V: MutVisitor>(visitor: &mut V, statement: &mut State
+     match statement {
+         Statement::VariableDecl(decl) => visitor.visit_variable_decl(decl),
++        Statement::DestructuringDecl(_) => {}, // TODO: implement visitor for destructuring decl
++        Statement::MultipleVariableDecl(_) => {}, // TODO: implement visitor for multiple variable decl
+         Statement::FunctionDecl(decl) => visitor.visit_function_decl(decl),
+         Statement::StructDecl(decl) => visitor.visit_struct_decl(decl),
+         Statement::InterfaceDecl(decl) => visitor.visit_interface_decl(decl),

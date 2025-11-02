@@ -1,0 +1,8 @@
+func main() {
+    let a: int64 = 1;
+    print("Before:");
+    print(a.toString());
+    a = 42;
+    print("After:");
+    print(a.toString());
+}

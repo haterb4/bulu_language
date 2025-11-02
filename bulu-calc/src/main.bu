@@ -112,5 +112,10 @@ func main() {
     
     println("")
     println(formatter.formatTitle("Calculs terminés avec succès!"))
+    run sayOk(formatter)
     println("Merci d'avoir utilisé Bulu Calculator!")
+}
+
+func sayOk(formatter: DisplayFormatter) {
+    println(formatter.formatTitle("C'est génial!"))
 }

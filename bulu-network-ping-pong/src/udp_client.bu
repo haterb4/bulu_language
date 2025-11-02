@@ -1,0 +1,60 @@
+// Simple UDP Client Example
+
+import { UdpConnection, NetAddr } from "std/net"
+import { sleep } from "std/time"
+
+func main() {
+    println("=== Simple UDP Client ===")
+    
+    let serverPort = 9091
+    let clientPort = 0 // Let system choose port
+    let serverAddr = NetAddr.localhost_ipv4(serverPort)
+    let clientAddr = NetAddr.any_ipv4(clientPort)
+    
+    println("Connecting to UDP server at localhost:" + serverPort.toString())
+    
+    let socket = UdpConnection.bind(clientAddr)
+    if socket.isError() {
+        println("❌ Failed to bind UDP client: " + socket.error().toString())
+        return
+    }
+    
+    println("✅ UDP Client bound to " + socket.local_addr().toString())
+    
+    // Send test messages
+    let messages = ["Hello UDP Server!", "How are you?", "Testing 123", "Final message", "quit"]
+    
+    for message in messages {
+        println("📤 Sending: " + message)
+        
+        // Send message to server
+        let bytesSent = socket.send_to(message.bytes(), serverAddr)
+        if bytesSent.isError() {
+            println("❌ Error sending message: " + bytesSent.error().toString())
+            continue
+        }
+        
+        // Don't wait for response to quit command
+        if message == "quit" {
+            println("👋 Sent quit command, exiting")
+            break
+        }
+        
+        // Wait for response
+        let buffer = make([]byte, 1024)
+        let result = socket.recv_from(buffer)
+        if result.isError() {
+            println("❌ Error receiving response: " + result.error().toString())
+            continue
+        }
+        
+        let (bytesRead, fromAddr) = result
+        let response = string(buffer[0:bytesRead])
+        println("📨 Response from " + fromAddr.toString() + ": " + response)
+        
+        // Small delay between messages
+        sleep(500) // 500ms
+    }
+    
+    println("🔌 UDP Client finished")
+}

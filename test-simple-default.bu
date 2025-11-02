@@ -1,0 +1,5 @@
+func main() {
+    let b, c: int64;
+    let defaultValue: int64 = 0;
+    println(defaultValue.toString());
+}

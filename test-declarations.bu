@@ -1,0 +1,14 @@
+// Test des différents types de déclarations
+
+func main() {
+    let a, b: int64;
+    let x: int64, y: int32, z: string;
+    let object = {x: 2, y: 4, r: 25.1213};
+    let {field1, field2} = {field1: 42, field2: "hello"};
+    let { r } = object;
+    a = 1;
+    b = 5;
+    a, b = b, a;
+    print(field2.toString());
+    print(r.toString());
+}

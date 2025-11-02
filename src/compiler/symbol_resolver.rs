@@ -207,6 +207,57 @@ impl SymbolResolver {
                         self.symbol_table.exported_symbols.insert(var.name.clone(), symbol);
                     }
                 }
+                Statement::MultipleVariableDecl(multi_var) => {
+                    let symbol_type = if multi_var.is_const {
+                        SymbolType::Constant
+                    } else {
+                        SymbolType::Variable
+                    };
+                    
+                    for var_decl in &multi_var.declarations {
+                        let symbol = SymbolInfo {
+                            name: var_decl.name.clone(),
+                            symbol_type: symbol_type.clone(),
+                            is_exported: multi_var.is_exported,
+                            position: multi_var.position,
+                            function_signature: None,
+                            type_info: var_decl.type_annotation.clone(),
+                            is_mutable: !multi_var.is_const,
+                        };
+                        self.symbol_table.local_symbols.insert(var_decl.name.clone(), symbol.clone());
+                        
+                        if multi_var.is_exported {
+                            self.symbol_table.exported_symbols.insert(var_decl.name.clone(), symbol);
+                        }
+                    }
+                }
+                Statement::DestructuringDecl(destructuring) => {
+                    let symbol_type = if destructuring.is_const {
+                        SymbolType::Constant
+                    } else {
+                        SymbolType::Variable
+                    };
+                    
+                    // Extract variable names from the destructuring pattern
+                    let variable_names = self.extract_pattern_variables(&destructuring.pattern);
+                    
+                    for var_name in variable_names {
+                        let symbol = SymbolInfo {
+                            name: var_name.clone(),
+                            symbol_type: symbol_type.clone(),
+                            is_exported: destructuring.is_exported,
+                            position: destructuring.position,
+                            function_signature: None,
+                            type_info: None, // Type will be inferred from the initializer
+                            is_mutable: !destructuring.is_const,
+                        };
+                        self.symbol_table.local_symbols.insert(var_name.clone(), symbol.clone());
+                        
+                        if destructuring.is_exported {
+                            self.symbol_table.exported_symbols.insert(var_name, symbol);
+                        }
+                    }
+                }
                 Statement::StructDecl(struct_decl) => {
                     let symbol = SymbolInfo {
                         name: struct_decl.name.clone(),
@@ -311,6 +362,49 @@ impl SymbolResolver {
                     is_mutable: !var.is_const,
                 };
                 self.symbol_table.exported_symbols.insert(var.name.clone(), symbol);
+            }
+            Statement::MultipleVariableDecl(multi_var) => {
+                let symbol_type = if multi_var.is_const {
+                    SymbolType::Constant
+                } else {
+                    SymbolType::Variable
+                };
+                
+                for var_decl in &multi_var.declarations {
+                    let symbol = SymbolInfo {
+                        name: var_decl.name.clone(),
+                        symbol_type: symbol_type.clone(),
+                        is_exported: true,
+                        position: multi_var.position,
+                        function_signature: None,
+                        type_info: var_decl.type_annotation.clone(),
+                        is_mutable: !multi_var.is_const,
+                    };
+                    self.symbol_table.exported_symbols.insert(var_decl.name.clone(), symbol);
+                }
+            }
+            Statement::DestructuringDecl(destructuring) => {
+                let symbol_type = if destructuring.is_const {
+                    SymbolType::Constant
+                } else {
+                    SymbolType::Variable
+                };
+                
+                // Extract variable names from the destructuring pattern
+                let variable_names = self.extract_pattern_variables(&destructuring.pattern);
+                
+                for var_name in variable_names {
+                    let symbol = SymbolInfo {
+                        name: var_name.clone(),
+                        symbol_type: symbol_type.clone(),
+                        is_exported: true,
+                        position: destructuring.position,
+                        function_signature: None,
+                        type_info: None, // Type will be inferred from the initializer
+                        is_mutable: !destructuring.is_const,
+                    };
+                    self.symbol_table.exported_symbols.insert(var_name, symbol);
+                }
             }
             _ => {
                 return Err(BuluError::TypeError {
@@ -568,6 +662,58 @@ impl SymbolResolver {
                     is_mutable: !var_decl.is_const,
                 };
                 self.define_local_symbol(var_decl.name.clone(), symbol);
+            }
+            Statement::MultipleVariableDecl(multi_var_decl) => {
+                // Handle multiple variable declarations
+                for var_decl in &multi_var_decl.declarations {
+                    // First validate the initializer
+                    if let Some(ref initializer) = var_decl.initializer {
+                        self.validate_expression_symbols(initializer)?;
+                    }
+                    
+                    // Then add the variable to the current scope
+                    let symbol = SymbolInfo {
+                        name: var_decl.name.clone(),
+                        symbol_type: if multi_var_decl.is_const { SymbolType::Constant } else { SymbolType::Variable },
+                        is_exported: multi_var_decl.is_exported,
+                        position: multi_var_decl.position,
+                        function_signature: None,
+                        type_info: var_decl.type_annotation.clone(),
+                        is_mutable: !multi_var_decl.is_const,
+                    };
+                    self.define_local_symbol(var_decl.name.clone(), symbol);
+                }
+            }
+            Statement::DestructuringDecl(destructuring_decl) => {
+                // First validate the initializer
+                self.validate_expression_symbols(&destructuring_decl.initializer)?;
+                
+                // Extract variable names from the pattern and add them to the current scope
+                let variable_names = self.extract_pattern_variables(&destructuring_decl.pattern);
+                
+                for var_name in variable_names {
+                    let symbol = SymbolInfo {
+                        name: var_name.clone(),
+                        symbol_type: if destructuring_decl.is_const { SymbolType::Constant } else { SymbolType::Variable },
+                        is_exported: destructuring_decl.is_exported,
+                        position: destructuring_decl.position,
+                        function_signature: None,
+                        type_info: None, // Type will be inferred from the initializer
+                        is_mutable: !destructuring_decl.is_const,
+                    };
+                    self.define_local_symbol(var_name, symbol);
+                }
+            }
+            Statement::MultipleAssignment(multi_assign) => {
+                // Validate all target expressions (should be identifiers)
+                for target in &multi_assign.targets {
+                    self.validate_expression_symbols(target)?;
+                }
+                
+                // Validate all value expressions
+                for value in &multi_assign.values {
+                    self.validate_expression_symbols(value)?;
+                }
             }
             Statement::FunctionDecl(func_decl) => {
                 // Create a new scope for the function
@@ -835,6 +981,41 @@ impl SymbolResolver {
             }
         }
         None
+    }
+
+    /// Extract variable names from a destructuring pattern
+    fn extract_pattern_variables(&self, pattern: &Pattern) -> Vec<String> {
+        let mut variables = Vec::new();
+        self.collect_pattern_variables(pattern, &mut variables);
+        variables
+    }
+
+    /// Recursively collect variable names from a pattern
+    fn collect_pattern_variables(&self, pattern: &Pattern, variables: &mut Vec<String>) {
+        match pattern {
+            Pattern::Identifier(name, _) => {
+                variables.push(name.clone());
+            }
+            Pattern::Struct(struct_pattern) => {
+                for field_pattern in &struct_pattern.fields {
+                    self.collect_pattern_variables(&field_pattern.pattern, variables);
+                }
+            }
+            Pattern::Array(array_pattern) => {
+                for element_pattern in &array_pattern.elements {
+                    self.collect_pattern_variables(element_pattern, variables);
+                }
+            }
+            Pattern::Or(or_pattern) => {
+                // For OR patterns, collect from all alternatives
+                for alternative in &or_pattern.patterns {
+                    self.collect_pattern_variables(alternative, variables);
+                }
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Range(_) => {
+                // These patterns don't bind variables
+            }
+        }
     }
 }
 

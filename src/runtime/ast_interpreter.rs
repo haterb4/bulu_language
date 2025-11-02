@@ -150,6 +150,8 @@ impl AstInterpreter {
     pub fn execute_statement(&mut self, statement: &Statement) -> Result<RuntimeValue> {
         match statement {
             Statement::VariableDecl(decl) => self.execute_variable_decl(decl),
+            Statement::DestructuringDecl(decl) => self.execute_destructuring_decl(decl),
+            Statement::MultipleVariableDecl(decl) => self.execute_multiple_variable_decl(decl),
             Statement::FunctionDecl(decl) => self.execute_function_decl(decl),
             Statement::StructDecl(decl) => self.execute_struct_decl(decl),
             Statement::InterfaceDecl(decl) => self.execute_interface_decl(decl),
@@ -169,6 +171,7 @@ impl AstInterpreter {
             Statement::Export(stmt) => self.execute_export_stmt(stmt),
             Statement::Expression(stmt) => self.execute_expression_stmt(stmt),
             Statement::Block(stmt) => self.execute_block_stmt(stmt),
+            Statement::MultipleAssignment(stmt) => self.execute_multiple_assignment_stmt(stmt),
         }
     }
 
@@ -188,6 +191,144 @@ impl AstInterpreter {
         }
 
         Ok(RuntimeValue::Null)
+    }
+
+    /// Execute destructuring declaration
+    fn execute_destructuring_decl(&mut self, decl: &DestructuringDecl) -> Result<RuntimeValue> {
+        let value = self.execute_expression(&decl.initializer)?;
+        self.execute_pattern_assignment(&decl.pattern, value, decl.is_exported)?;
+        Ok(RuntimeValue::Null)
+    }
+
+    /// Execute multiple variable declaration
+    fn execute_multiple_variable_decl(&mut self, decl: &MultipleVariableDecl) -> Result<RuntimeValue> {
+        for var_decl in &decl.declarations {
+            let value = if let Some(initializer) = &var_decl.initializer {
+                self.execute_expression(initializer)?
+            } else {
+                // Use default value based on type annotation
+                if let Some(type_annotation) = &var_decl.type_annotation {
+                    self.get_default_value_for_type(type_annotation)
+                } else {
+                    RuntimeValue::Null
+                }
+            };
+
+            self.environment.define(var_decl.name.clone(), value.clone());
+
+            // If exported, also add to globals
+            if decl.is_exported {
+                self.globals.define(var_decl.name.clone(), value.clone());
+            }
+        }
+
+        Ok(RuntimeValue::Null)
+    }
+
+    /// Execute multiple assignment statement
+    fn execute_multiple_assignment_stmt(&mut self, stmt: &MultipleAssignmentStmt) -> Result<RuntimeValue> {
+        // First, evaluate all the values
+        let mut values = Vec::new();
+        for value_expr in &stmt.values {
+            values.push(self.execute_expression(value_expr)?);
+        }
+        
+        // Then assign them to the targets
+        for (i, target_expr) in stmt.targets.iter().enumerate() {
+            let value = if i < values.len() {
+                values[i].clone()
+            } else {
+                RuntimeValue::Null
+            };
+            
+            // For now, only support identifier targets
+            if let Expression::Identifier(ident) = target_expr {
+                self.environment.set(&ident.name, value)?;
+            } else {
+                return Err(BuluError::RuntimeError {
+                    message: "Complex assignment targets not yet supported".to_string(),
+                    file: None,
+                });
+            }
+        }
+        
+        Ok(RuntimeValue::Null)
+    }
+
+    /// Execute pattern assignment for destructuring
+    fn execute_pattern_assignment(&mut self, pattern: &Pattern, value: RuntimeValue, is_exported: bool) -> Result<()> {
+        match pattern {
+            Pattern::Identifier(name, _) => {
+                self.environment.define(name.clone(), value.clone());
+                
+                if is_exported {
+                    self.globals.define(name.clone(), value.clone());
+                }
+                Ok(())
+            }
+            Pattern::Struct(struct_pattern) => {
+                match value {
+                    RuntimeValue::Struct { fields: struct_fields, .. } => {
+                        for field_pattern in &struct_pattern.fields {
+                            if let Some(field_value) = struct_fields.get(&field_pattern.name) {
+                                self.execute_pattern_assignment(&field_pattern.pattern, field_value.clone(), is_exported)?;
+                            } else {
+                                self.execute_pattern_assignment(&field_pattern.pattern, RuntimeValue::Null, is_exported)?;
+                            }
+                        }
+                        Ok(())
+                    }
+                    _ => Err(BuluError::RuntimeError {
+                        message: "Cannot destructure non-object value".to_string(),
+                        file: self.current_file.clone(),
+                    })
+                }
+            }
+            Pattern::Array(array_pattern) => {
+                match value {
+                    RuntimeValue::Array(ref arr) => {
+                        for (i, element_pattern) in array_pattern.elements.iter().enumerate() {
+                            let element_value = if i < arr.len() {
+                                arr[i].clone()
+                            } else {
+                                RuntimeValue::Null
+                            };
+                            self.execute_pattern_assignment(element_pattern, element_value, is_exported)?;
+                        }
+                        Ok(())
+                    }
+                    RuntimeValue::Slice(ref slice) => {
+                        for (i, element_pattern) in array_pattern.elements.iter().enumerate() {
+                            let element_value = if i < slice.len() {
+                                slice[i].clone()
+                            } else {
+                                RuntimeValue::Null
+                            };
+                            self.execute_pattern_assignment(element_pattern, element_value, is_exported)?;
+                        }
+                        Ok(())
+                    }
+                    // Support for tuple-like return values
+                    _ => {
+                        // For now, treat other values as single-element tuples
+                        if array_pattern.elements.len() == 1 {
+                            self.execute_pattern_assignment(&array_pattern.elements[0], value, is_exported)?;
+                        } else {
+                            // Fill remaining with null
+                            for element_pattern in &array_pattern.elements {
+                                self.execute_pattern_assignment(element_pattern, RuntimeValue::Null, is_exported)?;
+                            }
+                        }
+                        Ok(())
+                    }
+                }
+            }
+            // Handle other pattern types that we don't need for destructuring
+            Pattern::Wildcard(_) => Ok(()),
+            Pattern::Literal(_, _) => Ok(()),
+            Pattern::Range(_) => Ok(()),
+            Pattern::Or(_) => Ok(()),
+        }
     }
 
     /// Execute function declaration
@@ -532,8 +673,218 @@ impl AstInterpreter {
         }
     }
 
-    fn execute_index_expr(&mut self, _expr: &IndexExpr) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+    fn execute_index_expr(&mut self, expr: &IndexExpr) -> Result<RuntimeValue> {
+        let object = self.execute_expression(&expr.object)?;
+        let index = self.execute_expression(&expr.index)?;
+        
+        match object {
+            RuntimeValue::Array(ref arr) => {
+                match index {
+                    // Normal indexing with integer
+                    RuntimeValue::Integer(i) => {
+                        let idx = if i < 0 {
+                            arr.len() as i64 + i
+                        } else {
+                            i
+                        } as usize;
+                        
+                        if idx >= arr.len() {
+                            return Err(BuluError::RuntimeError {
+                                message: format!("Array index {} out of bounds for array of length {}", idx, arr.len()),
+                                file: self.current_file.clone(),
+                            });
+                        }
+                        
+                        Ok(arr[idx].clone())
+                    }
+                    RuntimeValue::Int32(i) => {
+                        let idx = if i < 0 {
+                            arr.len() as i32 + i
+                        } else {
+                            i
+                        } as usize;
+                        
+                        if idx >= arr.len() {
+                            return Err(BuluError::RuntimeError {
+                                message: format!("Array index {} out of bounds for array of length {}", idx, arr.len()),
+                                file: self.current_file.clone(),
+                            });
+                        }
+                        
+                        Ok(arr[idx].clone())
+                    }
+                    RuntimeValue::Int64(i) => {
+                        let idx = if i < 0 {
+                            arr.len() as i64 + i
+                        } else {
+                            i
+                        } as usize;
+                        
+                        if idx >= arr.len() {
+                            return Err(BuluError::RuntimeError {
+                                message: format!("Array index {} out of bounds for array of length {}", idx, arr.len()),
+                                file: self.current_file.clone(),
+                            });
+                        }
+                        
+                        Ok(arr[idx].clone())
+                    }
+                    // Range indexing for slicing
+                    RuntimeValue::Range(start, end, _step) => {
+                        let start_idx = if start < 0 {
+                            (arr.len() as i64 + start).max(0) as usize
+                        } else {
+                            (start as usize).min(arr.len())
+                        };
+                        
+                        let end_idx = if end < 0 {
+                            arr.len()
+                        } else {
+                            (end as usize).min(arr.len())
+                        };
+                        
+                        if start_idx > end_idx {
+                            return Ok(RuntimeValue::Slice(Vec::new()));
+                        }
+                        
+                        let sliced = arr[start_idx..end_idx].to_vec();
+                        Ok(RuntimeValue::Slice(sliced))
+                    }
+                    _ => Err(BuluError::RuntimeError {
+                        message: "Array index must be an integer or range".to_string(),
+                        file: self.current_file.clone(),
+                    })
+                }
+            }
+            RuntimeValue::Slice(ref slice_vec) => {
+                match index {
+                    // Normal indexing with integer
+                    RuntimeValue::Integer(i) => {
+                        let idx = if i < 0 {
+                            slice_vec.len() as i64 + i
+                        } else {
+                            i
+                        } as usize;
+                        
+                        if idx >= slice_vec.len() {
+                            return Err(BuluError::RuntimeError {
+                                message: format!("Slice index {} out of bounds for slice of length {}", idx, slice_vec.len()),
+                                file: self.current_file.clone(),
+                            });
+                        }
+                        
+                        Ok(slice_vec[idx].clone())
+                    }
+                    RuntimeValue::Int32(i) => {
+                        let idx = if i < 0 {
+                            slice_vec.len() as i32 + i
+                        } else {
+                            i
+                        } as usize;
+                        
+                        if idx >= slice_vec.len() {
+                            return Err(BuluError::RuntimeError {
+                                message: format!("Slice index {} out of bounds for slice of length {}", idx, slice_vec.len()),
+                                file: self.current_file.clone(),
+                            });
+                        }
+                        
+                        Ok(slice_vec[idx].clone())
+                    }
+                    RuntimeValue::Int64(i) => {
+                        let idx = if i < 0 {
+                            slice_vec.len() as i64 + i
+                        } else {
+                            i
+                        } as usize;
+                        
+                        if idx >= slice_vec.len() {
+                            return Err(BuluError::RuntimeError {
+                                message: format!("Slice index {} out of bounds for slice of length {}", idx, slice_vec.len()),
+                                file: self.current_file.clone(),
+                            });
+                        }
+                        
+                        Ok(slice_vec[idx].clone())
+                    }
+                    // Range indexing for slicing
+                    RuntimeValue::Range(start, end, _step) => {
+                        let start_idx = if start < 0 {
+                            (slice_vec.len() as i64 + start).max(0) as usize
+                        } else {
+                            (start as usize).min(slice_vec.len())
+                        };
+                        
+                        let end_idx = if end < 0 {
+                            slice_vec.len()
+                        } else {
+                            (end as usize).min(slice_vec.len())
+                        };
+                        
+                        if start_idx > end_idx {
+                            return Ok(RuntimeValue::Slice(Vec::new()));
+                        }
+                        
+                        let sliced = slice_vec[start_idx..end_idx].to_vec();
+                        Ok(RuntimeValue::Slice(sliced))
+                    }
+                    _ => Err(BuluError::RuntimeError {
+                        message: "Slice index must be an integer or range".to_string(),
+                        file: self.current_file.clone(),
+                    })
+                }
+            }
+            RuntimeValue::String(ref s) => {
+                match index {
+                    RuntimeValue::Integer(i) => {
+                        let chars: Vec<char> = s.chars().collect();
+                        let idx = if i < 0 {
+                            chars.len() as i64 + i
+                        } else {
+                            i
+                        } as usize;
+                        
+                        if idx >= chars.len() {
+                            return Err(BuluError::RuntimeError {
+                                message: format!("String index {} out of bounds for string of length {}", idx, chars.len()),
+                                file: self.current_file.clone(),
+                            });
+                        }
+                        
+                        Ok(RuntimeValue::String(chars[idx].to_string()))
+                    }
+                    RuntimeValue::Range(start, end, _step) => {
+                        let chars: Vec<char> = s.chars().collect();
+                        let start_idx = if start < 0 {
+                            (chars.len() as i64 + start).max(0) as usize
+                        } else {
+                            (start as usize).min(chars.len())
+                        };
+                        
+                        let end_idx = if end < 0 {
+                            chars.len()
+                        } else {
+                            (end as usize).min(chars.len())
+                        };
+                        
+                        if start_idx > end_idx {
+                            return Ok(RuntimeValue::String(String::new()));
+                        }
+                        
+                        let sliced: String = chars[start_idx..end_idx].iter().collect();
+                        Ok(RuntimeValue::String(sliced))
+                    }
+                    _ => Err(BuluError::RuntimeError {
+                        message: "String index must be an integer or range".to_string(),
+                        file: self.current_file.clone(),
+                    })
+                }
+            }
+            _ => Err(BuluError::RuntimeError {
+                message: "Cannot index non-indexable value".to_string(),
+                file: self.current_file.clone(),
+            })
+        }
     }
 
     fn execute_assignment_expr(&mut self, _expr: &AssignmentExpr) -> Result<RuntimeValue> {
@@ -552,8 +903,33 @@ impl AstInterpreter {
         Ok(RuntimeValue::Null)
     }
 
-    fn execute_map_expr(&mut self, _expr: &MapExpr) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+    fn execute_map_expr(&mut self, expr: &MapExpr) -> Result<RuntimeValue> {
+        let mut fields = std::collections::HashMap::new();
+        
+        for entry in &expr.entries {
+            // Evaluate the key and value
+            let key_value = self.execute_expression(&entry.key)?;
+            let value_value = self.execute_expression(&entry.value)?;
+            
+            // Convert key to string for field name
+            let field_name = match key_value {
+                RuntimeValue::String(s) => s,
+                RuntimeValue::Integer(i) => i.to_string(),
+                RuntimeValue::Float64(f) => f.to_string(),
+                RuntimeValue::Bool(b) => b.to_string(),
+                _ => return Err(BuluError::RuntimeError {
+                    message: "Map keys must be convertible to strings".to_string(),
+                    file: self.current_file.clone(),
+                })
+            };
+            
+            fields.insert(field_name, value_value);
+        }
+        
+        Ok(RuntimeValue::Struct {
+            name: String::new(), // Anonymous struct for object literals
+            fields,
+        })
     }
 
     fn execute_lambda_expr(&mut self, _expr: &LambdaExpr) -> Result<RuntimeValue> {
@@ -615,22 +991,16 @@ impl AstInterpreter {
             }),
         };
         
-        // Create array from range
-        let mut values = Vec::new();
-        
-        if expr.inclusive {
-            // Inclusive range: 1...5 includes 5
-            for i in start..=end {
-                values.push(RuntimeValue::Int64(i));
+        // Create range value
+        let step = expr.step.as_ref().map(|step_expr| {
+            match self.execute_expression(step_expr) {
+                Ok(RuntimeValue::Int32(i)) => i as i64,
+                Ok(RuntimeValue::Int64(i)) => i,
+                _ => 1, // Default step
             }
-        } else {
-            // Exclusive range: 1..<5 or 1..5 excludes 5
-            for i in start..end {
-                values.push(RuntimeValue::Int64(i));
-            }
-        }
+        });
         
-        Ok(RuntimeValue::Array(values))
+        Ok(RuntimeValue::Range(start, end, step))
     }
 
     fn execute_yield_expr(&mut self, _expr: &YieldExpr) -> Result<RuntimeValue> {

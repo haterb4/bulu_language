@@ -1,0 +1,11 @@
+func main() {
+    let a, b: int64;
+    let x: int64, y: int32, z: string;
+    
+    // Essayons d'accéder aux variables
+    println("a = " + a.toString());
+    println("b = " + b.toString());
+    println("x = " + x.toString());
+    println("y = " + y.toString());
+    println("z = " + z);
+}

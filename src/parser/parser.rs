@@ -180,16 +180,31 @@ impl Parser {
             self.consume(&TokenType::Let, "Expected 'let' or 'const'")?;
         }
 
-        let name = self.consume_identifier("Expected variable name")?;
+        // Check for destructuring patterns
+        if self.check(&TokenType::LeftBrace) {
+            // Object destructuring: let {field1, field2} = object
+            return self.parse_object_destructuring(start_pos, is_const, None, false);
+        } else if self.check(&TokenType::LeftParen) {
+            // Tuple destructuring: let (a, b) = tuple
+            return self.parse_tuple_destructuring(start_pos, is_const, None, false);
+        }
 
-        // Optional type annotation
+        // Parse first identifier
+        let first_name = self.consume_identifier("Expected variable name")?;
+
+        // Check for multiple variable declarations
+        if self.check(&TokenType::Comma) {
+            return self
+                .parse_multiple_variable_declaration(start_pos, is_const, first_name, None, false);
+        }
+
+        // Single variable declaration
         let type_annotation = if self.match_token(&TokenType::Colon) {
             Some(self.parse_type()?)
         } else {
             None
         };
 
-        // Optional initializer
         let initializer = if self.match_token(&TokenType::Assign) {
             Some(self.parse_expression()?)
         } else {
@@ -205,11 +220,11 @@ impl Parser {
 
         Ok(Statement::VariableDecl(VariableDecl {
             is_const,
-            name,
+            name: first_name,
             type_annotation,
             initializer,
-            doc_comment: None,  // TODO: Extract doc comments from preceding tokens
-            is_exported: false, // TODO: Handle export keyword
+            doc_comment: None,
+            is_exported: false,
             position: start_pos,
         }))
     }
@@ -227,16 +242,38 @@ impl Parser {
             self.consume(&TokenType::Let, "Expected 'let' or 'const'")?;
         }
 
-        let name = self.consume_identifier("Expected variable name")?;
+        // Check for destructuring patterns
+        if self.check(&TokenType::LeftBrace) {
+            // Object destructuring: let {field1, field2} = object
+            return self.parse_object_destructuring(start_pos, is_const, doc_comments, is_exported);
+        } else if self.check(&TokenType::LeftParen) {
+            // Tuple destructuring: let (a, b) = tuple
+            return self.parse_tuple_destructuring(start_pos, is_const, doc_comments, is_exported);
+        }
 
-        // Optional type annotation
+        // Parse first identifier
+        let first_name = self.consume_identifier("Expected variable name")?;
+
+        // Check for multiple variable declarations
+        // We need to look ahead to see if this is a multiple declaration
+        let is_multiple = self.is_multiple_variable_declaration();
+        if is_multiple {
+            return self.parse_multiple_variable_declaration(
+                start_pos,
+                is_const,
+                first_name,
+                doc_comments,
+                is_exported,
+            );
+        }
+
+        // Single variable declaration
         let type_annotation = if self.match_token(&TokenType::Colon) {
             Some(self.parse_type()?)
         } else {
             None
         };
 
-        // Optional initializer
         let initializer = if self.match_token(&TokenType::Assign) {
             Some(self.parse_expression()?)
         } else {
@@ -247,9 +284,271 @@ impl Parser {
 
         Ok(Statement::VariableDecl(VariableDecl {
             is_const,
-            name,
+            name: first_name,
             type_annotation,
             initializer,
+            doc_comment: doc_comments,
+            is_exported,
+            position: start_pos,
+        }))
+    }
+
+    /// Parse object destructuring: let {field1, field2} = object
+    fn parse_object_destructuring(
+        &mut self,
+        start_pos: Position,
+        is_const: bool,
+        doc_comments: Option<Vec<Token>>,
+        is_exported: bool,
+    ) -> Result<Statement> {
+        self.advance(); // consume '{'
+
+        let mut field_patterns = Vec::new();
+
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            let field_name = self.consume_identifier("Expected field name")?;
+            let field_pos = self.current_position();
+
+            // For simple destructuring, we create a field pattern that maps to an identifier
+            field_patterns.push(FieldPattern {
+                name: field_name.clone(),
+                pattern: Box::new(Pattern::Identifier(field_name, field_pos)),
+                position: field_pos,
+            });
+
+            if !self.check(&TokenType::RightBrace) {
+                self.consume(&TokenType::Comma, "Expected ',' between fields")?;
+            }
+        }
+
+        self.consume(
+            &TokenType::RightBrace,
+            "Expected '}' after destructuring fields",
+        )?;
+        self.consume(
+            &TokenType::Assign,
+            "Expected '=' after destructuring pattern",
+        )?;
+
+        let initializer = self.parse_expression()?;
+        self.consume_statement_terminator()?;
+
+        Ok(Statement::DestructuringDecl(DestructuringDecl {
+            is_const,
+            pattern: Pattern::Struct(StructPattern {
+                name: String::new(), // Empty name for destructuring
+                fields: field_patterns,
+                position: start_pos,
+            }),
+            initializer,
+            doc_comment: doc_comments,
+            is_exported,
+            position: start_pos,
+        }))
+    }
+
+    /// Parse tuple destructuring: let (a, b) = tuple
+    fn parse_tuple_destructuring(
+        &mut self,
+        start_pos: Position,
+        is_const: bool,
+        doc_comments: Option<Vec<Token>>,
+        is_exported: bool,
+    ) -> Result<Statement> {
+        self.advance(); // consume '('
+
+        let mut elements = Vec::new();
+
+        while !self.check(&TokenType::RightParen) && !self.is_at_end() {
+            let element_name = self.consume_identifier("Expected variable name")?;
+            let element_pos = self.current_position();
+            elements.push(Pattern::Identifier(element_name, element_pos));
+
+            if !self.check(&TokenType::RightParen) {
+                self.consume(&TokenType::Comma, "Expected ',' between elements")?;
+            }
+        }
+
+        self.consume(
+            &TokenType::RightParen,
+            "Expected ')' after destructuring elements",
+        )?;
+        self.consume(
+            &TokenType::Assign,
+            "Expected '=' after destructuring pattern",
+        )?;
+
+        let initializer = self.parse_expression()?;
+        self.consume_statement_terminator()?;
+
+        Ok(Statement::DestructuringDecl(DestructuringDecl {
+            is_const,
+            pattern: Pattern::Array(ArrayPattern {
+                elements,
+                position: start_pos,
+            }),
+            initializer,
+            doc_comment: doc_comments,
+            is_exported,
+            position: start_pos,
+        }))
+    }
+
+    /// Check if this is a multiple variable declaration by looking ahead
+    fn is_multiple_variable_declaration(&self) -> bool {
+        let mut i = 0;
+
+        // Skip optional type annotation
+        if let Some(token) = self.peek_ahead(i) {
+            if token.token_type == TokenType::Colon {
+                i += 1; // skip ':'
+                        // Skip the type (simplified - we just skip until we find comma or other tokens)
+                while i < 10 {
+                    // safety limit
+                    if let Some(token) = self.peek_ahead(i) {
+                        if matches!(
+                            token.token_type,
+                            TokenType::Comma
+                                | TokenType::Assign
+                                | TokenType::Semicolon
+                                | TokenType::Newline
+                                | TokenType::Eof
+                        ) {
+                            break;
+                        }
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Check if there's a comma (indicating multiple variables)
+        if let Some(token) = self.peek_ahead(i) {
+            token.token_type == TokenType::Comma
+        } else {
+            false
+        }
+    }
+
+    /// Parse multiple variable declarations: let a, b: int64 or let a: int64, b: int32
+    fn parse_multiple_variable_declaration(
+        &mut self,
+        start_pos: Position,
+        is_const: bool,
+        first_name: String,
+        doc_comments: Option<Vec<Token>>,
+        is_exported: bool,
+    ) -> Result<Statement> {
+        let mut declarations = Vec::new();
+
+        // Check if the first variable has a type annotation
+        let first_has_type = self.check(&TokenType::Colon);
+
+        if first_has_type {
+            // Individual types: let a: int64, b: int32, c: string
+            self.advance(); // consume ':'
+            let first_type = self.parse_type()?;
+
+            // Collect all variable declarations with their types first
+            let mut var_decls = vec![(first_name, Some(first_type))];
+
+            // Parse remaining variables with individual types
+            while self.match_token(&TokenType::Comma) {
+                let name = self.consume_identifier("Expected variable name")?;
+
+                let var_type = if self.match_token(&TokenType::Colon) {
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+
+                var_decls.push((name, var_type));
+            }
+
+            // Check for multiple initialization: = expr1, expr2, expr3
+            let initializers = if self.match_token(&TokenType::Assign) {
+                let mut exprs = vec![self.parse_expression()?];
+                while self.match_token(&TokenType::Comma) {
+                    exprs.push(self.parse_expression()?);
+                }
+                Some(exprs)
+            } else {
+                None
+            };
+
+            // Create declarations for all variables
+            for (i, (name, var_type)) in var_decls.into_iter().enumerate() {
+                let initializer = if let Some(ref inits) = initializers {
+                    if i < inits.len() {
+                        Some(inits[i].clone())
+                    } else {
+                        None // More variables than initializers
+                    }
+                } else {
+                    None
+                };
+
+                declarations.push(SingleVariableDecl {
+                    name,
+                    type_annotation: var_type,
+                    initializer,
+                });
+            }
+        } else {
+            // Common type: let a, b, c: int64
+            let mut names = vec![first_name];
+
+            // Collect all variable names first
+            while self.match_token(&TokenType::Comma) {
+                let name = self.consume_identifier("Expected variable name")?;
+                names.push(name);
+            }
+
+            // Check if there's a common type annotation
+            let common_type = if self.match_token(&TokenType::Colon) {
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+
+            // Check for multiple initialization: = expr1, expr2, expr3
+            let initializers = if self.match_token(&TokenType::Assign) {
+                let mut exprs = vec![self.parse_expression()?];
+                while self.match_token(&TokenType::Comma) {
+                    exprs.push(self.parse_expression()?);
+                }
+                Some(exprs)
+            } else {
+                None
+            };
+
+            // Create declarations for all variables
+            for (i, name) in names.into_iter().enumerate() {
+                let initializer = if let Some(ref inits) = initializers {
+                    if i < inits.len() {
+                        Some(inits[i].clone())
+                    } else {
+                        None // More variables than initializers
+                    }
+                } else {
+                    None
+                };
+
+                declarations.push(SingleVariableDecl {
+                    name,
+                    type_annotation: common_type.clone(),
+                    initializer,
+                });
+            }
+        }
+
+        self.consume_statement_terminator()?;
+
+        Ok(Statement::MultipleVariableDecl(MultipleVariableDecl {
+            is_const,
+            declarations,
             doc_comment: doc_comments,
             is_exported,
             position: start_pos,
@@ -1264,7 +1563,7 @@ impl Parser {
         } else if self.match_token(&TokenType::DotDotLess) {
             false
         } else if self.match_token(&TokenType::DotDot) {
-            false  // 0..10 is exclusive like Rust
+            false // 0..10 is exclusive like Rust
         } else {
             return Err(self.error("Expected range operator (..), (..<) or (...)"));
         };
@@ -1882,11 +2181,66 @@ impl Parser {
     /// Parse expression statement
     fn parse_expression_statement(&mut self) -> Result<Statement> {
         let start_pos = self.current_position();
+        
+        // Try to parse as multiple assignment first
+        let checkpoint = self.current;
+        match self.try_parse_multiple_assignment() {
+            Ok(multiple_assignment) => return Ok(multiple_assignment),
+            Err(_) => {
+                // Restore parser state and continue with regular expression parsing
+                self.current = checkpoint;
+            }
+        }
+        
+        // Parse as regular expression statement
         let expr = self.parse_expression()?;
         self.consume_statement_terminator()?;
 
         Ok(Statement::Expression(ExpressionStmt {
             expr,
+            position: start_pos,
+        }))
+    }
+
+    /// Try to parse a multiple assignment statement
+    fn try_parse_multiple_assignment(&mut self) -> Result<Statement> {
+        let start_pos = self.current_position();
+        
+        // Parse the first expression (should be an identifier for assignment)
+        let first_expr = self.parse_primary()?;
+        
+        // Check if there's a comma (indicating multiple targets)
+        if !self.check(&TokenType::Comma) {
+            return Err(self.error("Not a multiple assignment"));
+        }
+        
+        // Parse additional target expressions
+        let mut targets = vec![first_expr];
+        while self.match_token(&TokenType::Comma) {
+            targets.push(self.parse_primary()?);
+        }
+        
+        // Must have an assignment operator
+        if !self.check(&TokenType::Assign) {
+            return Err(self.error("Not a multiple assignment"));
+        }
+        
+        self.advance(); // consume '='
+        
+        // Parse the first value
+        let first_value = self.parse_expression()?;
+        let mut values = vec![first_value];
+        
+        // Parse additional values
+        while self.match_token(&TokenType::Comma) {
+            values.push(self.parse_expression()?);
+        }
+        
+        self.consume_statement_terminator()?;
+        
+        Ok(Statement::MultipleAssignment(MultipleAssignmentStmt {
+            targets,
+            values,
             position: start_pos,
         }))
     }
@@ -2041,7 +2395,11 @@ impl Parser {
     fn parse_range(&mut self) -> Result<Expression> {
         let mut expr = self.parse_term()?;
 
-        if self.match_tokens(&[TokenType::DotDot, TokenType::DotDotLess, TokenType::DotDotDot]) {
+        if self.match_tokens(&[
+            TokenType::DotDot,
+            TokenType::DotDotLess,
+            TokenType::DotDotDot,
+        ]) {
             let inclusive = match self.previous().token_type {
                 TokenType::DotDot => false,     // 0..10 (exclusive, like Rust)
                 TokenType::DotDotLess => false, // 0..<10 (exclusive)
@@ -2150,7 +2508,12 @@ impl Parser {
             }));
         }
 
-        if self.match_tokens(&[TokenType::Not, TokenType::Bang, TokenType::Minus, TokenType::Plus]) {
+        if self.match_tokens(&[
+            TokenType::Not,
+            TokenType::Bang,
+            TokenType::Minus,
+            TokenType::Plus,
+        ]) {
             let operator = match self.previous().token_type {
                 TokenType::Not => UnaryOperator::Not,
                 TokenType::Bang => UnaryOperator::Not,
@@ -2186,14 +2549,77 @@ impl Parser {
                     position: pos,
                 });
             } else if self.match_token(&TokenType::LeftBracket) {
-                let index = self.parse_expression()?;
-                self.consume(&TokenType::RightBracket, "Expected ']' after index")?;
+                // Parse index or slice
                 let pos = expr.position();
-                expr = Expression::Index(IndexExpr {
-                    object: Box::new(expr),
-                    index: Box::new(index),
-                    position: pos,
-                });
+
+                // Check if this starts with a colon (like [:3])
+                if self.check(&TokenType::Colon) {
+                    self.advance(); // consume ':'
+                    let end_expr = self.parse_expression()?;
+                    self.consume(&TokenType::RightBracket, "Expected ']' after slice")?;
+
+                    // Create slice from start to end: [:end]
+                    let start_expr = Expression::Literal(LiteralExpr {
+                        value: LiteralValue::Integer(0),
+                        position: pos,
+                    });
+
+                    let range = Expression::Range(RangeExpr {
+                        start: Box::new(start_expr),
+                        end: Box::new(end_expr),
+                        step: None,
+                        inclusive: false,
+                        position: pos,
+                    });
+
+                    expr = Expression::Index(IndexExpr {
+                        object: Box::new(expr),
+                        index: Box::new(range),
+                        position: pos,
+                    });
+                } else {
+                    // Parse first expression
+                    let start_expr = self.parse_expression()?;
+
+                    if self.match_token(&TokenType::Colon) {
+                        // This is a slice: arr[start:end] or arr[start:]
+                        let end_expr = if self.check(&TokenType::RightBracket) {
+                            // arr[start:] - slice to end
+                            Expression::Literal(LiteralExpr {
+                                value: LiteralValue::Integer(-1), // -1 means end
+                                position: pos,
+                            })
+                        } else {
+                            // arr[start:end]
+                            self.parse_expression()?
+                        };
+
+                        self.consume(&TokenType::RightBracket, "Expected ']' after slice")?;
+
+                        // Create a slice expression using Index with a Range
+                        let range = Expression::Range(RangeExpr {
+                            start: Box::new(start_expr),
+                            end: Box::new(end_expr),
+                            step: None,
+                            inclusive: false,
+                            position: pos,
+                        });
+
+                        expr = Expression::Index(IndexExpr {
+                            object: Box::new(expr),
+                            index: Box::new(range),
+                            position: pos,
+                        });
+                    } else {
+                        // This is a simple index: arr[index]
+                        self.consume(&TokenType::RightBracket, "Expected ']' after index")?;
+                        expr = Expression::Index(IndexExpr {
+                            object: Box::new(expr),
+                            index: Box::new(start_expr),
+                            position: pos,
+                        });
+                    }
+                }
             } else if self.check(&TokenType::LeftBrace) {
                 // Check if this is a struct literal (TypeName{...})
                 if let Expression::Identifier(_) = expr {
@@ -2390,7 +2816,7 @@ impl Parser {
             if self.check(&TokenType::Chan) {
                 // Parse chan T as a type and create a special identifier for it
                 let chan_type = self.parse_type()?;
-                
+
                 // Create a special identifier that represents the channel type
                 let type_name = match chan_type {
                     Type::Channel(ref ch_type) => {
@@ -2398,12 +2824,12 @@ impl Parser {
                     }
                     _ => "chan_any".to_string(),
                 };
-                
+
                 args.push(Expression::Identifier(IdentifierExpr {
                     name: type_name,
                     position: self.current_position(),
                 }));
-                
+
                 // Check for additional arguments (like capacity)
                 if self.match_token(&TokenType::Comma) {
                     loop {
@@ -2418,27 +2844,27 @@ impl Parser {
                 let current_token = self.peek();
                 let type_name = current_token.lexeme.clone();
                 let position = current_token.position;
-                
+
                 // Check if it's a primitive type
                 if self.is_primitive_type(&type_name) {
                     // Consume the type identifier
                     self.advance();
-                        
-                        // Create an identifier expression for the type
-                        args.push(Expression::Identifier(IdentifierExpr {
-                            name: type_name,
-                            position,
-                        }));
-                        
-                        // Check for additional arguments (like size for slices)
-                        if self.match_token(&TokenType::Comma) {
-                            loop {
-                                args.push(self.parse_expression()?);
-                                if !self.match_token(&TokenType::Comma) {
-                                    break;
-                                }
+
+                    // Create an identifier expression for the type
+                    args.push(Expression::Identifier(IdentifierExpr {
+                        name: type_name,
+                        position,
+                    }));
+
+                    // Check for additional arguments (like size for slices)
+                    if self.match_token(&TokenType::Comma) {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if !self.match_token(&TokenType::Comma) {
+                                break;
                             }
                         }
+                    }
                 } else {
                     // Parse as regular expression
                     loop {
@@ -2452,12 +2878,12 @@ impl Parser {
                 // Handle slice types like []int32
                 let slice_type = self.parse_type()?;
                 let type_name = self.type_to_string(&slice_type);
-                
+
                 args.push(Expression::Identifier(IdentifierExpr {
                     name: type_name,
                     position: self.current_position(),
                 }));
-                
+
                 // Check for additional arguments (like size)
                 if self.match_token(&TokenType::Comma) {
                     loop {
@@ -2491,11 +2917,24 @@ impl Parser {
 
     /// Check if a string represents a primitive type
     fn is_primitive_type(&self, type_name: &str) -> bool {
-        matches!(type_name, 
-            "int8" | "int16" | "int32" | "int64" | 
-            "uint8" | "uint16" | "uint32" | "uint64" |
-            "float32" | "float64" | "bool" | "string" |
-            "char" | "byte" | "rune" | "any"
+        matches!(
+            type_name,
+            "int8"
+                | "int16"
+                | "int32"
+                | "int64"
+                | "uint8"
+                | "uint16"
+                | "uint32"
+                | "uint64"
+                | "float32"
+                | "float64"
+                | "bool"
+                | "string"
+                | "char"
+                | "byte"
+                | "rune"
+                | "any"
         )
     }
 
@@ -2527,9 +2966,11 @@ impl Parser {
                 format!("chan_{}", self.type_to_string(&channel_type.element_type))
             }
             Type::Map(map_type) => {
-                format!("map_{}_{}", 
+                format!(
+                    "map_{}_{}",
                     self.type_to_string(&map_type.key_type),
-                    self.type_to_string(&map_type.value_type))
+                    self.type_to_string(&map_type.value_type)
+                )
             }
             _ => "unknown".to_string(),
         }
@@ -2653,7 +3094,7 @@ impl Parser {
                     }))
                 }
             }
-            
+
             // Allow 'chan' keyword to be used as an identifier in certain contexts (like make(chan))
             TokenType::Chan => {
                 let name = "chan".to_string();
@@ -2968,7 +3409,7 @@ impl Parser {
             TokenType::Chan => {
                 // Channel type: chan T, chan<- T, <-chan T
                 self.advance(); // consume 'chan'
-                
+
                 let direction = if self.match_token(&TokenType::LeftArrow) {
                     // chan<- T (send-only)
                     ChannelDirection::Send
@@ -2976,15 +3417,18 @@ impl Parser {
                     // chan T (bidirectional)
                     ChannelDirection::Bidirectional
                 };
-                
+
                 // Check if there's a type after chan, if not default to 'any'
-                let element_type = if self.check(&TokenType::RightParen) || self.check(&TokenType::Comma) || self.is_at_end() {
+                let element_type = if self.check(&TokenType::RightParen)
+                    || self.check(&TokenType::Comma)
+                    || self.is_at_end()
+                {
                     // No type specified, default to 'any'
                     Box::new(Type::Any)
                 } else {
                     Box::new(self.parse_type()?)
                 };
-                
+
                 Ok(Type::Channel(ChannelType {
                     element_type,
                     direction,
@@ -2994,9 +3438,9 @@ impl Parser {
                 // <-chan T (receive-only)
                 self.advance(); // consume '<-'
                 self.consume(&TokenType::Chan, "Expected 'chan' after '<-'")?;
-                
+
                 let element_type = Box::new(self.parse_type()?);
-                
+
                 Ok(Type::Channel(ChannelType {
                     element_type,
                     direction: ChannelDirection::Receive,

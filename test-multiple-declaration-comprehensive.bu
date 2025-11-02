@@ -1,0 +1,13 @@
+func main() {
+    // Test 1: Type commun avec valeurs multiples
+    let x, y, z: int64 = 10, 20, 30;
+    print("Test 1: x=" + x.toString() + ", y=" + y.toString() + ", z=" + z.toString());
+    
+    // Test 2: Types individuels avec valeurs multiples
+    let a: int32, b: int64, c: string = 42, 100, "hello";
+    print("Test 2: a=" + a.toString() + ", b=" + b.toString() + ", c=" + c);
+    
+    // Test 3: Plus de variables que de valeurs (les autres sont null/default)
+    let p, q, r: int64 = 1, 2;
+    print("Test 3: p=" + p.toString() + ", q=" + q.toString() + ", r=" + r.toString());
+}

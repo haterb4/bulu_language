@@ -82,6 +82,9 @@ impl AstPrinter {
                 format!("ExprStmt({})", self.print_expression(&stmt.expr))
             }
             Statement::Block(stmt) => self.print_block_stmt(stmt),
+            Statement::DestructuringDecl(decl) => self.print_destructuring_decl(decl),
+            Statement::MultipleVariableDecl(decl) => self.print_multiple_variable_decl(decl),
+            Statement::MultipleAssignment(stmt) => self.print_multiple_assignment_stmt(stmt),
         }
     }
 
@@ -155,6 +158,72 @@ impl AstPrinter {
             result.push_str(&format!(" = {}", self.print_expression(init)));
         }
 
+        result
+    }
+
+    fn print_destructuring_decl(&mut self, decl: &DestructuringDecl) -> String {
+        let mut result = if decl.is_const {
+            "Const ".to_string()
+        } else {
+            "Let ".to_string()
+        };
+        
+        result.push_str(&self.print_pattern(&decl.pattern));
+        result.push_str(" = ");
+        result.push_str(&self.print_expression(&decl.initializer));
+        
+        result
+    }
+
+    fn print_multiple_variable_decl(&mut self, decl: &MultipleVariableDecl) -> String {
+        let mut result = if decl.is_const {
+            "Const ".to_string()
+        } else {
+            "Let ".to_string()
+        };
+        
+        let mut first = true;
+        for var_decl in &decl.declarations {
+            if !first {
+                result.push_str(", ");
+            }
+            first = false;
+            
+            result.push_str(&var_decl.name);
+            
+            if let Some(ref type_ann) = var_decl.type_annotation {
+                result.push_str(&format!(": {}", self.print_type(type_ann)));
+            }
+            
+            if let Some(ref init) = var_decl.initializer {
+                result.push_str(&format!(" = {}", self.print_expression(init)));
+            }
+        }
+        
+        result
+    }
+
+    fn print_multiple_assignment_stmt(&mut self, stmt: &MultipleAssignmentStmt) -> String {
+        let mut result = String::new();
+        
+        // Print targets
+        for (i, target) in stmt.targets.iter().enumerate() {
+            if i > 0 {
+                result.push_str(", ");
+            }
+            result.push_str(&self.print_expression(target));
+        }
+        
+        result.push_str(" = ");
+        
+        // Print values
+        for (i, value) in stmt.values.iter().enumerate() {
+            if i > 0 {
+                result.push_str(", ");
+            }
+            result.push_str(&self.print_expression(value));
+        }
+        
         result
     }
 

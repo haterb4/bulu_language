@@ -1,0 +1,12 @@
+// Test de destructuration simple
+
+func main() {
+    let result = {bytesRead: 42, fromAddr: "127.0.0.1"};
+    let {bytesRead, fromAddr} = result;
+
+    result.bytesRead = result.bytesRead + 10
+
+    println("Test completed with: ", fromAddr);
+
+
+}

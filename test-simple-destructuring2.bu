@@ -1,0 +1,6 @@
+func main() {
+    let obj = {x: 42, y: "hello"};
+    let {x, y} = obj;
+    print(x.toString());
+    print(y);
+}

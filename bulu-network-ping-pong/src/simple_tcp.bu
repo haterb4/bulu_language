@@ -1,0 +1,84 @@
+// Simple TCP Echo Server Example
+
+import { TcpServer, TcpConnection, NetAddr } from "std/net"
+
+func main() {
+    println("=== Simple TCP Echo Server ===")
+    
+    let port = 9090
+    let addr = NetAddr.localhost_ipv4(port)
+    
+    println("Starting TCP echo server on localhost:" + port.toString())
+    println("Connect with: telnet localhost " + port.toString())
+    
+    let server = TcpServer.bind(addr)
+    if server.isError() {
+        println("❌ Failed to start server: " + server.error().toString())
+        return
+    }
+    
+    println("✅ Server listening on " + addr.toString())
+    println("Waiting for connections...")
+    
+    // Accept connections in a loop
+    for {
+        let conn = server.accept()
+        if conn.isError() {
+            println("❌ Error accepting connection: " + conn.error().toString())
+            continue
+        }
+        
+        println("📞 New client connected from " + conn.peer_addr().toString())
+        
+        // Handle client in goroutine
+        go {
+            handleClient(conn)
+        }
+    }
+}
+
+func handleClient(conn: TcpConnection) {
+    let clientAddr = conn.peer_addr().toString()
+    println("🔄 Handling client " + clientAddr)
+    
+    // Send welcome message
+    let welcome = "Welcome to Bulu TCP Echo Server!\nType messages and they will be echoed back.\nType 'quit' to disconnect.\n"
+    conn.write(welcome.bytes())
+    
+    let buffer = make([]byte, 1024)
+    
+    for {
+        // Read message from client
+        let bytesRead = conn.read(buffer)
+        if bytesRead.isError() {
+            println("📴 Client " + clientAddr + " disconnected")
+            break
+        }
+        
+        if bytesRead == 0 {
+            println("📴 Client " + clientAddr + " closed connection")
+            break
+        }
+        
+        let message = string(buffer[0:bytesRead]).trim()
+        println("📨 From " + clientAddr + ": " + message)
+        
+        // Check for quit command
+        if message == "quit" {
+            let goodbye = "Goodbye!\n"
+            conn.write(goodbye.bytes())
+            break
+        }
+        
+        // Echo message back
+        let echo = "Echo: " + message + "\n"
+        let bytesWritten = conn.write(echo.bytes())
+        if bytesWritten.isError() {
+            println("❌ Error writing to client " + clientAddr)
+            break
+        }
+    }
+    
+    conn.close()
+    println("🔌 Connection with " + clientAddr + " closed")
+}

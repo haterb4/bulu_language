@@ -1,0 +1,5 @@
+func main() {
+    let b, c: int64;
+    println("Variables declared");
+    println(b.toString());
+}

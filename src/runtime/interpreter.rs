@@ -2230,6 +2230,21 @@ impl Interpreter {
                     }
                 }
             }
+            IrOpcode::Move => {
+                if instruction.operands.len() != 1 {
+                    return Err(BuluError::Other(
+                        "Move instruction requires exactly one operand".to_string(),
+                    ));
+                }
+
+                let value = self.evaluate_value(&instruction.operands[0])?;
+
+                if let Some(result_reg) = &instruction.result {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.registers.insert(result_reg.id, value);
+                    }
+                }
+            }
             IrOpcode::Add => {
                 if instruction.operands.len() != 2 {
                     return Err(BuluError::Other(
@@ -3364,48 +3379,167 @@ impl Interpreter {
                 let array = self.evaluate_value(&instruction.operands[0])?;
                 let index = self.evaluate_value(&instruction.operands[1])?;
 
-                let array_index = match index {
-                    RuntimeValue::Int32(i) => i as usize,
-                    RuntimeValue::Int64(i) => i as usize,
-                    RuntimeValue::Integer(i) => i as usize,
+                // Handle both single indexing and slicing
+                let result = match index {
+                    RuntimeValue::Int32(i) => {
+                        let array_index = i as usize;
+                        match array {
+                            RuntimeValue::Array(ref arr) => {
+                                if array_index < arr.len() {
+                                    arr[array_index].clone()
+                                } else {
+                                    return Err(BuluError::Other(format!(
+                                        "Array index {} out of bounds for array of length {}",
+                                        array_index,
+                                        arr.len()
+                                    )));
+                                }
+                            }
+                            RuntimeValue::Slice(ref slice) => {
+                                if array_index < slice.len() {
+                                    slice[array_index].clone()
+                                } else {
+                                    return Err(BuluError::Other(format!(
+                                        "Slice index {} out of bounds for slice of length {}",
+                                        array_index,
+                                        slice.len()
+                                    )));
+                                }
+                            }
+                            _ => {
+                                return Err(BuluError::Other(format!(
+                                    "Cannot access index on {:?}",
+                                    array
+                                )));
+                            }
+                        }
+                    }
+                    RuntimeValue::Int64(i) => {
+                        let array_index = i as usize;
+                        match array {
+                            RuntimeValue::Array(ref arr) => {
+                                if array_index < arr.len() {
+                                    arr[array_index].clone()
+                                } else {
+                                    return Err(BuluError::Other(format!(
+                                        "Array index {} out of bounds for array of length {}",
+                                        array_index,
+                                        arr.len()
+                                    )));
+                                }
+                            }
+                            RuntimeValue::Slice(ref slice) => {
+                                if array_index < slice.len() {
+                                    slice[array_index].clone()
+                                } else {
+                                    return Err(BuluError::Other(format!(
+                                        "Slice index {} out of bounds for slice of length {}",
+                                        array_index,
+                                        slice.len()
+                                    )));
+                                }
+                            }
+                            _ => {
+                                return Err(BuluError::Other(format!(
+                                    "Cannot access index on {:?}",
+                                    array
+                                )));
+                            }
+                        }
+                    }
+                    RuntimeValue::Integer(i) => {
+                        let array_index = i as usize;
+                        match array {
+                            RuntimeValue::Array(ref arr) => {
+                                if array_index < arr.len() {
+                                    arr[array_index].clone()
+                                } else {
+                                    return Err(BuluError::Other(format!(
+                                        "Array index {} out of bounds for array of length {}",
+                                        array_index,
+                                        arr.len()
+                                    )));
+                                }
+                            }
+                            RuntimeValue::Slice(ref slice) => {
+                                if array_index < slice.len() {
+                                    slice[array_index].clone()
+                                } else {
+                                    return Err(BuluError::Other(format!(
+                                        "Slice index {} out of bounds for slice of length {}",
+                                        array_index,
+                                        slice.len()
+                                    )));
+                                }
+                            }
+                            _ => {
+                                return Err(BuluError::Other(format!(
+                                    "Cannot access index on {:?}",
+                                    array
+                                )));
+                            }
+                        }
+                    }
+                    RuntimeValue::Range(start, end, _step) => {
+                        // Handle slicing
+                        match array {
+                            RuntimeValue::Array(ref arr) => {
+                                let start_idx = if start < 0 {
+                                    (arr.len() as i64 + start).max(0) as usize
+                                } else {
+                                    (start as usize).min(arr.len())
+                                };
+                                
+                                let end_idx = if end < 0 {
+                                    arr.len()
+                                } else {
+                                    (end as usize).min(arr.len())
+                                };
+                                
+                                if start_idx > end_idx {
+                                    RuntimeValue::Slice(Vec::new())
+                                } else {
+                                    let sliced = arr[start_idx..end_idx].to_vec();
+                                    RuntimeValue::Slice(sliced)
+                                }
+                            }
+                            RuntimeValue::Slice(ref slice_vec) => {
+                                let start_idx = if start < 0 {
+                                    (slice_vec.len() as i64 + start).max(0) as usize
+                                } else {
+                                    (start as usize).min(slice_vec.len())
+                                };
+                                
+                                let end_idx = if end < 0 {
+                                    slice_vec.len()
+                                } else {
+                                    (end as usize).min(slice_vec.len())
+                                };
+                                
+                                if start_idx > end_idx {
+                                    RuntimeValue::Slice(Vec::new())
+                                } else {
+                                    let sliced = slice_vec[start_idx..end_idx].to_vec();
+                                    RuntimeValue::Slice(sliced)
+                                }
+                            }
+                            _ => {
+                                return Err(BuluError::Other(format!(
+                                    "Cannot slice non-array value: {:?}",
+                                    array
+                                )));
+                            }
+                        }
+                    }
                     _ => {
                         return Err(BuluError::Other(format!(
-                            "Array index must be an integer, got {:?}",
+                            "Array index must be an integer or range, got {:?}",
                             index
                         )));
                     }
                 };
 
-                let result = match array {
-                    RuntimeValue::Array(ref arr) => {
-                        if array_index < arr.len() {
-                            arr[array_index].clone()
-                        } else {
-                            return Err(BuluError::Other(format!(
-                                "Array index {} out of bounds for array of length {}",
-                                array_index,
-                                arr.len()
-                            )));
-                        }
-                    }
-                    RuntimeValue::Slice(ref slice) => {
-                        if array_index < slice.len() {
-                            slice[array_index].clone()
-                        } else {
-                            return Err(BuluError::Other(format!(
-                                "Slice index {} out of bounds for slice of length {}",
-                                array_index,
-                                slice.len()
-                            )));
-                        }
-                    }
-                    _ => {
-                        return Err(BuluError::Other(format!(
-                            "Cannot access index on {:?}",
-                            array
-                        )));
-                    }
-                };
+
 
                 // Store result in register if specified
                 if let Some(result_reg) = &instruction.result {

@@ -127,6 +127,7 @@ impl BuiltinRegistry {
         self.register("copy", builtin_copy);
         self.register("delete", builtin_delete);
         self.register("__range_to_array", builtin_range_to_array);
+        self.register("__create_range", builtin_create_range);
     }
 
     /// Register I/O functions
@@ -443,13 +444,15 @@ pub fn builtin_sizeof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Integer(_) => 8, // Generic integer is 64-bit
         RuntimeValue::Byte(_) => 1,    // Byte is 1 byte
         RuntimeValue::Null => 0,
+        RuntimeValue::Range(_, _, _) => std::mem::size_of::<(i64, i64, Option<i64>)>(),
         RuntimeValue::Function(_) => std::mem::size_of::<String>(), // Function refs are pointer-sized
         RuntimeValue::MethodRef { .. } => std::mem::size_of::<String>() * 2, // Object + method name
         RuntimeValue::Struct { fields, .. } => {
             // Estimate struct size as sum of field sizes
             fields.values().map(|v| estimate_value_size(v)).sum::<usize>()
         }
-        RuntimeValue::Global(_) => std::mem::size_of::<String>(), // Global refs are pointer-sized
+        RuntimeValue::Global(_) => std::mem::size_of::<String>(),
+        RuntimeValue::Range(_, _, _) => std::mem::size_of::<(i64, i64, Option<i64>)>(), // Global refs are pointer-sized
     };
 
     Ok(RuntimeValue::Int32(size as i32))
@@ -882,6 +885,47 @@ pub fn builtin_range_to_array(args: &[RuntimeValue]) -> Result<RuntimeValue> {
     Ok(RuntimeValue::Array(array))
 }
 
+/// Create range value: __create_range(start, end, inclusive)
+pub fn builtin_create_range(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "__create_range requires exactly 3 arguments".to_string(),
+        });
+    }
+
+    let start = match &args[0] {
+        RuntimeValue::Int64(i) => *i,
+        RuntimeValue::Int32(i) => *i as i64,
+        RuntimeValue::Integer(i) => *i,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "Range start must be an integer".to_string(),
+        }),
+    };
+
+    let end = match &args[1] {
+        RuntimeValue::Int64(i) => *i,
+        RuntimeValue::Int32(i) => *i as i64,
+        RuntimeValue::Integer(i) => *i,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "Range end must be an integer".to_string(),
+        }),
+    };
+
+    let _inclusive = match &args[2] {
+        RuntimeValue::Bool(b) => *b,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "Range inclusive flag must be boolean".to_string(),
+        }),
+    };
+
+    // Create range value directly
+    Ok(RuntimeValue::Range(start, end, None))
+}
+
 // ============================================================================
 // I/O FUNCTIONS
 // ============================================================================
@@ -1013,6 +1057,7 @@ pub fn builtin_typeof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::MethodRef { .. } => "method",
         RuntimeValue::Struct { name, .. } => name,
         RuntimeValue::Global(_) => "global",
+        RuntimeValue::Range(_, _, _) => "range",
         RuntimeValue::Null => "null",
     };
 
@@ -1066,6 +1111,7 @@ pub fn builtin_instanceof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::MethodRef { .. } => "method",
         RuntimeValue::Struct { name, .. } => name,
         RuntimeValue::Global(_) => "global",
+        RuntimeValue::Range(_, _, _) => "range",
         RuntimeValue::Null => "null",
     };
 
@@ -1514,6 +1560,13 @@ pub fn format_runtime_value(value: &RuntimeValue) -> String {
             format!("{}{{ {} }}", name, field_strs.join(", "))
         }
         RuntimeValue::Global(name) => format!("global:{}", name),
+        RuntimeValue::Range(start, end, step) => {
+            if let Some(s) = step {
+                format!("{}..{}:{}", start, end, s)
+            } else {
+                format!("{}..{}", start, end)
+            }
+        }
         RuntimeValue::Null => "null".to_string(),
     }
 }

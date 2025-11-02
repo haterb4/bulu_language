@@ -1,0 +1,14 @@
+func main() {
+    let a, b, c: int64;
+    let x, y: string;
+    let flag1, flag2: bool;
+    
+    println("Variables declared:");
+    println("a = " + a.toString());
+    println("b = " + b.toString());
+    println("c = " + c.toString());
+    println("x = '" + x + "'");
+    println("y = '" + y + "'");
+    println("flag1 = " + flag1.toString());
+    println("flag2 = " + flag2.toString());
+}

@@ -1,0 +1,55 @@
+// Simple UDP Echo Server Example
+
+import { UdpConnection, NetAddr } from "std/net"
+
+func main() {
+    println("=== Simple UDP Echo Server ===")
+    
+    let port = 9091
+    let addr = NetAddr.localhost_ipv4(port)
+    
+    println("Starting UDP echo server on localhost:" + port.toString())
+    println("Send UDP packets with: echo 'Hello' | nc -u localhost " + port.toString())
+    
+    let socket = UdpConnection.bind(addr)
+    if socket.isError() {
+        println("❌ Failed to bind UDP socket: " + socket.error().toString())
+        return
+    }
+    
+    println("✅ UDP Server listening on " + addr.toString())
+    println("Waiting for UDP packets...")
+    
+    let buffer = make([]byte, 1024)
+    
+    // Listen for UDP packets
+    for {
+        let result = socket.recv_from(buffer)
+        if result.isError() {
+            println("❌ Error receiving UDP packet: " + result.error().toString())
+            continue
+        }
+        
+        let (bytesRead, fromAddr) = result
+        let message = string(buffer[0:bytesRead]).trim()
+        
+        println("📨 UDP packet from " + fromAddr.toString() + ": " + message)
+        
+        // Check for quit command
+        if message == "quit" {
+            println("👋 Received quit command, shutting down server")
+            break
+        }
+        
+        // Echo message back
+        let echo = "UDP Echo: " + message
+        let bytesSent = socket.send_to(echo.bytes(), NetAddr.from_socket_addr(fromAddr))
+        if bytesSent.isError() {
+            println("❌ Error sending UDP response: " + bytesSent.error().toString())
+        } else {
+            println("📤 Echoed back to " + fromAddr.toString() + ": " + echo)
+        }
+    }
+    
+    println("🔌 UDP Server shutting down")
+}

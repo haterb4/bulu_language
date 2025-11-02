@@ -592,6 +592,7 @@ pub enum RuntimeValue {
     Array(Vec<RuntimeValue>),                             // Array of values
     Slice(Vec<RuntimeValue>),                             // Slice of values (dynamic array)
     Map(std::collections::HashMap<String, RuntimeValue>), // Map/dictionary
+    Range(i64, i64, Option<i64>),                         // Range (start, end, step)
     Integer(i64),                                         // Generic integer for compatibility
     Byte(u8),
 
@@ -642,6 +643,7 @@ impl RuntimeValue {
             RuntimeValue::Array(_) => PrimitiveType::Any, // Arrays are treated as Any type
             RuntimeValue::Slice(_) => PrimitiveType::Any, // Slices are treated as Any type
             RuntimeValue::Map(_) => PrimitiveType::Any,  // Maps are treated as Any type
+            RuntimeValue::Range(_, _, _) => PrimitiveType::Any, // Ranges are treated as Any type
             RuntimeValue::Integer(_) => PrimitiveType::Int64, // Generic integer maps to Int64
             RuntimeValue::Byte(_) => PrimitiveType::UInt8, // Byte maps to UInt8
             RuntimeValue::Function(_) => PrimitiveType::Any, // Functions are treated as Any type
@@ -675,6 +677,7 @@ impl RuntimeValue {
             RuntimeValue::Array(arr) => !arr.is_empty(), // Arrays are truthy if not empty
             RuntimeValue::Slice(slice) => !slice.is_empty(), // Slices are truthy if not empty
             RuntimeValue::Map(map) => !map.is_empty(), // Maps are truthy if not empty
+            RuntimeValue::Range(start, end, _) => start != end, // Ranges are truthy if not empty
             RuntimeValue::Integer(i) => *i != 0, // Generic integer
             RuntimeValue::Byte(b) => *b != 0, // Byte is truthy if not zero
             RuntimeValue::Function(_) => true, // Functions are always truthy (they exist)
@@ -708,6 +711,13 @@ impl RuntimeValue {
             RuntimeValue::Array(arr) => {
                 let elements: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
                 format!("[{}]", elements.join(", "))
+            }
+            RuntimeValue::Range(start, end, step) => {
+                if let Some(s) = step {
+                    format!("{}..{}:{}", start, end, s)
+                } else {
+                    format!("{}..{}", start, end)
+                }
             }
             RuntimeValue::Slice(slice) => {
                 let elements: Vec<String> = slice.iter().map(|v| v.to_string()).collect();
@@ -1042,6 +1052,13 @@ impl fmt::Display for RuntimeValue {
             RuntimeValue::Array(arr) => {
                 let elements: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
                 write!(f, "[{}]", elements.join(", "))
+            }
+            RuntimeValue::Range(start, end, step) => {
+                if let Some(s) = step {
+                    write!(f, "{}..{}:{}", start, end, s)
+                } else {
+                    write!(f, "{}..{}", start, end)
+                }
             }
             RuntimeValue::Slice(slice) => {
                 let elements: Vec<String> = slice.iter().map(|v| v.to_string()).collect();

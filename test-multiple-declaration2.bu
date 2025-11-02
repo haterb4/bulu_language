@@ -1,0 +1,5 @@
+func main() {
+    let a: int32, b: int64 = 1, 5;
+    print("a = " + a.toString());
+    print("b = " + b.toString());
+}

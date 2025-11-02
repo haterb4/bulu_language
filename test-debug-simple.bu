@@ -1,0 +1,4 @@
+func main() {
+    let b, c: int64;
+    println("After declaration");
+}

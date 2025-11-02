@@ -1,0 +1,9 @@
+func main() {
+    let {x, y} = getObject();
+    print(x.toString());
+    print(y);
+}
+
+func getObject() {
+    return {x: 42, y: "hello"};
+}

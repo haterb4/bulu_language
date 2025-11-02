@@ -309,6 +309,9 @@ impl TypeChecker {
     pub fn check_statement(&mut self, statement: &Statement) -> Result<TypeId> {
         match statement {
             Statement::VariableDecl(decl) => self.check_variable_declaration(decl),
+            Statement::MultipleVariableDecl(decl) => self.check_multiple_variable_declaration(decl),
+            Statement::MultipleAssignment(stmt) => self.check_multiple_assignment_statement(stmt),
+            Statement::DestructuringDecl(decl) => self.check_destructuring_declaration(decl),
             Statement::FunctionDecl(decl) => self.check_function_declaration(decl),
             Statement::StructDecl(decl) => self.check_struct_declaration(decl),
             Statement::InterfaceDecl(decl) => self.check_interface_declaration(decl),
@@ -420,6 +423,115 @@ impl TypeChecker {
 
         self.add_symbol(symbol)?;
         Ok(final_type)
+    }
+
+    /// Type check a multiple variable declaration
+    fn check_multiple_variable_declaration(&mut self, decl: &MultipleVariableDecl) -> Result<TypeId> {
+        for var_decl in &decl.declarations {
+            // For each variable in the multiple declaration, check it like a single variable
+            let mut inferred_type = None;
+
+            // Check initializer if present
+            if let Some(ref initializer) = var_decl.initializer {
+                let init_type = self.check_expression(initializer)?;
+                inferred_type = Some(init_type);
+            }
+
+            // Determine the final type
+            let final_type = match (&var_decl.type_annotation, inferred_type) {
+                // Explicit type annotation
+                (Some(ref type_ann), None) => self.ast_type_to_type_id(type_ann),
+                // Type inference from initializer
+                (None, Some(inferred)) => inferred,
+                // Both explicit type and initializer - check compatibility
+                (Some(ref type_ann), Some(inferred)) => {
+                    let explicit_type = self.ast_type_to_type_id(type_ann);
+                    if !PrimitiveType::is_assignable(inferred, explicit_type) {
+                        return Err(BuluError::TypeError {
+                            file: None,
+                            message: format!(
+                                "Cannot assign {} to variable of type {}",
+                                PrimitiveType::type_name(inferred),
+                                PrimitiveType::type_name(explicit_type)
+                            ),
+                            line: decl.position.line,
+                            column: decl.position.column,
+                        });
+                    }
+                    explicit_type
+                }
+                // Neither type annotation nor initializer
+                (None, None) => {
+                    return Err(BuluError::TypeError {
+                        file: None,
+                        message: "Variable declaration must have either type annotation or initializer"
+                            .to_string(),
+                        line: decl.position.line,
+                        column: decl.position.column,
+                    });
+                }
+            };
+
+            // Add to symbol table
+            let symbol = Symbol {
+                name: var_decl.name.clone(),
+                type_id: final_type,
+                is_mutable: !decl.is_const,
+                position: decl.position,
+                function_info: None,
+            };
+
+            self.add_symbol(symbol)?;
+        }
+        Ok(TypeId::Any)
+    }
+
+    /// Type check a destructuring declaration
+    fn check_destructuring_declaration(&mut self, decl: &DestructuringDecl) -> Result<TypeId> {
+        // First, check the type of the initializer
+        let initializer_type = self.check_expression(&decl.initializer)?;
+        
+        // Extract variables from the pattern and add them to the current scope
+        self.check_pattern_and_add_variables(&decl.pattern, initializer_type)?;
+        
+        Ok(TypeId::Void)
+    }
+
+    /// Type check a multiple assignment statement
+    fn check_multiple_assignment_statement(&mut self, stmt: &MultipleAssignmentStmt) -> Result<TypeId> {
+        // Check that all targets are valid lvalues (identifiers for now)
+        for target in &stmt.targets {
+            match target {
+                Expression::Identifier(ident) => {
+                    // Check that the identifier exists
+                    if self.lookup_symbol(&ident.name).is_none() {
+                        return Err(BuluError::TypeError {
+                            message: format!("Undefined variable '{}'", ident.name),
+                            line: ident.position.line,
+                            column: ident.position.column,
+                            file: None,
+                        });
+                    }
+                }
+                _ => {
+                    return Err(BuluError::TypeError {
+                        message: "Only simple identifiers are supported in multiple assignment".to_string(),
+                        line: 0,
+                        column: 0,
+                        file: None,
+                    });
+                }
+            }
+        }
+
+        // Check all value expressions
+        for value in &stmt.values {
+            self.check_expression(value)?;
+        }
+
+        // For now, we don't enforce type compatibility between targets and values
+        // This could be enhanced later
+        Ok(TypeId::Void)
     }
 
     /// Type check a function declaration
@@ -1380,20 +1492,55 @@ impl TypeChecker {
         let object_type = self.check_expression(&index.object)?;
         let index_type = self.check_expression(&index.index)?;
 
+        // Check if this is a slicing operation (index is a range)
+        let is_slicing = matches!(index.index.as_ref(), Expression::Range(_));
+        
         // Check index type based on the object type
         match object_type {
             TypeId::String | TypeId::Array(_) | TypeId::Slice(_) => {
-                // Arrays, slices, and strings require integer indices
-                if !PrimitiveType::is_integer_type_id(index_type) {
-                    return Err(BuluError::TypeError {
-                        file: None,
-                        message: format!(
-                            "Array/slice/string index must be integer, got {}",
-                            PrimitiveType::type_name(index_type)
-                        ),
-                        line: index.position.line,
-                        column: index.position.column,
-                    });
+                if is_slicing {
+                    // For slicing, we need to validate the range bounds are integers
+                    if let Expression::Range(range) = index.index.as_ref() {
+                        let start_type = self.check_expression(&range.start)?;
+                        let end_type = self.check_expression(&range.end)?;
+                        
+                        if !PrimitiveType::is_integer_type_id(start_type) {
+                            return Err(BuluError::TypeError {
+                                file: None,
+                                message: format!(
+                                    "Slice start index must be integer, got {}",
+                                    PrimitiveType::type_name(start_type)
+                                ),
+                                line: index.position.line,
+                                column: index.position.column,
+                            });
+                        }
+                        
+                        if !PrimitiveType::is_integer_type_id(end_type) {
+                            return Err(BuluError::TypeError {
+                                file: None,
+                                message: format!(
+                                    "Slice end index must be integer, got {}",
+                                    PrimitiveType::type_name(end_type)
+                                ),
+                                line: index.position.line,
+                                column: index.position.column,
+                            });
+                        }
+                    }
+                } else {
+                    // Arrays, slices, and strings require integer indices for simple indexing
+                    if !PrimitiveType::is_integer_type_id(index_type) {
+                        return Err(BuluError::TypeError {
+                            file: None,
+                            message: format!(
+                                "Array/slice/string index must be integer, got {}",
+                                PrimitiveType::type_name(index_type)
+                            ),
+                            line: index.position.line,
+                            column: index.position.column,
+                        });
+                    }
                 }
             }
             TypeId::Map(_type_id) => {
@@ -1420,16 +1567,37 @@ impl TypeChecker {
             }
         }
 
-        // Return the appropriate element type based on the object type
+        // Return the appropriate type based on the object type and operation
         match object_type {
-            TypeId::String => Ok(TypeId::Char),
-            TypeId::Array(_type_id) | TypeId::Slice(_type_id) => {
-                // Try to get the element type from the type registry
-                if let Some(element_type) = self.type_registry.get_element_type(object_type) {
-                    Ok(element_type)
+            TypeId::String => {
+                if is_slicing {
+                    // String slicing returns a string
+                    Ok(TypeId::String)
                 } else {
-                    // Fallback to Any if we can't determine the element type
-                    Ok(TypeId::Any)
+                    // String indexing returns a char
+                    Ok(TypeId::Char)
+                }
+            }
+            TypeId::Array(_type_id) | TypeId::Slice(_type_id) => {
+                if is_slicing {
+                    // Array/slice slicing returns a slice of the same element type
+                    if let Some(element_type) = self.type_registry.get_element_type(object_type) {
+                        // Create a slice type with the same element type
+                        let slice_id = self.type_registry.register_slice_type(element_type);
+                        Ok(TypeId::Slice(slice_id))
+                    } else {
+                        // Fallback to Any slice if we can't determine the element type
+                        let slice_id = self.type_registry.register_slice_type(TypeId::Any);
+                        Ok(TypeId::Slice(slice_id))
+                    }
+                } else {
+                    // Array/slice indexing returns the element type
+                    if let Some(element_type) = self.type_registry.get_element_type(object_type) {
+                        Ok(element_type)
+                    } else {
+                        // Fallback to Any if we can't determine the element type
+                        Ok(TypeId::Any)
+                    }
                 }
             }
             TypeId::Map(_type_id) => {
@@ -2238,6 +2406,104 @@ impl TypeChecker {
             }
             _ => Ok(None),
         }
+    }
+
+    /// Check a pattern and add variables to the current scope
+    fn check_pattern_and_add_variables(&mut self, pattern: &Pattern, value_type: TypeId) -> Result<()> {
+        match pattern {
+            Pattern::Identifier(name, position) => {
+                // Add the variable to the current scope
+                let symbol = Symbol {
+                    name: name.clone(),
+                    type_id: value_type,
+                    is_mutable: true, // TODO: get from declaration
+                    position: *position,
+                    function_info: None,
+                };
+                self.add_symbol(symbol)?;
+            }
+            Pattern::Struct(struct_pattern) => {
+                // For struct destructuring, we need to check that the value type is a struct
+                // and extract field types
+                match value_type {
+                    TypeId::Struct(_struct_id) => {
+                        // Get the struct definition to know field types
+                        // For now, we'll look up by struct name since we don't have a direct ID->struct mapping
+                        let struct_def = self.structs.get(&struct_pattern.name).cloned();
+                        if let Some(struct_def) = struct_def {
+                            for field_pattern in &struct_pattern.fields {
+                                // Find the field type in the struct definition
+                                if let Some(field_def) = struct_def.fields.iter().find(|f| f.name == field_pattern.name) {
+                                    let field_type = self.ast_type_to_type_id(&field_def.field_type);
+                                    self.check_pattern_and_add_variables(&field_pattern.pattern, field_type)?;
+                                } else {
+                                    return Err(BuluError::TypeError {
+                                        message: format!("Field '{}' not found in struct", field_pattern.name),
+                                        line: field_pattern.position.line,
+                                        column: field_pattern.position.column,
+                                        file: None,
+                                    });
+                                }
+                            }
+                        } else {
+                            return Err(BuluError::TypeError {
+                                message: "Unknown struct type in destructuring".to_string(),
+                                line: 0,
+                                column: 0,
+                                file: None,
+                            });
+                        }
+                    }
+                    TypeId::Any => {
+                        // For Any type (like object literals), assume all fields exist and are Any
+                        for field_pattern in &struct_pattern.fields {
+                            self.check_pattern_and_add_variables(&field_pattern.pattern, TypeId::Any)?;
+                        }
+                    }
+                    _ => {
+                        return Err(BuluError::TypeError {
+                            message: format!("Cannot destructure non-struct type"),
+                            line: 0,
+                            column: 0,
+                            file: None,
+                        });
+                    }
+                }
+            }
+            Pattern::Array(array_pattern) => {
+                // For array destructuring, extract element type
+                let element_type = match value_type {
+                    TypeId::Array(_element_type_id) => {
+                        // For now, assume Any type for array elements
+                        // TODO: Implement proper type registry lookup
+                        TypeId::Any
+                    }
+                    TypeId::Any => TypeId::Any,
+                    _ => {
+                        return Err(BuluError::TypeError {
+                            message: "Cannot destructure non-array type".to_string(),
+                            line: 0,
+                            column: 0,
+                            file: None,
+                        });
+                    }
+                };
+                
+                for element_pattern in &array_pattern.elements {
+                    self.check_pattern_and_add_variables(element_pattern, element_type)?;
+                }
+            }
+            Pattern::Or(or_pattern) => {
+                // For OR patterns, all alternatives should bind the same variables with the same types
+                for alternative in &or_pattern.patterns {
+                    self.check_pattern_and_add_variables(alternative, value_type)?;
+                }
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Range(_) => {
+                // These patterns don't bind variables
+            }
+        }
+        Ok(())
     }
 }
 

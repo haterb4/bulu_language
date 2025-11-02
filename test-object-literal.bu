@@ -1,0 +1,4 @@
+func main() {
+    let obj = {field1: 42, field2: "hello"};
+    print("obj created");
+}

@@ -1,0 +1,7 @@
+func main() {
+    let a: int64 = 1;
+    let b: int64 = 2;
+    a, b = b, a;
+    print(a.toString());
+    print(b.toString());
+}

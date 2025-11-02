@@ -381,6 +381,32 @@ impl IrGenerator {
                     ir_program.globals.push(ir_global);
                 }
 
+                Statement::DestructuringDecl(_) => {
+                    // Destructuring declarations at global scope are not supported yet
+                    return Err(BuluError::RuntimeError {
+                        message: "Global destructuring declarations are not supported".to_string(),
+                        file: None,
+                    });
+                }
+
+                Statement::MultipleVariableDecl(decl) => {
+                    // Generate globals for each variable in the multiple declaration
+                    for var_decl in &decl.declarations {
+                        // Create a temporary VariableDecl for generate_global
+                        let temp_var_decl = VariableDecl {
+                            is_const: decl.is_const,
+                            name: var_decl.name.clone(),
+                            type_annotation: var_decl.type_annotation.clone(),
+                            initializer: var_decl.initializer.clone(),
+                            doc_comment: None,
+                            is_exported: decl.is_exported,
+                            position: decl.position,
+                        };
+                        let ir_global = self.generate_global(&temp_var_decl)?;
+                        ir_program.globals.push(ir_global);
+                    }
+                }
+
                 Statement::StructDecl(struct_decl) => {
 
                     let ir_struct = self.generate_struct(struct_decl)?;
@@ -415,6 +441,30 @@ impl IrGenerator {
                         Statement::VariableDecl(var_decl) => {
                             let ir_global = self.generate_global(var_decl)?;
                             ir_program.globals.push(ir_global);
+                        }
+                        Statement::DestructuringDecl(_) => {
+                            // Destructuring declarations at global scope are not supported yet
+                            return Err(BuluError::RuntimeError {
+                                message: "Global destructuring declarations are not supported".to_string(),
+                                file: None,
+                            });
+                        }
+                        Statement::MultipleVariableDecl(decl) => {
+                            // Generate globals for each variable in the multiple declaration
+                            for var_decl in &decl.declarations {
+                                // Create a temporary VariableDecl for generate_global
+                                let temp_var_decl = VariableDecl {
+                                    is_const: decl.is_const,
+                                    name: var_decl.name.clone(),
+                                    type_annotation: var_decl.type_annotation.clone(),
+                                    initializer: var_decl.initializer.clone(),
+                                    doc_comment: None,
+                                    is_exported: decl.is_exported,
+                                    position: decl.position,
+                                };
+                                let ir_global = self.generate_global(&temp_var_decl)?;
+                                ir_program.globals.push(ir_global);
+                            }
                         }
                         Statement::StructDecl(struct_decl) => {
                             let ir_struct = self.generate_struct(struct_decl)?;
@@ -689,6 +739,18 @@ impl IrGenerator {
                 self.generate_variable_declaration(var_decl)?;
             }
 
+            Statement::DestructuringDecl(decl) => {
+                self.generate_destructuring_declaration(decl)?;
+            }
+
+            Statement::MultipleVariableDecl(decl) => {
+                self.generate_multiple_variable_declaration(decl)?;
+            }
+
+            Statement::MultipleAssignment(stmt) => {
+                self.generate_multiple_assignment_statement(stmt)?;
+            }
+
             Statement::Expression(expr_stmt) => {
                 self.generate_expression(&expr_stmt.expr)?;
             }
@@ -777,20 +839,236 @@ impl IrGenerator {
         let register = self.new_register();
         self.register_map.insert(var_decl.name.clone(), register);
 
-        // Generate initializer if present
-        if let Some(ref initializer) = var_decl.initializer {
-            let init_value = self.generate_expression(initializer)?;
+        // Generate initializer if present, otherwise use default value
+        let init_value = if let Some(ref initializer) = var_decl.initializer {
+            self.generate_expression(initializer)?
+        } else {
+            // Use default value based on type annotation
+            if let Some(ref type_annotation) = var_decl.type_annotation {
+                self.get_default_value_for_type(type_annotation)
+            } else {
+                IrValue::Constant(IrConstant::Null)
+            }
+        };
+
+        // Generate copy instruction to assign the value
+        self.emit_instruction(IrInstruction {
+            opcode: IrOpcode::Copy,
+            result: Some(register),
+            operands: vec![init_value],
+            position: var_decl.position,
+        });
+
+        Ok(())
+    }
+
+    /// Generate instructions for multiple assignment statement
+    pub fn generate_multiple_assignment_statement(&mut self, stmt: &MultipleAssignmentStmt) -> Result<()> {
+        // First, evaluate all the values
+        let mut value_registers = Vec::new();
+        for value_expr in &stmt.values {
+            let value_reg = self.generate_expression(value_expr)?;
+            value_registers.push(value_reg);
+        }
+
+        // Create temporary registers to hold all values to avoid overwriting
+        let mut temp_registers = Vec::new();
+        for (i, _) in stmt.targets.iter().enumerate() {
+            let value_reg = if i < value_registers.len() {
+                value_registers[i].clone()
+            } else {
+                // If there are more targets than values, assign null
+                let null_reg = self.new_register();
+                self.emit_instruction(IrInstruction {
+                    opcode: IrOpcode::Load,
+                    result: Some(null_reg.clone()),
+                    operands: vec![IrValue::Constant(IrConstant::Null)],
+                    position: stmt.position,
+                });
+                IrValue::Register(null_reg)
+            };
+
+            // Copy to a temporary register
+            let temp_reg = self.new_register();
+            self.emit_instruction(IrInstruction {
+                opcode: IrOpcode::Copy,
+                result: Some(temp_reg.clone()),
+                operands: vec![value_reg],
+                position: stmt.position,
+            });
+            temp_registers.push(IrValue::Register(temp_reg));
+        }
+
+        // Then assign from temporary registers to the targets
+        for (i, target_expr) in stmt.targets.iter().enumerate() {
+            let temp_reg = &temp_registers[i];
+
+            // For now, only support identifier targets
+            match target_expr {
+                Expression::Identifier(ident) => {
+                    if let Some(&register) = self.register_map.get(&ident.name) {
+                        self.emit_instruction(IrInstruction {
+                            opcode: IrOpcode::Move,
+                            result: Some(register),
+                            operands: vec![temp_reg.clone()],
+                            position: stmt.position,
+                        });
+                    }
+                }
+                _ => {
+                    return Err(BuluError::RuntimeError {
+                        message: "Complex assignment targets not yet supported in IR generation".to_string(),
+                        file: None,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Generate instructions for destructuring declaration
+    pub fn generate_destructuring_declaration(&mut self, decl: &DestructuringDecl) -> Result<()> {
+        // Generate the initializer expression
+        let init_value = self.generate_expression(&decl.initializer)?;
+        
+        // Generate pattern assignment
+        self.generate_pattern_assignment(&decl.pattern, init_value)?;
+        
+        Ok(())
+    }
+
+    /// Generate instructions for multiple variable declaration
+    pub fn generate_multiple_variable_declaration(&mut self, decl: &MultipleVariableDecl) -> Result<()> {
+        for var_decl in &decl.declarations {
+            // Allocate register for each variable
+            let register = self.new_register();
+            self.register_map.insert(var_decl.name.clone(), register);
+
+            // Generate initializer if present, otherwise use default value
+            let init_value = if let Some(ref initializer) = var_decl.initializer {
+                self.generate_expression(initializer)?
+            } else {
+                // Use default value based on type annotation
+                if let Some(ref type_annotation) = var_decl.type_annotation {
+                    self.get_default_value_for_type(type_annotation)
+                } else {
+                    IrValue::Constant(IrConstant::Null)
+                }
+            };
 
             // Generate copy instruction to assign the value
             self.emit_instruction(IrInstruction {
                 opcode: IrOpcode::Copy,
                 result: Some(register),
                 operands: vec![init_value],
-                position: var_decl.position,
+                position: decl.position,
             });
         }
-
+        
         Ok(())
+    }
+
+    /// Get default value for a type
+    fn get_default_value_for_type(&self, type_annotation: &Type) -> IrValue {
+        match type_annotation {
+            Type::Int32 => IrValue::Constant(IrConstant::Integer(0)),
+            Type::Int64 => IrValue::Constant(IrConstant::Integer(0)),
+            Type::Float32 => IrValue::Constant(IrConstant::Float(0.0)),
+            Type::Float64 => IrValue::Constant(IrConstant::Float(0.0)),
+            Type::Bool => IrValue::Constant(IrConstant::Boolean(false)),
+            Type::String => IrValue::Constant(IrConstant::String("".to_string())),
+            Type::Char => IrValue::Constant(IrConstant::Char('\0')),
+            _ => IrValue::Constant(IrConstant::Null),
+        }
+    }
+
+    /// Generate pattern assignment for destructuring
+    pub fn generate_pattern_assignment(&mut self, pattern: &Pattern, value: IrValue) -> Result<()> {
+        match pattern {
+            Pattern::Identifier(name, _) => {
+                let register = self.new_register();
+                self.register_map.insert(name.clone(), register);
+                
+                // Generate copy instruction
+                self.emit_instruction(IrInstruction {
+                    opcode: IrOpcode::Copy,
+                    result: Some(register),
+                    operands: vec![value],
+                    position: Position::new(0, 0, 0),
+                });
+            }
+            
+            Pattern::Struct(struct_pattern) => {
+                // For struct destructuring, we need to extract fields
+                for field_pattern in &struct_pattern.fields {
+                    // Generate field access
+                    let field_value = self.generate_field_access(value.clone(), &field_pattern.name)?;
+                    
+                    // Recursively assign to the field pattern
+                    self.generate_pattern_assignment(&field_pattern.pattern, field_value)?;
+                }
+            }
+            
+            Pattern::Array(array_pattern) => {
+                // For array destructuring, we need to extract elements by index
+                for (index, element_pattern) in array_pattern.elements.iter().enumerate() {
+                    // Generate index access
+                    let index_value = self.generate_index_access(value.clone(), index)?;
+                    
+                    // Recursively assign to the element pattern
+                    self.generate_pattern_assignment(element_pattern, index_value)?;
+                }
+            }
+            
+            // Handle other pattern types
+            Pattern::Wildcard(_) => {
+                // Wildcard patterns don't bind to variables, so we do nothing
+            }
+            
+            Pattern::Literal(_, _) => {
+                // Literal patterns are used for matching, not assignment
+                // In destructuring context, we might want to validate the value
+            }
+            
+            Pattern::Range(_) => {
+                // Range patterns are used for matching, not assignment
+            }
+            
+            Pattern::Or(_) => {
+                // Or patterns are complex and would need special handling
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Generate field access for struct destructuring
+    fn generate_field_access(&mut self, object: IrValue, field_name: &str) -> Result<IrValue> {
+        let result_register = self.new_register();
+        
+        self.emit_instruction(IrInstruction {
+            opcode: IrOpcode::StructAccess,
+            result: Some(result_register),
+            operands: vec![object, IrValue::Constant(IrConstant::String(field_name.to_string()))],
+            position: Position::new(0, 0, 0),
+        });
+        
+        Ok(IrValue::Register(result_register))
+    }
+
+    /// Generate index access for array destructuring
+    fn generate_index_access(&mut self, array: IrValue, index: usize) -> Result<IrValue> {
+        let result_register = self.new_register();
+        
+        self.emit_instruction(IrInstruction {
+            opcode: IrOpcode::ArrayAccess,
+            result: Some(result_register),
+            operands: vec![array, IrValue::Constant(IrConstant::Integer(index as i64))],
+            position: Position::new(0, 0, 0),
+        });
+        
+        Ok(IrValue::Register(result_register))
     }
 
     /// Generate IR value for an expression
@@ -1143,7 +1421,7 @@ impl IrGenerator {
                     opcode: IrOpcode::Call,
                     result: Some(result_register),
                     operands: vec![
-                        IrValue::Global("__range_to_array".to_string()),
+                        IrValue::Global("__create_range".to_string()),
                         start,
                         end,
                         IrValue::Constant(IrConstant::Boolean(range.inclusive)),
@@ -1591,6 +1869,26 @@ impl IrGenerator {
                             },
                             is_mutable: !var_decl.is_const,
                         });
+                    }
+                }
+                Statement::DestructuringDecl(_) => {
+                    // For destructuring, we would need to analyze the pattern to extract variable names
+                    // For now, we skip this as it's complex
+                }
+                Statement::MultipleVariableDecl(decl) => {
+                    for var_decl in &decl.declarations {
+                        if let Ok(ir_type) =
+                            self.convert_type(&var_decl.type_annotation.as_ref().unwrap_or(&Type::Any))
+                        {
+                            locals.push(IrLocal {
+                                name: var_decl.name.clone(),
+                                local_type: ir_type,
+                                register: IrRegister {
+                                    id: locals.len() as u32,
+                                },
+                                is_mutable: !decl.is_const,
+                            });
+                        }
                     }
                 }
                 Statement::Block(block) => {

@@ -4,6 +4,7 @@
 //! enabling operations like semantic analysis, code generation, and optimization.
 
 use super::nodes::*;
+use crate::lexer::token::Position;
 
 /// Generic visitor trait for AST traversal
 pub trait Visitor<T> {
@@ -16,6 +17,8 @@ pub trait Visitor<T> {
     }
     
     fn visit_variable_decl(&mut self, decl: &VariableDecl) -> T;
+    fn visit_destructuring_decl(&mut self, decl: &DestructuringDecl) -> T;
+    fn visit_multiple_variable_decl(&mut self, decl: &MultipleVariableDecl) -> T;
     fn visit_function_decl(&mut self, decl: &FunctionDecl) -> T;
     fn visit_struct_decl(&mut self, decl: &StructDecl) -> T;
     fn visit_interface_decl(&mut self, decl: &InterfaceDecl) -> T;
@@ -86,6 +89,8 @@ pub trait MutVisitor {
     }
     
     fn visit_variable_decl(&mut self, decl: &mut VariableDecl);
+    fn visit_destructuring_decl(&mut self, decl: &mut DestructuringDecl);
+    fn visit_multiple_variable_decl(&mut self, decl: &mut MultipleVariableDecl);
     fn visit_function_decl(&mut self, decl: &mut FunctionDecl);
     fn visit_struct_decl(&mut self, decl: &mut StructDecl);
     fn visit_interface_decl(&mut self, decl: &mut InterfaceDecl);
@@ -153,6 +158,27 @@ pub trait MutVisitor {
 pub fn walk_statement<T, V: Visitor<T>>(visitor: &mut V, statement: &Statement) -> T {
     match statement {
         Statement::VariableDecl(decl) => visitor.visit_variable_decl(decl),
+        Statement::DestructuringDecl(decl) => visitor.visit_destructuring_decl(decl),
+        Statement::MultipleVariableDecl(decl) => visitor.visit_multiple_variable_decl(decl),
+        Statement::MultipleAssignment(stmt) => {
+            // Visit all target expressions
+            for target in &stmt.targets {
+                visitor.visit_expression(target);
+            }
+            // Visit all value expressions  
+            for value in &stmt.values {
+                visitor.visit_expression(value);
+            }
+            // Return a default value for the visitor
+            if !stmt.targets.is_empty() {
+                visitor.visit_expression(&stmt.targets[0])
+            } else {
+                visitor.visit_expression(&Expression::Literal(LiteralExpr {
+                    value: LiteralValue::Null,
+                    position: Position::new(0, 0, 0),
+                }))
+            }
+        }
         Statement::FunctionDecl(decl) => visitor.visit_function_decl(decl),
         Statement::StructDecl(decl) => visitor.visit_struct_decl(decl),
         Statement::InterfaceDecl(decl) => visitor.visit_interface_decl(decl),
@@ -213,6 +239,18 @@ pub fn walk_statement_mut<V: MutVisitor>(visitor: &mut V, statement: &mut Statem
         Statement::VariableDecl(decl) => visitor.visit_variable_decl(decl),
         Statement::FunctionDecl(decl) => visitor.visit_function_decl(decl),
         Statement::StructDecl(decl) => visitor.visit_struct_decl(decl),
+        Statement::DestructuringDecl(decl) => visitor.visit_destructuring_decl(decl),
+        Statement::MultipleVariableDecl(decl) => visitor.visit_multiple_variable_decl(decl),
+        Statement::MultipleAssignment(stmt) => {
+            // Visit all target expressions (mutable)
+            for target in &mut stmt.targets {
+                visitor.visit_expression(target);
+            }
+            // Visit all value expressions (mutable)
+            for value in &mut stmt.values {
+                visitor.visit_expression(value);
+            }
+        }
         Statement::InterfaceDecl(decl) => visitor.visit_interface_decl(decl),
         Statement::TypeAlias(decl) => visitor.visit_type_alias_decl(decl),
         Statement::If(stmt) => visitor.visit_if_stmt(stmt),

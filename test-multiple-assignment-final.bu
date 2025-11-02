@@ -1,0 +1,12 @@
+func main() {
+    let x: int64 = 10;
+    let y: int64 = 20;
+    let z: int64 = 30;
+    
+    print("Before: x=" + x.toString() + ", y=" + y.toString() + ", z=" + z.toString());
+    
+    // Rotation des variables: x -> y -> z -> x
+    x, y, z = z, x, y;
+    
+    print("After: x=" + x.toString() + ", y=" + y.toString() + ", z=" + z.toString());
+}
