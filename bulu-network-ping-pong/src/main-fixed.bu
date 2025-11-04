@@ -1,0 +1,147 @@
+// Bulu Network Ping-Pong Example - Fixed for Goroutines
+// Tests TCP and UDP networking functionality with non-blocking goroutines
+
+import { TcpServer, TcpConnection, UdpConnection, NetAddr } from "std/net"
+import { sleep } from "std/time"
+
+func main() {
+    println("=== BULU NETWORK PING-PONG DEMO (FIXED) ===")
+    println("")
+    
+    // Test TCP Ping-Pong
+    println("🔗 Testing TCP Ping-Pong...")
+    testTcpPingPong()
+    
+    println("")
+    println("✅ All network tests completed!")
+}
+
+func testTcpPingPong() {
+    let port = 9080
+    let addr = NetAddr.localhost_ipv4(port)
+    
+    println("Starting TCP server on localhost:" + port.toString())
+    
+    // Start TCP server in a goroutine
+    run runTcpServerFixed(addr)
+    
+    // Give server time to start
+    sleep(500) // 500ms - more time for server to start
+    
+    // Connect as client and send ping-pong messages
+    runTcpClient(addr)
+    
+    // Give time for server to finish
+    sleep(1000) // 1 second
+}
+
+func runTcpServerFixed(addr: NetAddr) {
+    let server = TcpServer.bind(addr)
+    if server.isError() {
+        println("❌ Failed to bind TCP server: " + server.error().toString())
+        return
+    }
+    
+    println("✅ TCP Server listening on " + addr.toString())
+    
+    let server_unwrapped = server.unwrap()
+    
+    // Non-blocking accept loop for goroutines
+    println("🔄 Server waiting for connections (non-blocking)...")
+    let attempts = 0
+    let maxAttempts = 100 // Try for about 10 seconds (100 * 100ms)
+    let conn_result = server_unwrapped.accept() // Initialize with first attempt
+    
+    // Keep trying to accept a connection
+    while attempts < maxAttempts && conn_result.isError() {
+        // No connection yet, wait a bit and try again
+        sleep(100) // 100ms
+        attempts = attempts + 1
+        
+        if attempts % 10 == 0 {
+            println("🔄 Still waiting for connection... (attempt " + attempts.toString() + ")")
+        }
+        
+        conn_result = server_unwrapped.accept()
+    }
+    
+    if conn_result.isError() {
+        println("❌ Server timeout: no connection received after " + maxAttempts.toString() + " attempts")
+        return
+    }
+    
+    let conn_unwrapped = conn_result.unwrap()
+    println("📞 Client connected from " + conn_unwrapped.peer_addr().toString())
+    
+    // Ping-pong loop
+    for i in 0..5 {
+        // Read ping from client
+        let buffer = make([]byte, 1024)
+        let bytesRead = conn_unwrapped.read(buffer)
+        if bytesRead.isError() {
+            println("❌ Error reading from client: " + bytesRead.error().toString())
+            break
+        }
+        
+        let bytesRead_unwrapped = bytesRead.unwrap()
+        let message = string(buffer[0:bytesRead_unwrapped])
+        println("📨 Server received: " + message)
+        
+        // Send pong back
+        let pongMessage = "PONG " + i.toString()
+        let bytesWritten = conn_unwrapped.write(pongMessage.bytes())
+        if bytesWritten.isError() {
+            println("❌ Error writing to client: " + bytesWritten.error().toString())
+            break
+        }
+        
+        println("📤 Server sent: " + pongMessage)
+    }
+    
+    conn_unwrapped.close()
+    println("🔌 TCP Server connection closed")
+}
+
+func runTcpClient(addr: NetAddr) {
+    println("🔗 Connecting to TCP server...")
+    
+    let conn = TcpConnection.connect(addr)
+    if conn.isError() {
+        println("❌ Failed to connect to server: " + conn.error().toString())
+        return
+    }
+    
+    let conn_unwrapped = conn.unwrap()
+    println("✅ Connected to server at " + addr.toString())
+    
+    // Ping-pong loop
+    for i in 0..5 {
+        // Send ping
+        let pingMessage = "PING " + i.toString()
+        let bytesWritten = conn_unwrapped.write(pingMessage.bytes())
+        if bytesWritten.isError() {
+            println("❌ Error writing to server: " + bytesWritten.error().toString())
+            break
+        }
+        
+        println("📤 Client sent: " + pingMessage)
+        
+        // Read pong response
+        let buffer = make([]byte, 1024)
+        let bytesRead = conn_unwrapped.read(buffer)
+        if bytesRead.isError() {
+            println("❌ Error reading from server: " + bytesRead.error().toString())
+            break
+        }
+        
+        let bytesRead_unwrapped = bytesRead.unwrap()
+        let message = string(buffer[0:bytesRead_unwrapped])
+        println("📨 Client received: " + message)
+        
+        // Small delay between messages
+        sleep(50) // 50ms
+    }
+    
+    conn_unwrapped.close()
+    println("🔌 TCP Client connection closed")
+}

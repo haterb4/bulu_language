@@ -1,44 +1,51 @@
-// Bulu Network Ping-Pong Example
+// Bulu Network Ping-Pong Example - Debug Version
 // Tests TCP and UDP networking functionality
 
 import { TcpServer, TcpConnection, UdpConnection, NetAddr } from "std/net"
 import { sleep } from "std/time"
 
 func main() {
-    println("=== BULU NETWORK PING-PONG DEMO ===")
+    println("=== BULU NETWORK PING-PONG DEMO (DEBUG) ===")
     println("")
     
     // Test TCP Ping-Pong
     println("🔗 Testing TCP Ping-Pong...")
+    println("DEBUG: About to call testTcpPingPong()")
     testTcpPingPong()
-    
-    println("")
-    
-    // Test UDP Ping-Pong  
-    println("📡 Testing UDP Ping-Pong...")
-    testUdpPingPong()
+    println("DEBUG: testTcpPingPong() completed")
     
     println("")
     println("✅ All network tests completed!")
 }
 
 func testTcpPingPong() {
+    println("DEBUG: testTcpPingPong() started")
     let port = 9080
     let addr = NetAddr.localhost_ipv4(port)
     
     println("Starting TCP server on localhost:" + port.toString())
+    println("DEBUG: About to launch goroutine with 'run runTcpServer(addr)'")
     
     // Start TCP server in a goroutine
     run runTcpServer(addr)
     
+    println("DEBUG: 'run runTcpServer(addr)' completed, goroutine should be launched")
+    
     // Give server time to start
+    println("DEBUG: About to sleep for 100ms")
     sleep(100) // 100ms
+    println("DEBUG: Sleep completed")
     
     // Connect as client and send ping-pong messages
+    println("DEBUG: About to call runTcpClient(addr)")
     runTcpClient(addr)
+    println("DEBUG: runTcpClient(addr) completed")
+    
+    println("DEBUG: testTcpPingPong() ending")
 }
 
 func runTcpServer(addr: NetAddr) {
+    println("DEBUG: runTcpServer() started - THIS SHOULD BE IN A GOROUTINE")
     let server = TcpServer.bind(addr)
     if server.isError() {
         println("❌ Failed to bind TCP server: " + server.error().toString())
@@ -49,7 +56,10 @@ func runTcpServer(addr: NetAddr) {
     
     // Accept one connection for demo
     let server_unwrapped = server.unwrap()
+    println("DEBUG: About to call server.accept() - THIS MIGHT BLOCK")
     let conn = server_unwrapped.accept()
+    println("DEBUG: server.accept() returned")
+    
     if conn.isError() {
         println("❌ Failed to accept connection: " + conn.error().toString())
         return
@@ -85,9 +95,11 @@ func runTcpServer(addr: NetAddr) {
     
     conn_unwrapped.close()
     println("🔌 TCP Server connection closed")
+    println("DEBUG: runTcpServer() ending")
 }
 
 func runTcpClient(addr: NetAddr) {
+    println("DEBUG: runTcpClient() started")
     println("🔗 Connecting to TCP server...")
     
     let conn = TcpConnection.connect(addr)
@@ -129,103 +141,5 @@ func runTcpClient(addr: NetAddr) {
     
     conn_unwrapped.close()
     println("🔌 TCP Client connection closed")
-}
-
-func testUdpPingPong() {
-    let serverPort = 8081
-    let clientPort = 8082
-    let serverAddr = NetAddr.localhost_ipv4(serverPort)
-    let clientAddr = NetAddr.localhost_ipv4(clientPort)
-    
-    println("Starting UDP ping-pong between ports " + serverPort.toString() + " and " + clientPort.toString())
-    
-    // Start UDP server in a goroutine
-    run runUdpServer(serverAddr, clientAddr)
-
-    
-    // Give server time to start
-    sleep(100) // 100ms
-    
-    // Run UDP client
-    runUdpClient(clientAddr, serverAddr)
-}
-
-func runUdpServer(serverAddr: NetAddr, clientAddr: NetAddr) {
-    let socket = UdpConnection.bind(serverAddr)
-    if socket.isError() {
-        println("❌ Failed to bind UDP server: " + socket.error().toString())
-        return
-    }
-    
-    let socket_unwrapped = socket.unwrap()
-    println("✅ UDP Server listening on " + serverAddr.toString())
-    
-    // Ping-pong loop
-    for i in 0..5 {
-        // Read ping from client
-        let buffer = make([]byte, 1024)
-        let result = socket_unwrapped.recv_from(buffer)
-        if result.isError() {
-            println("❌ Error reading UDP message: " + result.error().toString())
-            break
-        }
-        let result_unwrapped = result.unwrap()
-        let (bytesRead, fromAddr) = result_unwrapped;
-        let message = string(buffer[0:bytesRead]);
-        println("📨 UDP Server received from " + fromAddr.toString() + ": " + message);
-        
-        // Send pong back
-        let pongMessage = "UDP_PONG " + i.toString()
-        let bytesSent = socket_unwrapped.send_to(pongMessage.bytes(), clientAddr)
-        if bytesSent.isError() {
-            println("❌ Error sending UDP message: " + bytesSent.error().toString())
-            break
-        }
-        
-        println("📤 UDP Server sent: " + pongMessage)
-    }
-    
-    println("🔌 UDP Server finished")
-}
-
-func runUdpClient(clientAddr: NetAddr, serverAddr: NetAddr) {
-    let socket = UdpConnection.bind(clientAddr)
-    if socket.isError() {
-        println("❌ Failed to bind UDP client: " + socket.error().toString())
-        return
-    }
-    
-    let socket_unwrapped = socket.unwrap()
-    println("✅ UDP Client bound to " + clientAddr.toString())
-    
-    // Ping-pong loop
-    for i in 0..5 {
-        // Send ping
-        let pingMessage = "UDP_PING " + i.toString()
-        let bytesSent = socket_unwrapped.send_to(pingMessage.bytes(), serverAddr)
-        if bytesSent.isError() {
-            println("❌ Error sending UDP message: " + bytesSent.error().toString())
-            break
-        }
-        
-        println("📤 UDP Client sent: " + pingMessage)
-        
-        // Read pong response
-        let buffer = make([]byte, 1024)
-        let result = socket_unwrapped.recv_from(buffer)
-        if result.isError() {
-            println("❌ Error reading UDP response: " + result.error().toString())
-            break
-        }
-        
-        let result_unwrapped = result.unwrap()
-        let (bytesRead, fromAddr) = result_unwrapped
-        let message = string(buffer[0:bytesRead])
-        println("📨 UDP Client received from " + fromAddr.toString() + ": " + message)
-        
-        // Small delay between messages
-        sleep(50) // 50ms
-    }
-    
-    println("🔌 UDP Client finished")
+    println("DEBUG: runTcpClient() ending")
 }

@@ -1,0 +1,9 @@
+func main() {
+    // Test 1: Type mismatch in tuple destructuring
+    let (a, b) = 42
+    
+    // Test 2: Wrong number of elements
+    let (x, y, z) = (1, 2)
+    
+    println(a)
+}

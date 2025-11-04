@@ -1,0 +1,23 @@
+func main() {
+    // Test what recv_from actually returns
+    let addr = NetAddr.new("127.0.0.1", 8080)
+    let socket_result = UdpConnection.bind(addr)
+    
+    if socket_result.isError() {
+        println("Error binding socket")
+        return
+    }
+    
+    let socket = socket_result.unwrap()
+    let buffer = make([]byte, 1024)
+    let result = socket.recv_from(buffer)
+    
+    if result.isError() {
+        println("recv_from returned error: " + result.error().toString())
+        return
+    }
+    
+    let result_unwrapped = result.unwrap()
+    println("recv_from returned: " + result_unwrapped.toString())
+    println("Type of result_unwrapped: " + typeof(result_unwrapped))
+}

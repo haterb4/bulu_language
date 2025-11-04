@@ -1,0 +1,12 @@
+func main() {
+    // Test 1: Type mismatch in tuple destructuring
+    let (a, b) = 42  // Should error: cannot destructure non-tuple
+    
+    // Test 2: Wrong number of elements
+    let (x, y, z) = (1, 2)  // Should error: mismatched tuple sizes
+    
+    // Test 3: Invalid tuple syntax
+    let (,) = (1, 2)  // Should error: empty pattern element
+    
+    println(a)
+}

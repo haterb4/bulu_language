@@ -1,0 +1,7 @@
+import { sleep } from "std/time"
+
+func main() {
+    println("Test d'import std/time")
+    sleep(100)
+    println("Après sleep")
+}

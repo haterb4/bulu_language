@@ -383,7 +383,7 @@ impl Parser {
 
         Ok(Statement::DestructuringDecl(DestructuringDecl {
             is_const,
-            pattern: Pattern::Array(ArrayPattern {
+            pattern: Pattern::Tuple(TuplePattern {
                 elements,
                 position: start_pos,
             }),
@@ -1518,12 +1518,45 @@ impl Parser {
             // Array patterns
             TokenType::LeftBracket => self.parse_array_pattern(),
 
-            // Parenthesized patterns
+            // Parenthesized patterns or tuple patterns
             TokenType::LeftParen => {
                 self.advance(); // consume '('
-                let pattern = self.parse_pattern()?;
-                self.consume(&TokenType::RightParen, "Expected ')' after pattern")?;
-                Ok(pattern)
+                
+                // Check for empty tuple ()
+                if self.check(&TokenType::RightParen) {
+                    self.advance(); // consume ')'
+                    return Ok(Pattern::Tuple(TuplePattern {
+                        elements: vec![],
+                        position: pos,
+                    }));
+                }
+                
+                // Parse first pattern
+                let first_pattern = self.parse_pattern()?;
+                
+                // Check if this is a tuple (has comma) or just parenthesized pattern
+                if self.check(&TokenType::Comma) {
+                    // This is a tuple pattern
+                    let mut elements = vec![first_pattern];
+                    
+                    while self.match_token(&TokenType::Comma) {
+                        // Allow trailing comma
+                        if self.check(&TokenType::RightParen) {
+                            break;
+                        }
+                        elements.push(self.parse_pattern()?);
+                    }
+                    
+                    self.consume(&TokenType::RightParen, "Expected ')' after tuple pattern")?;
+                    Ok(Pattern::Tuple(TuplePattern {
+                        elements,
+                        position: pos,
+                    }))
+                } else {
+                    // Just a parenthesized pattern
+                    self.consume(&TokenType::RightParen, "Expected ')' after pattern")?;
+                    Ok(first_pattern)
+                }
             }
 
             _ => Err(self.error("Expected pattern")),
@@ -3120,14 +3153,47 @@ impl Parser {
                     if self.is_arrow_function() {
                         self.parse_arrow_function()
                     } else {
-                        // Regular parenthesized expression
-                        self.advance();
-                        let expr = self.parse_expression()?;
-                        self.consume(&TokenType::RightParen, "Expected ')' after expression")?;
-                        Ok(Expression::Parenthesized(ParenthesizedExpr {
-                            expr: Box::new(expr),
-                            position: pos,
-                        }))
+                        // Parse parenthesized expression or tuple expression
+                        self.advance(); // consume '('
+                        
+                        // Check for empty tuple ()
+                        if self.check(&TokenType::RightParen) {
+                            self.advance(); // consume ')'
+                            return Ok(Expression::Tuple(TupleExpr {
+                                elements: vec![],
+                                position: pos,
+                            }));
+                        }
+                        
+                        // Parse first expression
+                        let first_expr = self.parse_expression()?;
+                        
+                        // Check if this is a tuple (has comma) or just parenthesized expression
+                        if self.check(&TokenType::Comma) {
+                            // This is a tuple expression
+                            let mut elements = vec![first_expr];
+                            
+                            while self.match_token(&TokenType::Comma) {
+                                // Allow trailing comma
+                                if self.check(&TokenType::RightParen) {
+                                    break;
+                                }
+                                elements.push(self.parse_expression()?);
+                            }
+                            
+                            self.consume(&TokenType::RightParen, "Expected ')' after tuple expression")?;
+                            Ok(Expression::Tuple(TupleExpr {
+                                elements,
+                                position: pos,
+                            }))
+                        } else {
+                            // Just a parenthesized expression
+                            self.consume(&TokenType::RightParen, "Expected ')' after expression")?;
+                            Ok(Expression::Parenthesized(ParenthesizedExpr {
+                                expr: Box::new(first_expr),
+                                position: pos,
+                            }))
+                        }
                     }
                 } else {
                     Err(self.error(&format!("Unexpected token: {}", token.token_type)))

@@ -49,7 +49,7 @@ impl ImportResolver {
         // Load the module if not already loaded
         let module_name = self.get_module_name(&import_stmt.path);
         if !context.modules.contains_key(&module_name) {
-            let module = self.module_resolver.load_module(&module_path)?;
+            let module = self.module_resolver.load_module(&import_stmt.path)?;
             context.register_module(module);
         }
 

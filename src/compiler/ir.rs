@@ -1021,6 +1021,17 @@ impl IrGenerator {
                 }
             }
             
+            Pattern::Tuple(tuple_pattern) => {
+                // For tuple destructuring, we need to extract elements by index
+                for (index, element_pattern) in tuple_pattern.elements.iter().enumerate() {
+                    // Generate tuple element access
+                    let element_value = self.generate_tuple_access(value.clone(), index)?;
+                    
+                    // Recursively assign to the element pattern
+                    self.generate_pattern_assignment(element_pattern, element_value)?;
+                }
+            }
+            
             // Handle other pattern types
             Pattern::Wildcard(_) => {
                 // Wildcard patterns don't bind to variables, so we do nothing
@@ -1065,6 +1076,20 @@ impl IrGenerator {
             opcode: IrOpcode::ArrayAccess,
             result: Some(result_register),
             operands: vec![array, IrValue::Constant(IrConstant::Integer(index as i64))],
+            position: Position::new(0, 0, 0),
+        });
+        
+        Ok(IrValue::Register(result_register))
+    }
+
+    /// Generate tuple access for tuple destructuring
+    fn generate_tuple_access(&mut self, tuple: IrValue, index: usize) -> Result<IrValue> {
+        let result_register = self.new_register();
+        
+        self.emit_instruction(IrInstruction {
+            opcode: IrOpcode::TupleAccess,
+            result: Some(result_register),
+            operands: vec![tuple, IrValue::Constant(IrConstant::Integer(index as i64))],
             position: Position::new(0, 0, 0),
         });
         
@@ -1615,16 +1640,59 @@ impl IrGenerator {
             }
 
             Expression::Run(run_expr) => {
-                // Generate IR for goroutine spawn
-                let expr_val = self.generate_expression(&run_expr.expr)?;
+                println!("🔧 IR_GENERATOR: Processing Expression::Run");
+                
+                // For goroutine spawn, we need to handle the expression specially
+                // We DON'T want to execute it now, but defer it for the goroutine
                 let result_register = self.new_register();
                 
-                self.emit_instruction(IrInstruction {
-                    opcode: IrOpcode::Spawn,
-                    result: Some(result_register),
-                    operands: vec![expr_val],
-                    position: run_expr.position,
-                });
+                // Check if it's a function call
+                match &*run_expr.expr {
+                    Expression::Call(call_expr) => {
+                        // Extract function name from callee
+                        let function_name = match &*call_expr.callee {
+                            Expression::Identifier(ident) => ident.name.clone(),
+                            _ => {
+                                return Err(BuluError::Other(
+                                    "Run expression must call a named function".to_string()
+                                ));
+                            }
+                        };
+                        
+                        println!("🔧 IR_GENERATOR: Run expression is a function call: {}", function_name);
+                        
+                        // Generate arguments but don't execute the function yet
+                        let mut operands = vec![IrValue::Global(function_name.clone())];
+                        
+                        for arg in &call_expr.args {
+                            let arg_val = self.generate_expression(arg)?;
+                            operands.push(arg_val);
+                        }
+                        
+                        println!("🔧 IR_GENERATOR: Emitting IrOpcode::Spawn with function '{}' and {} args", function_name, call_expr.args.len());
+                        
+                        self.emit_instruction(IrInstruction {
+                            opcode: IrOpcode::Spawn,
+                            result: Some(result_register),
+                            operands,
+                            position: run_expr.position,
+                        });
+                    }
+                    _ => {
+                        // For other expressions, generate them normally
+                        println!("🔧 IR_GENERATOR: Run expression is not a function call, generating normally");
+                        let expr_val = self.generate_expression(&run_expr.expr)?;
+                        
+                        self.emit_instruction(IrInstruction {
+                            opcode: IrOpcode::Spawn,
+                            result: Some(result_register),
+                            operands: vec![expr_val],
+                            position: run_expr.position,
+                        });
+                    }
+                }
+                
+                println!("🔧 IR_GENERATOR: IrOpcode::Spawn instruction emitted");
                 
                 Ok(IrValue::Register(result_register))
             }

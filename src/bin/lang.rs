@@ -3,15 +3,16 @@
 //! High-level command-line tool for Bulu project management
 
 use bulu::build::{run_executable, BuildOptions, Builder};
+use bulu::compiler::symbol_resolver::SymbolType;
 use bulu::compiler::{IrGenerator, SemanticAnalyzer, SymbolResolver};
 use bulu::docs::{DocFormat, DocGenerator, DocOptions};
 use bulu::formatter::{create_default_format_config, load_format_config, Formatter};
-use bulu::linter::{create_default_lint_config, load_lint_config, Linter};
 use bulu::lexer::Lexer;
+use bulu::linter::{create_default_lint_config, load_lint_config, Linter};
 use bulu::package::commands::{PackageManager, PackageOptions};
 use bulu::parser::Parser;
 use bulu::project::{create_project, Project};
-use bulu::runtime::Interpreter;
+use bulu::runtime::{ast_interpreter::AstInterpreter, Interpreter};
 use bulu::testing::{BenchmarkRunner, TestOptions, TestRunner};
 use bulu::types::{primitive::RuntimeValue, TypeChecker};
 use bulu::{BuluError, Result};
@@ -215,11 +216,7 @@ fn main() -> Result<()> {
                         .required(true)
                         .index(1),
                 )
-                .arg(
-                    Arg::new("version")
-                        .help("Version constraint")
-                        .index(2),
-                )
+                .arg(Arg::new("version").help("Version constraint").index(2))
                 .arg(
                     Arg::new("verbose")
                         .short('v')
@@ -246,37 +243,31 @@ fn main() -> Result<()> {
                 ),
         )
         .subcommand(
-            Command::new("update")
-                .about("Update dependencies")
-                .arg(
-                    Arg::new("verbose")
-                        .short('v')
-                        .long("verbose")
-                        .help("Verbose output")
-                        .action(clap::ArgAction::SetTrue),
-                ),
+            Command::new("update").about("Update dependencies").arg(
+                Arg::new("verbose")
+                    .short('v')
+                    .long("verbose")
+                    .help("Verbose output")
+                    .action(clap::ArgAction::SetTrue),
+            ),
         )
         .subcommand(
-            Command::new("install")
-                .about("Install dependencies")
-                .arg(
-                    Arg::new("verbose")
-                        .short('v')
-                        .long("verbose")
-                        .help("Verbose output")
-                        .action(clap::ArgAction::SetTrue),
-                ),
+            Command::new("install").about("Install dependencies").arg(
+                Arg::new("verbose")
+                    .short('v')
+                    .long("verbose")
+                    .help("Verbose output")
+                    .action(clap::ArgAction::SetTrue),
+            ),
         )
         .subcommand(
-            Command::new("list")
-                .about("List dependencies")
-                .arg(
-                    Arg::new("verbose")
-                        .short('v')
-                        .long("verbose")
-                        .help("Verbose output")
-                        .action(clap::ArgAction::SetTrue),
-                ),
+            Command::new("list").about("List dependencies").arg(
+                Arg::new("verbose")
+                    .short('v')
+                    .long("verbose")
+                    .help("Verbose output")
+                    .action(clap::ArgAction::SetTrue),
+            ),
         )
         .subcommand(
             Command::new("search")
@@ -459,23 +450,25 @@ fn build_project(release: bool, verbose: bool, target: Option<&str>) -> Result<(
     if !result.success {
         let error_count = result.errors.len();
         let warning_count = result.warnings.len();
-        
+
         if error_count > 0 {
-            eprintln!("{} {} compilation error{}", 
-                "Error:".red().bold(), 
-                error_count, 
+            eprintln!(
+                "{} {} compilation error{}",
+                "Error:".red().bold(),
+                error_count,
                 if error_count == 1 { "" } else { "s" }
             );
         }
-        
+
         if warning_count > 0 {
-            eprintln!("{} {} warning{}", 
-                "Warning:".yellow().bold(), 
-                warning_count, 
+            eprintln!(
+                "{} {} warning{}",
+                "Warning:".yellow().bold(),
+                warning_count,
                 if warning_count == 1 { "" } else { "s" }
             );
         }
-        
+
         return Err(BuluError::Other(format!(
             "Build failed with {} error{} and {} warning{}",
             error_count,
@@ -492,21 +485,22 @@ fn build_project(release: bool, verbose: bool, target: Option<&str>) -> Result<(
 fn find_project_entrypoint() -> Result<PathBuf> {
     let current_dir = std::env::current_dir()
         .map_err(|e| BuluError::Other(format!("Failed to get current directory: {}", e)))?;
-    
+
     // Look for main.bu in src directory
     let main_path = current_dir.join("src").join("main.bu");
     if main_path.exists() {
         return Ok(main_path);
     }
-    
+
     // Look for main.bu in current directory as fallback
     let main_path = current_dir.join("main.bu");
     if main_path.exists() {
         return Ok(main_path);
     }
-    
+
     Err(BuluError::Other(
-        "No entrypoint found. Expected 'main.bu' in 'src/' directory or current directory.".to_string()
+        "No entrypoint found. Expected 'main.bu' in 'src/' directory or current directory."
+            .to_string(),
     ))
 }
 
@@ -517,7 +511,7 @@ fn run_project(file: Option<&String>, _release: bool, is_source: bool) -> Result
         if !path.exists() {
             return Err(BuluError::Other(format!("File '{}' not found", file_path)));
         }
-        
+
         if is_source {
             // Treat as source code
             execute_source_file(path)?;
@@ -573,12 +567,16 @@ fn execute_source_file(path: &Path) -> Result<RuntimeValue> {
 
     // Type checking
     let mut type_checker = TypeChecker::new();
+    type_checker.set_file_path(Some(file_path.clone()));
 
     // Import symbols from the symbol resolver
     type_checker.import_symbols_from_resolver(&symbol_resolver);
-    
+
     // Re-add builtin functions to ensure they're not overwritten
     type_checker.add_builtin_functions_after_import();
+
+    // Add standard library types and methods
+    type_checker.add_std_types();
 
     type_checker.check(&ast)?;
 
@@ -606,6 +604,28 @@ fn execute_source_file(path: &Path) -> Result<RuntimeValue> {
 
     // Execute with interpreter
     let mut interpreter = Interpreter::new();
+    
+    // Add imported symbols to interpreter globals
+    let symbol_table = symbol_resolver.get_symbol_table();
+    for (name, imported_symbol) in &symbol_table.imported_symbols {
+        // For now, we'll add the imported symbols as string identifiers
+        // This allows the interpreter to recognize them as available globals
+        match imported_symbol.symbol_type {
+            SymbolType::Struct => {
+                // For types like NetAddr, TcpServer, etc., add them as struct identifiers
+                interpreter.set_global(name.clone(), RuntimeValue::String(format!("struct:{}", name)));
+            }
+            SymbolType::Function => {
+                // For functions like sleep, add them as function identifiers
+                interpreter.set_global(name.clone(), RuntimeValue::String(format!("function:{}", name)));
+            }
+            _ => {
+                // For other symbols, add them as generic identifiers
+                interpreter.set_global(name.clone(), RuntimeValue::String(name.clone()));
+            }
+        }
+    }
+    
     interpreter.load_program(combined_ir_program);
     interpreter.execute()
 }
@@ -630,7 +650,10 @@ fn execute_bytecode_file(path: &Path) -> Result<RuntimeValue> {
                 execute_native_binary(path)
             }
         } else {
-            Err(BuluError::Other(format!("Cannot read file: {}", path.display())))
+            Err(BuluError::Other(format!(
+                "Cannot read file: {}",
+                path.display()
+            )))
         }
     }
 }
@@ -646,7 +669,7 @@ fn is_native_executable(path: &Path) -> bool {
             return permissions.mode() & 0o111 != 0; // Check if any execute bit is set
         }
     }
-    
+
     #[cfg(windows)]
     {
         // On Windows, check if it has .exe extension or is executable
@@ -654,7 +677,7 @@ fn is_native_executable(path: &Path) -> bool {
             return true;
         }
     }
-    
+
     // Try to read the file header to detect if it's a native binary
     if let Ok(mut file) = std::fs::File::open(path) {
         use std::io::Read;
@@ -665,7 +688,8 @@ fn is_native_executable(path: &Path) -> bool {
                 return true;
             }
             // Check for PE magic number (Windows) - would be at offset 0x3c, but this is a simple check
-            if header[0..2] == [0x4d, 0x5a] { // MZ header
+            if header[0..2] == [0x4d, 0x5a] {
+                // MZ header
                 return true;
             }
             // Check for Mach-O magic numbers (macOS)
@@ -674,7 +698,7 @@ fn is_native_executable(path: &Path) -> bool {
             }
         }
     }
-    
+
     false
 }
 
@@ -683,19 +707,19 @@ fn execute_bytecode_with_interpreter(path: &Path) -> Result<RuntimeValue> {
     // Read bytecode file
     let bytecode = std::fs::read(path)
         .map_err(|e| BuluError::Other(format!("Failed to read bytecode file: {}", e)))?;
-    
+
     // Validate bytecode header
     if bytecode.len() < 4 || &bytecode[0..4] != b"BULU" {
         return Err(BuluError::Other("Invalid bytecode format".to_string()));
     }
-    
+
     // Create and run interpreter
     let mut interpreter = Interpreter::new();
-    
+
     // For now, we'll create a simple bytecode execution
     // This is a placeholder - in a real implementation, we'd parse and execute the bytecode
     println!("Executing Bulu bytecode...");
-    
+
     // Parse the bytecode and execute it
     execute_simple_bytecode(&bytecode)
 }
@@ -705,27 +729,31 @@ fn execute_simple_bytecode(bytecode: &[u8]) -> Result<RuntimeValue> {
     if bytecode.len() < 8 {
         return Err(BuluError::Other("Bytecode too short".to_string()));
     }
-    
+
     let mut pc = 8; // Skip header (BULU + version + reserved + function count)
-    
+
     while pc < bytecode.len() {
         if pc >= bytecode.len() {
             break;
         }
-        
+
         let opcode = bytecode[pc];
         pc += 1;
-        
+
         match opcode {
-            0x06 => { // LOAD_STRING
+            0x06 => {
+                // LOAD_STRING
                 if pc + 4 > bytecode.len() {
                     break;
                 }
                 let len = u32::from_le_bytes([
-                    bytecode[pc], bytecode[pc + 1], bytecode[pc + 2], bytecode[pc + 3]
+                    bytecode[pc],
+                    bytecode[pc + 1],
+                    bytecode[pc + 2],
+                    bytecode[pc + 3],
                 ]) as usize;
                 pc += 4;
-                
+
                 if pc + len > bytecode.len() {
                     break;
                 }
@@ -734,10 +762,12 @@ fn execute_simple_bytecode(bytecode: &[u8]) -> Result<RuntimeValue> {
                 print!("{}", string);
                 pc += len;
             }
-            0x40 => { // PRINTLN
+            0x40 => {
+                // PRINTLN
                 println!();
             }
-            0x30 => { // RETURN
+            0x30 => {
+                // RETURN
                 break;
             }
             _ => {
@@ -745,36 +775,36 @@ fn execute_simple_bytecode(bytecode: &[u8]) -> Result<RuntimeValue> {
             }
         }
     }
-    
+
     Ok(RuntimeValue::Null)
 }
 
 /// Execute a native binary
 fn execute_native_binary(path: &Path) -> Result<RuntimeValue> {
     use std::process::Command;
-    
+
     let output = Command::new(path)
         .output()
         .map_err(|e| BuluError::Other(format!("Failed to execute binary: {}", e)))?;
-    
+
     // Print stdout
     if !output.stdout.is_empty() {
         print!("{}", String::from_utf8_lossy(&output.stdout));
     }
-    
+
     // Print stderr
     if !output.stderr.is_empty() {
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
     }
-    
+
     // Check exit status
     if !output.status.success() {
         return Err(BuluError::Other(format!(
-            "Program exited with code: {}", 
+            "Program exited with code: {}",
             output.status.code().unwrap_or(-1)
         )));
     }
-    
+
     // Return a dummy value since native executables don't return RuntimeValue
     Ok(RuntimeValue::Null)
 }
@@ -783,40 +813,46 @@ fn execute_native_binary(path: &Path) -> Result<RuntimeValue> {
 fn find_project_bytecode() -> Result<PathBuf> {
     let current_dir = std::env::current_dir()
         .map_err(|e| BuluError::Other(format!("Failed to get current directory: {}", e)))?;
-    
+
     // Get project name from directory name
     let project_name = current_dir
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("main");
-    
+
     // First, look for bytecode files (.buc) - these are generated in debug mode
     let bytecode_path = current_dir.join(format!("{}.buc", project_name));
     if bytecode_path.exists() {
         return Ok(bytecode_path);
     }
-    
-    let debug_bytecode_path = current_dir.join("target").join("debug").join(format!("{}.buc", project_name));
+
+    let debug_bytecode_path = current_dir
+        .join("target")
+        .join("debug")
+        .join(format!("{}.buc", project_name));
     if debug_bytecode_path.exists() {
         return Ok(debug_bytecode_path);
     }
-    
+
     // Then look for native executables - these are generated in release mode
     let executable_path = current_dir.join(project_name);
     if executable_path.exists() {
         return Ok(executable_path);
     }
-    
+
     let debug_path = current_dir.join("target").join("debug").join(project_name);
     if debug_path.exists() {
         return Ok(debug_path);
     }
-    
-    let release_path = current_dir.join("target").join("release").join(project_name);
+
+    let release_path = current_dir
+        .join("target")
+        .join("release")
+        .join(project_name);
     if release_path.exists() {
         return Ok(release_path);
     }
-    
+
     // Also check with .exe extension on Windows
     #[cfg(windows)]
     {
@@ -824,18 +860,24 @@ fn find_project_bytecode() -> Result<PathBuf> {
         if exe_path.exists() {
             return Ok(exe_path);
         }
-        
-        let debug_exe_path = current_dir.join("target").join("debug").join(format!("{}.exe", project_name));
+
+        let debug_exe_path = current_dir
+            .join("target")
+            .join("debug")
+            .join(format!("{}.exe", project_name));
         if debug_exe_path.exists() {
             return Ok(debug_exe_path);
         }
-        
-        let release_exe_path = current_dir.join("target").join("release").join(format!("{}.exe", project_name));
+
+        let release_exe_path = current_dir
+            .join("target")
+            .join("release")
+            .join(format!("{}.exe", project_name));
         if release_exe_path.exists() {
             return Ok(release_exe_path);
         }
     }
-    
+
     Err(BuluError::Other(format!(
         "No compiled executable or bytecode found. Run 'langc build' first to compile the project."
     )))
@@ -999,35 +1041,37 @@ fn run_benchmarks(verbose: bool) -> Result<()> {
 fn add_dependency(package: &str, version: Option<&str>, verbose: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
-    
+
     rt.block_on(async {
         let project = Project::load_current()?;
         let mut package_manager = PackageManager::new(project)?;
-        
+
         let options = PackageOptions {
             verbose,
             dry_run: false,
             force: false,
         };
-        
-        package_manager.add_dependency(package, version, &options).await
+
+        package_manager
+            .add_dependency(package, version, &options)
+            .await
     })
 }
 
 fn remove_dependency(package: &str, verbose: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
-    
+
     rt.block_on(async {
         let project = Project::load_current()?;
         let mut package_manager = PackageManager::new(project)?;
-        
+
         let options = PackageOptions {
             verbose,
             dry_run: false,
             force: false,
         };
-        
+
         package_manager.remove_dependency(package, &options).await
     })
 }
@@ -1035,17 +1079,17 @@ fn remove_dependency(package: &str, verbose: bool) -> Result<()> {
 fn update_dependencies(verbose: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
-    
+
     rt.block_on(async {
         let project = Project::load_current()?;
         let mut package_manager = PackageManager::new(project)?;
-        
+
         let options = PackageOptions {
             verbose,
             dry_run: false,
             force: false,
         };
-        
+
         package_manager.update_dependencies(&options).await
     })
 }
@@ -1053,17 +1097,17 @@ fn update_dependencies(verbose: bool) -> Result<()> {
 fn install_dependencies(verbose: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
-    
+
     rt.block_on(async {
         let project = Project::load_current()?;
         let mut package_manager = PackageManager::new(project)?;
-        
+
         let options = PackageOptions {
             verbose,
             dry_run: false,
             force: false,
         };
-        
+
         package_manager.install_dependencies(&options).await
     })
 }
@@ -1071,17 +1115,17 @@ fn install_dependencies(verbose: bool) -> Result<()> {
 fn list_dependencies(verbose: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
-    
+
     rt.block_on(async {
         let project = Project::load_current()?;
         let package_manager = PackageManager::new(project)?;
-        
+
         let options = PackageOptions {
             verbose,
             dry_run: false,
             force: false,
         };
-        
+
         package_manager.list_dependencies(&options).await
     })
 }
@@ -1089,11 +1133,11 @@ fn list_dependencies(verbose: bool) -> Result<()> {
 fn search_packages(query: &str, limit: Option<usize>) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
-    
+
     rt.block_on(async {
         let project = Project::load_current()?;
         let package_manager = PackageManager::new(project)?;
-        
+
         package_manager.search_packages(query, limit).await
     })
 }
@@ -1101,17 +1145,17 @@ fn search_packages(query: &str, limit: Option<usize>) -> Result<()> {
 fn publish_package(verbose: bool, dry_run: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
-    
+
     rt.block_on(async {
         let project = Project::load_current()?;
         let package_manager = PackageManager::new(project)?;
-        
+
         let options = PackageOptions {
             verbose,
             dry_run,
             force: false,
         };
-        
+
         package_manager.publish_package(&options).await
     })
 }
@@ -1119,17 +1163,17 @@ fn publish_package(verbose: bool, dry_run: bool) -> Result<()> {
 fn vendor_dependencies(verbose: bool, force: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
-    
+
     rt.block_on(async {
         let project = Project::load_current()?;
         let package_manager = PackageManager::new(project)?;
-        
+
         let options = PackageOptions {
             verbose,
             dry_run: false,
             force,
         };
-        
+
         package_manager.vendor_dependencies(&options).await
     })
 }

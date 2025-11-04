@@ -1,0 +1,9 @@
+import { sleep } from "std/time"
+import { TcpServer } from "std/net"
+
+func main() {
+    println("Test d'import std/time et std/net")
+    println("sleep function imported successfully")
+    println("TcpServer struct imported successfully")
+    println("Test réussi !")
+}

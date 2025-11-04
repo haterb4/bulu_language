@@ -96,6 +96,15 @@ impl ModuleResolver {
                     exports.insert("sin".to_string(), RuntimeValue::Null);
                     exports.insert("cos".to_string(), RuntimeValue::Null);
                 }
+                "net" => {
+                    exports.insert("TcpServer".to_string(), RuntimeValue::String("struct:TcpServer".to_string()));
+                    exports.insert("TcpConnection".to_string(), RuntimeValue::String("struct:TcpConnection".to_string()));
+                    exports.insert("UdpConnection".to_string(), RuntimeValue::String("struct:UdpConnection".to_string()));
+                    exports.insert("NetAddr".to_string(), RuntimeValue::String("struct:NetAddr".to_string()));
+                }
+                "time" => {
+                    exports.insert("sleep".to_string(), RuntimeValue::Null);
+                }
                 _ => {
                     // Add a generic export for other modules
                     exports.insert("default".to_string(), RuntimeValue::Null);
@@ -165,8 +174,17 @@ impl ModuleResolver {
         }
 
         // Check if it's a standard library module
-        if path.starts_with("std.") || self.std_modules.contains_key(path) {
-            if let Some(module) = self.std_modules.get(path) {
+        let std_module_key = if path.starts_with("std/") {
+            // Convert std/net to std.net format
+            path.replace('/', ".")
+        } else if path.starts_with("std.") {
+            path.to_string()
+        } else {
+            String::new()
+        };
+
+        if !std_module_key.is_empty() {
+            if let Some(module) = self.std_modules.get(&std_module_key) {
                 return Ok(module.clone());
             } else {
                 // Module not found in std_modules, but it's a std module

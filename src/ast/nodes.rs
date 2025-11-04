@@ -801,6 +801,7 @@ pub enum Pattern {
     Identifier(String, Position),
     Struct(StructPattern),
     Array(ArrayPattern),
+    Tuple(TuplePattern),
     Range(RangePattern),
     Or(OrPattern),
 }
@@ -824,6 +825,13 @@ pub struct FieldPattern {
 /// Array pattern
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrayPattern {
+    pub elements: Vec<Pattern>,
+    pub position: Position,
+}
+
+/// Tuple pattern
+#[derive(Debug, Clone, PartialEq)]
+pub struct TuplePattern {
     pub elements: Vec<Pattern>,
     pub position: Position,
 }
@@ -999,6 +1007,7 @@ impl HasPosition for Pattern {
             Pattern::Identifier(_, pos) => *pos,
             Pattern::Struct(node) => node.position,
             Pattern::Array(node) => node.position,
+            Pattern::Tuple(node) => node.position,
             Pattern::Range(node) => node.position,
             Pattern::Or(node) => node.position,
         }

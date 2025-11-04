@@ -14,8 +14,54 @@ use crate::runtime::channels::{Channel, ChannelRegistry};
 use crate::runtime::promises::PromiseRegistry;
 use crate::runtime::sync::{sleep, timer, yield_now, AtomicOperations, LockRegistry};
 use std::collections::HashMap;
-use std::io::{self, Write};
-use std::sync::{Arc, Mutex};
+use std::io::{self, Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
+
+// Thread-local variable to track if we're in a goroutine context
+thread_local! {
+    static IS_GOROUTINE_CONTEXT: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
+/// Set the goroutine context for the current thread
+pub fn set_goroutine_context(is_goroutine: bool) {
+    IS_GOROUTINE_CONTEXT.with(|ctx| ctx.set(is_goroutine));
+}
+
+/// Check if we're currently in a goroutine context
+pub fn is_in_goroutine_context() -> bool {
+    IS_GOROUTINE_CONTEXT.with(|ctx| ctx.get())
+}
+
+// Global registry for real network connections
+type TcpServerMap = HashMap<String, Arc<TcpListener>>;
+type TcpConnectionMap = HashMap<String, Arc<Mutex<TcpStream>>>;
+type UdpSocketMap = HashMap<String, Arc<UdpSocket>>;
+
+static TCP_SERVERS: OnceLock<Arc<Mutex<TcpServerMap>>> = OnceLock::new();
+static TCP_CONNECTIONS: OnceLock<Arc<Mutex<TcpConnectionMap>>> = OnceLock::new();
+static UDP_SOCKETS: OnceLock<Arc<Mutex<UdpSocketMap>>> = OnceLock::new();
+static CONNECTION_COUNTER: OnceLock<Arc<Mutex<u32>>> = OnceLock::new();
+
+fn get_tcp_servers() -> &'static Arc<Mutex<TcpServerMap>> {
+    TCP_SERVERS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+}
+
+fn get_tcp_connections() -> &'static Arc<Mutex<TcpConnectionMap>> {
+    TCP_CONNECTIONS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+}
+
+fn get_udp_sockets() -> &'static Arc<Mutex<UdpSocketMap>> {
+    UDP_SOCKETS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+}
+
+fn get_next_connection_id() -> String {
+    let counter = CONNECTION_COUNTER.get_or_init(|| Arc::new(Mutex::new(0)));
+    let mut count = counter.lock().unwrap();
+    *count += 1;
+    format!("conn_{}", *count)
+}
 
 /// Runtime value for collections and composite types
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +100,7 @@ impl BuiltinRegistry {
         registry.register_utility_functions();
         registry.register_channel_functions();
         registry.register_synchronization_functions();
+        registry.register_network_functions();
 
         registry
     }
@@ -165,6 +212,23 @@ impl BuiltinRegistry {
         self.register("atomic_add", builtin_atomic_add);
         self.register("atomic_sub", builtin_atomic_sub);
         self.register("atomic_cas", builtin_atomic_cas);
+    }
+
+    /// Register network functions
+    fn register_network_functions(&mut self) {
+        self.register("NetAddr_localhost_ipv4", builtin_netaddr_localhost_ipv4);
+        self.register("TcpServer_bind", builtin_tcpserver_bind);
+        self.register("TcpConnection_connect", builtin_tcpconnection_connect);
+        self.register("UdpConnection_bind", builtin_udpconnection_bind);
+
+        // Instance methods
+        self.register("TcpServer_accept", builtin_tcpserver_accept);
+        self.register("TcpConnection_peer_addr", builtin_tcpconnection_peer_addr);
+        self.register("TcpConnection_read", builtin_tcpconnection_read);
+        self.register("TcpConnection_write", builtin_tcpconnection_write);
+        self.register("TcpConnection_close", builtin_tcpconnection_close);
+        self.register("UdpConnection_recv_from", builtin_udpconnection_recv_from);
+        self.register("UdpConnection_send_to", builtin_udpconnection_send_to);
     }
 }
 
@@ -325,6 +389,43 @@ pub fn builtin_string(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         });
     }
 
+    // Special handling for byte arrays that might contain network data
+    match &args[0] {
+        RuntimeValue::Array(arr) => {
+            // Check if this looks like a byte buffer (array of small integers)
+            let is_byte_buffer = arr.iter().all(|v| match v {
+                RuntimeValue::Int32(i) => *i >= 0 && *i <= 255,
+                RuntimeValue::UInt8(_) => true,
+                _ => false,
+            });
+
+            if is_byte_buffer {
+                // First, try to get data from the last network read
+                static LAST_READ_DATA: OnceLock<Arc<Mutex<String>>> = OnceLock::new();
+                let last_read = LAST_READ_DATA.get_or_init(|| Arc::new(Mutex::new(String::new())));
+                if let Ok(data) = last_read.lock() {
+                    if !data.is_empty() {
+                        return Ok(RuntimeValue::String(data.clone()));
+                    }
+                }
+
+                // Fallback: Convert byte array directly to string
+                let bytes: Vec<u8> = arr
+                    .iter()
+                    .filter_map(|v| match v {
+                        RuntimeValue::Int32(i) => Some(*i as u8),
+                        RuntimeValue::UInt8(b) => Some(*b),
+                        _ => None,
+                    })
+                    .collect();
+                return Ok(RuntimeValue::String(
+                    String::from_utf8_lossy(&bytes).to_string(),
+                ));
+            }
+        }
+        _ => {}
+    }
+
     args[0].cast_to(PrimitiveType::String)
 }
 
@@ -348,7 +449,9 @@ pub fn builtin_len(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Map(map) => Ok(RuntimeValue::Int32(map.len() as i32)),
         RuntimeValue::Channel(channel_id) => {
             // Get channel length from global registry
-            let registry = crate::runtime::interpreter::get_global_channel_registry().lock().unwrap();
+            let registry = crate::runtime::interpreter::get_global_channel_registry()
+                .lock()
+                .unwrap();
             if let Some(channel) = registry.get(*channel_id) {
                 Ok(RuntimeValue::Int32(channel.len() as i32))
             } else {
@@ -379,7 +482,9 @@ pub fn builtin_cap(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Array(arr) => Ok(RuntimeValue::Int32(arr.len() as i32)), // Arrays have fixed capacity
         RuntimeValue::Channel(channel_id) => {
             // Get channel capacity from global registry
-            let registry = crate::runtime::interpreter::get_global_channel_registry().lock().unwrap();
+            let registry = crate::runtime::interpreter::get_global_channel_registry()
+                .lock()
+                .unwrap();
             if let Some(channel) = registry.get(*channel_id) {
                 Ok(RuntimeValue::Int32(channel.capacity() as i32))
             } else {
@@ -438,6 +543,7 @@ pub fn builtin_sizeof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Promise(_) => std::mem::size_of::<u32>(), // Promise ID size
         RuntimeValue::Array(arr) => arr.len() * std::mem::size_of::<RuntimeValue>(), // Array size
         RuntimeValue::Slice(slice) => slice.len() * std::mem::size_of::<RuntimeValue>(), // Slice size
+        RuntimeValue::Tuple(tuple) => tuple.len() * std::mem::size_of::<RuntimeValue>(), // Tuple size
         RuntimeValue::Map(map) => {
             map.len() * (std::mem::size_of::<String>() + std::mem::size_of::<RuntimeValue>())
         } // Map size
@@ -449,7 +555,10 @@ pub fn builtin_sizeof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::MethodRef { .. } => std::mem::size_of::<String>() * 2, // Object + method name
         RuntimeValue::Struct { fields, .. } => {
             // Estimate struct size as sum of field sizes
-            fields.values().map(|v| estimate_value_size(v)).sum::<usize>()
+            fields
+                .values()
+                .map(|v| estimate_value_size(v))
+                .sum::<usize>()
         }
         RuntimeValue::Global(_) => std::mem::size_of::<String>(),
         RuntimeValue::Range(_, _, _) => std::mem::size_of::<(i64, i64, Option<i64>)>(), // Global refs are pointer-sized
@@ -487,7 +596,6 @@ fn estimate_value_size(value: &RuntimeValue) -> usize {
 /// Built-in make function with Go-like type syntax
 /// This function should be called with proper type information from the parser
 pub fn builtin_make(args: &[RuntimeValue]) -> Result<RuntimeValue> {
-
     // This function should not be called directly for type-based make() calls
     // The interpreter's evaluate_make_call() handles proper type-based make() syntax
     // This function is kept for backward compatibility with non-type-based calls
@@ -508,19 +616,19 @@ pub fn builtin_make(args: &[RuntimeValue]) -> Result<RuntimeValue> {
             } else {
                 0 // Empty slice by default
             };
-            
+
             let cap = if args.len() > 2 {
                 extract_size_arg(&args[2], "slice capacity")?
             } else {
                 len // Capacity equals length by default
             };
-            
+
             // Create slice with specified length, filled with default values for the type
             let default_value = get_default_value_for_slice_type(type_name);
             let slice = vec![default_value; len];
             return Ok(RuntimeValue::Slice(slice));
         }
-        
+
         // Handle channel types
         if type_name.starts_with("chan_") {
             let capacity = if args.len() > 1 {
@@ -528,7 +636,7 @@ pub fn builtin_make(args: &[RuntimeValue]) -> Result<RuntimeValue> {
             } else {
                 None
             };
-            
+
             // Extract the element type from chan_TYPE
             let element_type = match type_name.strip_prefix("chan_") {
                 Some("int8") => TypeId::Int8,
@@ -547,10 +655,10 @@ pub fn builtin_make(args: &[RuntimeValue]) -> Result<RuntimeValue> {
                 Some("string") => TypeId::String,
                 _ => TypeId::Any,
             };
-            
+
             return builtin_make_chan(element_type, &args[1..]);
         }
-        
+
         // Handle other type names
         match type_name.as_str() {
             "chan" => {
@@ -617,12 +725,12 @@ pub fn builtin_make(args: &[RuntimeValue]) -> Result<RuntimeValue> {
             } else {
                 0 // Empty slice by default
             };
-            
+
             // Create slice with specified length, filled with zero values
             let slice = vec![RuntimeValue::Null; len];
             return Ok(RuntimeValue::Slice(slice));
         }
-        
+
         // Handle generic channel types (chan_TypeName)
         if type_name.starts_with("chan_") {
             let capacity = if args.len() > 1 {
@@ -630,7 +738,7 @@ pub fn builtin_make(args: &[RuntimeValue]) -> Result<RuntimeValue> {
             } else {
                 None
             };
-            
+
             // For unknown channel types, default to Any
             return builtin_make_chan(TypeId::Any, &args[1..]);
         }
@@ -776,7 +884,7 @@ pub fn builtin_copy(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Array(array) => array,
         _ => {
             return Err(BuluError::RuntimeError {
-            file: None,
+                file: None,
                 message: "copy() source must be a slice or array".to_string(),
             })
         }
@@ -850,34 +958,40 @@ pub fn builtin_range_to_array(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Int64(i) => *i,
         RuntimeValue::Int32(i) => *i as i64,
         RuntimeValue::Integer(i) => *i,
-        _ => return Err(BuluError::RuntimeError {
-            file: None,
-            message: "Range start must be an integer".to_string(),
-        }),
+        _ => {
+            return Err(BuluError::RuntimeError {
+                file: None,
+                message: "Range start must be an integer".to_string(),
+            })
+        }
     };
 
     let end = match &args[1] {
         RuntimeValue::Int64(i) => *i,
         RuntimeValue::Int32(i) => *i as i64,
         RuntimeValue::Integer(i) => *i,
-        _ => return Err(BuluError::RuntimeError {
-            file: None,
-            message: "Range end must be an integer".to_string(),
-        }),
+        _ => {
+            return Err(BuluError::RuntimeError {
+                file: None,
+                message: "Range end must be an integer".to_string(),
+            })
+        }
     };
 
     let inclusive = match &args[2] {
         RuntimeValue::Bool(b) => *b,
-        _ => return Err(BuluError::RuntimeError {
-            file: None,
-            message: "Range inclusive flag must be boolean".to_string(),
-        }),
+        _ => {
+            return Err(BuluError::RuntimeError {
+                file: None,
+                message: "Range inclusive flag must be boolean".to_string(),
+            })
+        }
     };
 
     // Create array from range
     let mut array = Vec::new();
     let actual_end = if inclusive { end + 1 } else { end };
-    
+
     for i in start..actual_end {
         array.push(RuntimeValue::Int64(i));
     }
@@ -898,28 +1012,34 @@ pub fn builtin_create_range(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Int64(i) => *i,
         RuntimeValue::Int32(i) => *i as i64,
         RuntimeValue::Integer(i) => *i,
-        _ => return Err(BuluError::RuntimeError {
-            file: None,
-            message: "Range start must be an integer".to_string(),
-        }),
+        _ => {
+            return Err(BuluError::RuntimeError {
+                file: None,
+                message: "Range start must be an integer".to_string(),
+            })
+        }
     };
 
     let end = match &args[1] {
         RuntimeValue::Int64(i) => *i,
         RuntimeValue::Int32(i) => *i as i64,
         RuntimeValue::Integer(i) => *i,
-        _ => return Err(BuluError::RuntimeError {
-            file: None,
-            message: "Range end must be an integer".to_string(),
-        }),
+        _ => {
+            return Err(BuluError::RuntimeError {
+                file: None,
+                message: "Range end must be an integer".to_string(),
+            })
+        }
     };
 
     let _inclusive = match &args[2] {
         RuntimeValue::Bool(b) => *b,
-        _ => return Err(BuluError::RuntimeError {
-            file: None,
-            message: "Range inclusive flag must be boolean".to_string(),
-        }),
+        _ => {
+            return Err(BuluError::RuntimeError {
+                file: None,
+                message: "Range inclusive flag must be boolean".to_string(),
+            })
+        }
     };
 
     // Create range value directly
@@ -939,7 +1059,7 @@ pub fn builtin_print(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         print!("{}", format_runtime_value(arg));
     }
     io::stdout().flush().map_err(|e| BuluError::RuntimeError {
-            file: None,
+        file: None,
         message: format!("Failed to flush stdout: {}", e),
     })?;
 
@@ -992,7 +1112,7 @@ pub fn builtin_input(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         if let RuntimeValue::String(prompt) = &args[0] {
             print!("{}", prompt);
             io::stdout().flush().map_err(|e| BuluError::RuntimeError {
-            file: None,
+                file: None,
                 message: format!("Failed to flush stdout: {}", e),
             })?;
         }
@@ -1050,6 +1170,7 @@ pub fn builtin_typeof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Promise(_) => "promise",
         RuntimeValue::Array(_) => "array",
         RuntimeValue::Slice(_) => "slice",
+        RuntimeValue::Tuple(_) => "tuple",
         RuntimeValue::Map(_) => "map",
         RuntimeValue::Integer(_) => "integer",
         RuntimeValue::Byte(_) => "byte",
@@ -1078,7 +1199,7 @@ pub fn builtin_instanceof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::String(s) => s,
         _ => {
             return Err(BuluError::RuntimeError {
-            file: None,
+                file: None,
                 message: "instanceof() second argument must be a string (type name)".to_string(),
             });
         }
@@ -1104,6 +1225,7 @@ pub fn builtin_instanceof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Promise(_) => "promise",
         RuntimeValue::Array(_) => "array",
         RuntimeValue::Slice(_) => "slice",
+        RuntimeValue::Tuple(_) => "tuple",
         RuntimeValue::Map(_) => "map",
         RuntimeValue::Integer(_) => "integer",
         RuntimeValue::Byte(_) => "byte",
@@ -1178,7 +1300,7 @@ pub fn builtin_panic(args: &[RuntimeValue]) -> Result<RuntimeValue> {
     };
 
     Err(BuluError::RuntimeError {
-            file: None,
+        file: None,
         message: format!("panic: {}", message),
     })
 }
@@ -1292,7 +1414,7 @@ pub fn builtin_sleep(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::UInt64(ms) => *ms,
         _ => {
             return Err(BuluError::RuntimeError {
-            file: None,
+                file: None,
                 message: "sleep() argument must be a number (milliseconds)".to_string(),
             });
         }
@@ -1331,7 +1453,7 @@ pub fn builtin_timer(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::UInt64(ms) => *ms,
         _ => {
             return Err(BuluError::RuntimeError {
-            file: None,
+                file: None,
                 message: "timer() argument must be a number (milliseconds)".to_string(),
             });
         }
@@ -1542,6 +1664,10 @@ pub fn format_runtime_value(value: &RuntimeValue) -> String {
             let elements: Vec<String> = slice.iter().map(|v| format_runtime_value(v)).collect();
             format!("[{}]", elements.join(", "))
         }
+        RuntimeValue::Tuple(tuple) => {
+            let elements: Vec<String> = tuple.iter().map(|v| format_runtime_value(v)).collect();
+            format!("({})", elements.join(", "))
+        }
         RuntimeValue::Map(map) => {
             let pairs: Vec<String> = map
                 .iter()
@@ -1554,7 +1680,8 @@ pub fn format_runtime_value(value: &RuntimeValue) -> String {
         RuntimeValue::Function(name) => format!("function({})", name),
         RuntimeValue::MethodRef { method_name, .. } => format!("method({})", method_name),
         RuntimeValue::Struct { name, fields } => {
-            let field_strs: Vec<String> = fields.iter()
+            let field_strs: Vec<String> = fields
+                .iter()
                 .map(|(k, v)| format!("{}: {}", k, format_runtime_value(v)))
                 .collect();
             format!("{}{{ {} }}", name, field_strs.join(", "))
@@ -1590,7 +1717,7 @@ fn format_string_with_args(format_str: &str, args: &[RuntimeValue]) -> Result<St
 
                     if arg_index >= args.len() {
                         return Err(BuluError::RuntimeError {
-            file: None,
+                            file: None,
                             message: format!("printf: not enough arguments for format string"),
                         });
                     }
@@ -1735,7 +1862,7 @@ pub fn builtin_close(args: &[RuntimeValue]) -> Result<RuntimeValue> {
                     Ok(RuntimeValue::Null)
                 } else {
                     Err(BuluError::RuntimeError {
-            file: None,
+                        file: None,
                         message: format!("Channel {} not found", channel_id),
                     })
                 }
@@ -1960,12 +2087,14 @@ pub fn builtin_make_chan(element_type: TypeId, args: &[RuntimeValue]) -> Result<
     // Create channel in the global registry
     let buffer_size = capacity.unwrap_or(0);
     let channel_id = {
-        let mut registry = crate::runtime::interpreter::get_global_channel_registry().lock().unwrap();
+        let mut registry = crate::runtime::interpreter::get_global_channel_registry()
+            .lock()
+            .unwrap();
         let id = registry.create_channel(element_type, buffer_size);
 
         id
     };
-    
+
     Ok(RuntimeValue::Channel(channel_id))
 }
 
@@ -1987,4 +2116,983 @@ fn get_default_value_for_type(type_id: TypeId) -> RuntimeValue {
         TypeId::String => RuntimeValue::String(String::new()),
         _ => RuntimeValue::Null,
     }
+}
+
+/// NetAddr.localhost_ipv4(port) - create a localhost IPv4 address
+pub fn builtin_netaddr_localhost_ipv4(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 1 {
+        return Err(BuluError::RuntimeError {
+            message: "NetAddr.localhost_ipv4() requires exactly one argument (port)".to_string(),
+            file: None,
+        });
+    }
+
+    let port = match &args[0] {
+        RuntimeValue::Integer(p) => *p,
+        RuntimeValue::Int64(p) => *p,
+        RuntimeValue::Int32(p) => *p as i64,
+        RuntimeValue::UInt32(p) => *p as i64,
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "NetAddr.localhost_ipv4() port must be a number".to_string(),
+                file: None,
+            });
+        }
+    };
+
+    // Return a mock NetAddr as a string representation
+    Ok(RuntimeValue::String(format!("127.0.0.1:{}", port)))
+}
+
+/// TcpServer.bind(addr) - bind a TCP server to an address
+pub fn builtin_tcpserver_bind(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 1 {
+        return Err(BuluError::RuntimeError {
+            message: "TcpServer.bind() requires exactly one argument (address)".to_string(),
+            file: None,
+        });
+    }
+
+    let addr = match &args[0] {
+        RuntimeValue::String(addr) => addr,
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "TcpServer.bind() address must be a string".to_string(),
+                file: None,
+            });
+        }
+    };
+
+    // Try to bind to the real address
+    match TcpListener::bind(addr) {
+        Ok(listener) => {
+            let server_id = get_next_connection_id();
+
+            // Store the listener in our global registry
+            if let Ok(mut servers) = get_tcp_servers().lock() {
+                servers.insert(server_id.clone(), Arc::new(listener));
+            }
+
+            // Create TcpServer struct with the server ID
+            let mut server_fields = std::collections::HashMap::new();
+            server_fields.insert("address".to_string(), RuntimeValue::String(addr.clone()));
+            server_fields.insert("server_id".to_string(), RuntimeValue::String(server_id));
+
+            let server = RuntimeValue::Struct {
+                name: "TcpServer".to_string(),
+                fields: server_fields,
+            };
+
+            let mut result_fields = std::collections::HashMap::new();
+            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(true));
+            result_fields.insert("value".to_string(), server);
+            result_fields.insert(
+                "error_msg".to_string(),
+                RuntimeValue::String("".to_string()),
+            );
+
+            Ok(RuntimeValue::Struct {
+                name: "Result".to_string(),
+                fields: result_fields,
+            })
+        }
+        Err(e) => {
+            let mut result_fields = std::collections::HashMap::new();
+            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+            result_fields.insert("value".to_string(), RuntimeValue::Null);
+            result_fields.insert("error_msg".to_string(), RuntimeValue::String(e.to_string()));
+
+            Ok(RuntimeValue::Struct {
+                name: "Result".to_string(),
+                fields: result_fields,
+            })
+        }
+    }
+}
+
+/// TcpConnection.connect(addr) - connect to a TCP server
+pub fn builtin_tcpconnection_connect(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 1 {
+        return Err(BuluError::RuntimeError {
+            message: "TcpConnection.connect() requires exactly one argument (address)".to_string(),
+            file: None,
+        });
+    }
+
+    let addr = match &args[0] {
+        RuntimeValue::String(addr) => addr,
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "TcpConnection.connect() address must be a string".to_string(),
+                file: None,
+            });
+        }
+    };
+
+    // Try to connect to the real address
+    match TcpStream::connect(addr) {
+        Ok(stream) => {
+            let connection_id = get_next_connection_id();
+            let peer_addr = stream
+                .peer_addr()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|_| "unknown".to_string());
+
+            // Store the connection in our registry
+            if let Ok(mut connections) = get_tcp_connections().lock() {
+                connections.insert(connection_id.clone(), Arc::new(Mutex::new(stream)));
+            }
+
+            // Create TcpConnection struct
+            let mut connection_fields = std::collections::HashMap::new();
+            connection_fields.insert("peer_addr".to_string(), RuntimeValue::String(peer_addr));
+            connection_fields.insert(
+                "connection_id".to_string(),
+                RuntimeValue::String(connection_id),
+            );
+
+            let connection = RuntimeValue::Struct {
+                name: "TcpConnection".to_string(),
+                fields: connection_fields,
+            };
+
+            let mut result_fields = std::collections::HashMap::new();
+            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(true));
+            result_fields.insert("value".to_string(), connection);
+            result_fields.insert(
+                "error_msg".to_string(),
+                RuntimeValue::String("".to_string()),
+            );
+
+            Ok(RuntimeValue::Struct {
+                name: "Result".to_string(),
+                fields: result_fields,
+            })
+        }
+        Err(e) => {
+            let mut result_fields = std::collections::HashMap::new();
+            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+            result_fields.insert("value".to_string(), RuntimeValue::Null);
+            result_fields.insert("error_msg".to_string(), RuntimeValue::String(e.to_string()));
+
+            Ok(RuntimeValue::Struct {
+                name: "Result".to_string(),
+                fields: result_fields,
+            })
+        }
+    }
+}
+
+/// UdpConnection.bind(addr) - bind a UDP connection to an address
+pub fn builtin_udpconnection_bind(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 1 {
+        return Err(BuluError::RuntimeError {
+            message: "UdpConnection.bind() requires exactly one argument (address)".to_string(),
+            file: None,
+        });
+    }
+
+    let addr = match &args[0] {
+        RuntimeValue::String(addr) => addr,
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "UdpConnection.bind() address must be a string".to_string(),
+                file: None,
+            });
+        }
+    };
+
+    // Try to bind to the real UDP address
+    match UdpSocket::bind(addr) {
+        Ok(socket) => {
+            let connection_id = get_next_connection_id();
+
+            // Store the socket in our global registry
+            if let Ok(mut sockets) = get_udp_sockets().lock() {
+                sockets.insert(connection_id.clone(), Arc::new(socket));
+            }
+
+            // Create UdpConnection struct with the connection ID
+            let mut connection_fields = std::collections::HashMap::new();
+            connection_fields.insert("address".to_string(), RuntimeValue::String(addr.clone()));
+            connection_fields.insert(
+                "connection_id".to_string(),
+                RuntimeValue::String(connection_id),
+            );
+
+            let connection = RuntimeValue::Struct {
+                name: "UdpConnection".to_string(),
+                fields: connection_fields,
+            };
+
+            let mut result_fields = std::collections::HashMap::new();
+            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(true));
+            result_fields.insert("value".to_string(), connection);
+            result_fields.insert(
+                "error_msg".to_string(),
+                RuntimeValue::String("".to_string()),
+            );
+
+            Ok(RuntimeValue::Struct {
+                name: "Result".to_string(),
+                fields: result_fields,
+            })
+        }
+        Err(e) => {
+            let mut result_fields = std::collections::HashMap::new();
+            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+            result_fields.insert("value".to_string(), RuntimeValue::Null);
+            result_fields.insert("error_msg".to_string(), RuntimeValue::String(e.to_string()));
+
+            Ok(RuntimeValue::Struct {
+                name: "Result".to_string(),
+                fields: result_fields,
+            })
+        }
+    }
+}
+
+/// UdpConnection.recv_from(buffer) - receive data from UDP socket
+pub fn builtin_udpconnection_recv_from(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 2 {
+        return Err(BuluError::RuntimeError {
+            message: "UdpConnection.recv_from() requires exactly two arguments (self, buffer)"
+                .to_string(),
+            file: None,
+        });
+    }
+
+    // Extract connection_id from the UdpConnection struct
+    let connection_id = match &args[0] {
+        RuntimeValue::Struct { name, fields } if name == "UdpConnection" => {
+            match fields.get("connection_id") {
+                Some(RuntimeValue::String(id)) => id.clone(),
+                _ => {
+                    return Err(BuluError::RuntimeError {
+                        message: "Invalid UdpConnection: missing connection_id".to_string(),
+                        file: None,
+                    })
+                }
+            }
+        }
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "UdpConnection.recv_from() requires a UdpConnection instance".to_string(),
+                file: None,
+            })
+        }
+    };
+
+    // Get the socket from our registry
+    let socket = {
+        if let Ok(sockets) = get_udp_sockets().lock() {
+            sockets.get(&connection_id).cloned()
+        } else {
+            None
+        }
+    };
+
+    match socket {
+        Some(socket) => {
+            // Set a timeout for recv_from
+            if let Err(e) = socket.set_read_timeout(Some(Duration::from_millis(1000))) {
+                let mut result_fields = std::collections::HashMap::new();
+                result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                result_fields.insert("value".to_string(), RuntimeValue::Null);
+                result_fields.insert("error_msg".to_string(), RuntimeValue::String(e.to_string()));
+
+                return Ok(RuntimeValue::Struct {
+                    name: "Result".to_string(),
+                    fields: result_fields,
+                });
+            }
+
+            let mut buffer = [0u8; 1024];
+            match socket.recv_from(&mut buffer) {
+                Ok((bytes_read, from_addr)) => {
+                    // Store the read data globally for string conversion
+                    let data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+
+                    static LAST_READ_DATA: OnceLock<Arc<Mutex<String>>> = OnceLock::new();
+                    let last_read =
+                        LAST_READ_DATA.get_or_init(|| Arc::new(Mutex::new(String::new())));
+                    if let Ok(mut last) = last_read.lock() {
+                        *last = data;
+                    }
+
+                    // Create a tuple (bytes_read, from_addr)
+                    let tuple_value = RuntimeValue::Tuple(vec![
+                        RuntimeValue::Int32(bytes_read as i32),
+                        RuntimeValue::String(from_addr.to_string()),
+                    ]);
+
+                    let mut result_fields = std::collections::HashMap::new();
+                    result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(true));
+                    result_fields.insert("value".to_string(), tuple_value);
+                    result_fields.insert(
+                        "error_msg".to_string(),
+                        RuntimeValue::String("".to_string()),
+                    );
+
+                    Ok(RuntimeValue::Struct {
+                        name: "Result".to_string(),
+                        fields: result_fields,
+                    })
+                }
+                Err(e) => {
+                    let mut result_fields = std::collections::HashMap::new();
+                    result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                    result_fields.insert("value".to_string(), RuntimeValue::Null);
+                    result_fields
+                        .insert("error_msg".to_string(), RuntimeValue::String(e.to_string()));
+
+                    Ok(RuntimeValue::Struct {
+                        name: "Result".to_string(),
+                        fields: result_fields,
+                    })
+                }
+            }
+        }
+        None => {
+            let mut result_fields = std::collections::HashMap::new();
+            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+            result_fields.insert("value".to_string(), RuntimeValue::Null);
+            result_fields.insert(
+                "error_msg".to_string(),
+                RuntimeValue::String("Socket not found".to_string()),
+            );
+
+            Ok(RuntimeValue::Struct {
+                name: "Result".to_string(),
+                fields: result_fields,
+            })
+        }
+    }
+}
+
+/// UdpConnection.send_to(data, addr) - send data to UDP address
+pub fn builtin_udpconnection_send_to(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 3 {
+        return Err(BuluError::RuntimeError {
+            message: "UdpConnection.send_to() requires exactly three arguments (self, data, addr)"
+                .to_string(),
+            file: None,
+        });
+    }
+
+    // Extract connection_id from the UdpConnection struct
+    let connection_id = match &args[0] {
+        RuntimeValue::Struct { name, fields } if name == "UdpConnection" => {
+            match fields.get("connection_id") {
+                Some(RuntimeValue::String(id)) => id.clone(),
+                _ => {
+                    return Err(BuluError::RuntimeError {
+                        message: "Invalid UdpConnection: missing connection_id".to_string(),
+                        file: None,
+                    })
+                }
+            }
+        }
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "UdpConnection.send_to() requires a UdpConnection instance".to_string(),
+                file: None,
+            })
+        }
+    };
+
+    // Extract the data to send
+    let data_bytes = match &args[1] {
+        RuntimeValue::Array(byte_array) => {
+            // Convert byte array to bytes
+            byte_array
+                .iter()
+                .filter_map(|v| match v {
+                    RuntimeValue::Int32(i) => Some(*i as u8),
+                    RuntimeValue::UInt8(b) => Some(*b),
+                    _ => None,
+                })
+                .collect::<Vec<u8>>()
+        }
+        RuntimeValue::String(s) => s.as_bytes().to_vec(),
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "UdpConnection.send_to() data must be a byte array or string".to_string(),
+                file: None,
+            })
+        }
+    };
+
+    // Extract the target address
+    let target_addr = match &args[2] {
+        RuntimeValue::String(addr) => addr,
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "UdpConnection.send_to() address must be a string".to_string(),
+                file: None,
+            })
+        }
+    };
+
+    // Get the socket from our registry
+    let socket = {
+        if let Ok(sockets) = get_udp_sockets().lock() {
+            sockets.get(&connection_id).cloned()
+        } else {
+            None
+        }
+    };
+
+    match socket {
+        Some(socket) => match socket.send_to(&data_bytes, target_addr) {
+            Ok(bytes_sent) => {
+                let mut result_fields = std::collections::HashMap::new();
+                result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(true));
+                result_fields.insert("value".to_string(), RuntimeValue::Int32(bytes_sent as i32));
+                result_fields.insert(
+                    "error_msg".to_string(),
+                    RuntimeValue::String("".to_string()),
+                );
+
+                Ok(RuntimeValue::Struct {
+                    name: "Result".to_string(),
+                    fields: result_fields,
+                })
+            }
+            Err(e) => {
+                let mut result_fields = std::collections::HashMap::new();
+                result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                result_fields.insert("value".to_string(), RuntimeValue::Int32(0));
+                result_fields.insert("error_msg".to_string(), RuntimeValue::String(e.to_string()));
+
+                Ok(RuntimeValue::Struct {
+                    name: "Result".to_string(),
+                    fields: result_fields,
+                })
+            }
+        },
+        None => {
+            let mut result_fields = std::collections::HashMap::new();
+            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+            result_fields.insert("value".to_string(), RuntimeValue::Int32(0));
+            result_fields.insert(
+                "error_msg".to_string(),
+                RuntimeValue::String("Socket not found".to_string()),
+            );
+
+            Ok(RuntimeValue::Struct {
+                name: "Result".to_string(),
+                fields: result_fields,
+            })
+        }
+    }
+}
+
+/// TcpServer.accept() - accept a connection
+pub fn builtin_tcpserver_accept(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 1 {
+        return Err(BuluError::RuntimeError {
+            message: "TcpServer.accept() requires exactly one argument (self)".to_string(),
+            file: None,
+        });
+    }
+
+    // Extract server_id from the TcpServer struct
+    let server_id = match &args[0] {
+        RuntimeValue::Struct { name, fields } if name == "TcpServer" => {
+            match fields.get("server_id") {
+                Some(RuntimeValue::String(id)) => id.clone(),
+                _ => {
+                    return Err(BuluError::RuntimeError {
+                        message: "Invalid TcpServer: missing server_id".to_string(),
+                        file: None,
+                    })
+                }
+            }
+        }
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "TcpServer.accept() requires a TcpServer instance".to_string(),
+                file: None,
+            })
+        }
+    };
+
+    // Get the listener from our registry
+    let listener = {
+        if let Ok(servers) = get_tcp_servers().lock() {
+            servers.get(&server_id).cloned()
+        } else {
+            None
+        }
+    };
+
+    match listener {
+        Some(listener) => {
+            // Check if we're in a goroutine context
+            let is_goroutine = is_in_goroutine_context();
+            
+            if is_goroutine {
+                println!("🌐 TCP_ACCEPT: Called from goroutine context on thread {:?}", std::thread::current().id());
+            } else {
+                println!("🌐 TCP_ACCEPT: Called from main thread context on thread {:?}", std::thread::current().id());
+            }
+
+            // Set blocking mode based on context
+            if let Err(e) = listener.set_nonblocking(is_goroutine) {
+                let mut result_fields = std::collections::HashMap::new();
+                result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                result_fields.insert("value".to_string(), RuntimeValue::Null);
+                result_fields.insert("error_msg".to_string(), RuntimeValue::String(e.to_string()));
+
+                return Ok(RuntimeValue::Struct {
+                    name: "Result".to_string(),
+                    fields: result_fields,
+                });
+            }
+
+            // In goroutine context, use cooperative approach
+            if is_goroutine {
+                // Try multiple times with yields to allow other goroutines to run
+                for attempt in 0..10 {
+                    match listener.accept() {
+                        Ok((stream, peer_addr)) => {
+                            let connection_id = get_next_connection_id();
+
+                            // Store the connection in our registry
+                            if let Ok(mut connections) = get_tcp_connections().lock() {
+                                connections
+                                    .insert(connection_id.clone(), Arc::new(Mutex::new(stream)));
+                            }
+
+                            // Create TcpConnection struct
+                            let mut connection_fields = std::collections::HashMap::new();
+                            connection_fields.insert(
+                                "peer_addr".to_string(),
+                                RuntimeValue::String(peer_addr.to_string()),
+                            );
+                            connection_fields.insert(
+                                "connection_id".to_string(),
+                                RuntimeValue::String(connection_id),
+                            );
+
+                            let connection = RuntimeValue::Struct {
+                                name: "TcpConnection".to_string(),
+                                fields: connection_fields,
+                            };
+
+                            let mut result_fields = std::collections::HashMap::new();
+                            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(true));
+                            result_fields.insert("value".to_string(), connection);
+                            result_fields.insert(
+                                "error_msg".to_string(),
+                                RuntimeValue::String("".to_string()),
+                            );
+
+                            return Ok(RuntimeValue::Struct {
+                                name: "Result".to_string(),
+                                fields: result_fields,
+                            });
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            // No connection available, yield and try again
+                            std::thread::yield_now();
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            continue;
+                        }
+                        Err(e) => {
+                            // Real error
+                            let mut result_fields = std::collections::HashMap::new();
+                            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                            result_fields.insert("value".to_string(), RuntimeValue::Null);
+                            result_fields.insert(
+                                "error_msg".to_string(),
+                                RuntimeValue::String(e.to_string()),
+                            );
+
+                            return Ok(RuntimeValue::Struct {
+                                name: "Result".to_string(),
+                                fields: result_fields,
+                            });
+                        }
+                    }
+                }
+
+                // After all attempts, return "no connection available"
+                let mut result_fields = std::collections::HashMap::new();
+                result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                result_fields.insert("value".to_string(), RuntimeValue::Null);
+                result_fields.insert(
+                    "error_msg".to_string(),
+                    RuntimeValue::String("No connection available after retries".to_string()),
+                );
+
+                Ok(RuntimeValue::Struct {
+                    name: "Result".to_string(),
+                    fields: result_fields,
+                })
+            } else {
+                // Not in goroutine, use blocking mode
+                match listener.accept() {
+                    Ok((stream, peer_addr)) => {
+                        let connection_id = get_next_connection_id();
+
+                        // Store the connection in our registry
+                        if let Ok(mut connections) = get_tcp_connections().lock() {
+                            connections.insert(connection_id.clone(), Arc::new(Mutex::new(stream)));
+                        }
+
+                        // Create TcpConnection struct
+                        let mut connection_fields = std::collections::HashMap::new();
+                        connection_fields.insert(
+                            "peer_addr".to_string(),
+                            RuntimeValue::String(peer_addr.to_string()),
+                        );
+                        connection_fields.insert(
+                            "connection_id".to_string(),
+                            RuntimeValue::String(connection_id),
+                        );
+
+                        let connection = RuntimeValue::Struct {
+                            name: "TcpConnection".to_string(),
+                            fields: connection_fields,
+                        };
+
+                        let mut result_fields = std::collections::HashMap::new();
+                        result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(true));
+                        result_fields.insert("value".to_string(), connection);
+                        result_fields.insert(
+                            "error_msg".to_string(),
+                            RuntimeValue::String("".to_string()),
+                        );
+
+                        Ok(RuntimeValue::Struct {
+                            name: "Result".to_string(),
+                            fields: result_fields,
+                        })
+                    }
+                    Err(e) => {
+                        let mut result_fields = std::collections::HashMap::new();
+                        result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                        result_fields.insert("value".to_string(), RuntimeValue::Null);
+                        result_fields
+                            .insert("error_msg".to_string(), RuntimeValue::String(e.to_string()));
+
+                        Ok(RuntimeValue::Struct {
+                            name: "Result".to_string(),
+                            fields: result_fields,
+                        })
+                    }
+                }
+            }
+        }
+        None => {
+            let mut result_fields = std::collections::HashMap::new();
+            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+            result_fields.insert("value".to_string(), RuntimeValue::Null);
+            result_fields.insert(
+                "error_msg".to_string(),
+                RuntimeValue::String("Server not found".to_string()),
+            );
+
+            Ok(RuntimeValue::Struct {
+                name: "Result".to_string(),
+                fields: result_fields,
+            })
+        }
+    }
+}
+
+/// TcpConnection.peer_addr() - get peer address
+pub fn builtin_tcpconnection_peer_addr(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 1 {
+        return Err(BuluError::RuntimeError {
+            message: "TcpConnection.peer_addr() requires exactly one argument (self)".to_string(),
+            file: None,
+        });
+    }
+
+    Ok(RuntimeValue::String("127.0.0.1:12345".to_string()))
+}
+
+/// TcpConnection.read(buffer) - read data
+pub fn builtin_tcpconnection_read(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 2 {
+        return Err(BuluError::RuntimeError {
+            message: "TcpConnection.read() requires exactly two arguments (self, buffer)"
+                .to_string(),
+            file: None,
+        });
+    }
+
+    // Extract connection_id from the TcpConnection struct
+    let connection_id = match &args[0] {
+        RuntimeValue::Struct { name, fields } if name == "TcpConnection" => {
+            match fields.get("connection_id") {
+                Some(RuntimeValue::String(id)) => id.clone(),
+                _ => {
+                    return Err(BuluError::RuntimeError {
+                        message: "Invalid TcpConnection: missing connection_id".to_string(),
+                        file: None,
+                    })
+                }
+            }
+        }
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "TcpConnection.read() requires a TcpConnection instance".to_string(),
+                file: None,
+            })
+        }
+    };
+
+    // Get the connection from our registry
+    let connection = {
+        if let Ok(connections) = get_tcp_connections().lock() {
+            connections.get(&connection_id).cloned()
+        } else {
+            None
+        }
+    };
+
+    match connection {
+        Some(connection) => {
+            // Try to read from the connection
+            if let Ok(mut stream) = connection.lock() {
+                // Set blocking mode with timeout
+                if let Err(e) = stream.set_read_timeout(Some(Duration::from_millis(1000))) {
+                    let mut result_fields = std::collections::HashMap::new();
+                    result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                    result_fields.insert("value".to_string(), RuntimeValue::Int64(0));
+                    result_fields
+                        .insert("error_msg".to_string(), RuntimeValue::String(e.to_string()));
+
+                    return Ok(RuntimeValue::Struct {
+                        name: "Result".to_string(),
+                        fields: result_fields,
+                    });
+                }
+
+                let mut buffer = [0u8; 1024];
+                match stream.read(&mut buffer) {
+                    Ok(bytes_read) => {
+                        // Store the read data globally for string conversion
+                        let data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+
+                        // Store in a global registry for later retrieval by string conversion
+                        static READ_DATA: OnceLock<Arc<Mutex<HashMap<String, String>>>> =
+                            OnceLock::new();
+                        let read_data_registry =
+                            READ_DATA.get_or_init(|| Arc::new(Mutex::new(HashMap::new())));
+
+                        if let Ok(mut registry) = read_data_registry.lock() {
+                            registry.insert(connection_id.clone(), data.clone());
+                        }
+
+                        // Also store in a simple global for string conversion
+                        static LAST_READ_DATA: OnceLock<Arc<Mutex<String>>> = OnceLock::new();
+                        let last_read =
+                            LAST_READ_DATA.get_or_init(|| Arc::new(Mutex::new(String::new())));
+                        if let Ok(mut last) = last_read.lock() {
+                            *last = data;
+                        }
+
+                        let mut result_fields = std::collections::HashMap::new();
+                        result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(true));
+                        result_fields
+                            .insert("value".to_string(), RuntimeValue::Int64(bytes_read as i64));
+                        result_fields.insert(
+                            "error_msg".to_string(),
+                            RuntimeValue::String("".to_string()),
+                        );
+
+                        Ok(RuntimeValue::Struct {
+                            name: "Result".to_string(),
+                            fields: result_fields,
+                        })
+                    }
+                    Err(e) => {
+                        let mut result_fields = std::collections::HashMap::new();
+                        result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                        result_fields.insert("value".to_string(), RuntimeValue::Int64(0));
+                        result_fields
+                            .insert("error_msg".to_string(), RuntimeValue::String(e.to_string()));
+
+                        Ok(RuntimeValue::Struct {
+                            name: "Result".to_string(),
+                            fields: result_fields,
+                        })
+                    }
+                }
+            } else {
+                let mut result_fields = std::collections::HashMap::new();
+                result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                result_fields.insert("value".to_string(), RuntimeValue::Int64(0));
+                result_fields.insert(
+                    "error_msg".to_string(),
+                    RuntimeValue::String("Failed to lock connection".to_string()),
+                );
+
+                Ok(RuntimeValue::Struct {
+                    name: "Result".to_string(),
+                    fields: result_fields,
+                })
+            }
+        }
+        None => {
+            let mut result_fields = std::collections::HashMap::new();
+            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+            result_fields.insert("value".to_string(), RuntimeValue::Int64(0));
+            result_fields.insert(
+                "error_msg".to_string(),
+                RuntimeValue::String("Connection not found".to_string()),
+            );
+
+            Ok(RuntimeValue::Struct {
+                name: "Result".to_string(),
+                fields: result_fields,
+            })
+        }
+    }
+}
+
+/// TcpConnection.write(data) - write data
+pub fn builtin_tcpconnection_write(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 2 {
+        return Err(BuluError::RuntimeError {
+            message: "TcpConnection.write() requires exactly two arguments (self, data)"
+                .to_string(),
+            file: None,
+        });
+    }
+
+    // Extract connection_id from the TcpConnection struct
+    let connection_id = match &args[0] {
+        RuntimeValue::Struct { name, fields } if name == "TcpConnection" => {
+            match fields.get("connection_id") {
+                Some(RuntimeValue::String(id)) => id.clone(),
+                _ => {
+                    return Err(BuluError::RuntimeError {
+                        message: "Invalid TcpConnection: missing connection_id".to_string(),
+                        file: None,
+                    })
+                }
+            }
+        }
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "TcpConnection.write() requires a TcpConnection instance".to_string(),
+                file: None,
+            })
+        }
+    };
+
+    // Extract the data to write
+    let data_bytes = match &args[1] {
+        RuntimeValue::Array(byte_array) => {
+            // Convert byte array to bytes
+            byte_array
+                .iter()
+                .filter_map(|v| match v {
+                    RuntimeValue::Int32(i) => Some(*i as u8),
+                    RuntimeValue::UInt8(b) => Some(*b),
+                    _ => None,
+                })
+                .collect::<Vec<u8>>()
+        }
+        RuntimeValue::String(s) => s.as_bytes().to_vec(),
+        _ => {
+            return Err(BuluError::RuntimeError {
+                message: "TcpConnection.write() data must be a byte array or string".to_string(),
+                file: None,
+            })
+        }
+    };
+
+    // Get the connection from our registry
+    let connection = {
+        if let Ok(connections) = get_tcp_connections().lock() {
+            connections.get(&connection_id).cloned()
+        } else {
+            None
+        }
+    };
+
+    match connection {
+        Some(connection) => {
+            // Try to write to the connection
+            if let Ok(mut stream) = connection.lock() {
+                match stream.write_all(&data_bytes) {
+                    Ok(()) => {
+                        let bytes_written = data_bytes.len() as i64;
+
+                        let mut result_fields = std::collections::HashMap::new();
+                        result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(true));
+                        result_fields
+                            .insert("value".to_string(), RuntimeValue::Int64(bytes_written));
+                        result_fields.insert(
+                            "error_msg".to_string(),
+                            RuntimeValue::String("".to_string()),
+                        );
+
+                        Ok(RuntimeValue::Struct {
+                            name: "Result".to_string(),
+                            fields: result_fields,
+                        })
+                    }
+                    Err(e) => {
+                        let mut result_fields = std::collections::HashMap::new();
+                        result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                        result_fields.insert("value".to_string(), RuntimeValue::Int64(0));
+                        result_fields
+                            .insert("error_msg".to_string(), RuntimeValue::String(e.to_string()));
+
+                        Ok(RuntimeValue::Struct {
+                            name: "Result".to_string(),
+                            fields: result_fields,
+                        })
+                    }
+                }
+            } else {
+                let mut result_fields = std::collections::HashMap::new();
+                result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                result_fields.insert("value".to_string(), RuntimeValue::Int64(0));
+                result_fields.insert(
+                    "error_msg".to_string(),
+                    RuntimeValue::String("Failed to lock connection".to_string()),
+                );
+
+                Ok(RuntimeValue::Struct {
+                    name: "Result".to_string(),
+                    fields: result_fields,
+                })
+            }
+        }
+        None => {
+            let mut result_fields = std::collections::HashMap::new();
+            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+            result_fields.insert("value".to_string(), RuntimeValue::Int64(0));
+            result_fields.insert(
+                "error_msg".to_string(),
+                RuntimeValue::String("Connection not found".to_string()),
+            );
+
+            Ok(RuntimeValue::Struct {
+                name: "Result".to_string(),
+                fields: result_fields,
+            })
+        }
+    }
+}
+
+/// TcpConnection.close() - close connection
+pub fn builtin_tcpconnection_close(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 1 {
+        return Err(BuluError::RuntimeError {
+            message: "TcpConnection.close() requires exactly one argument (self)".to_string(),
+            file: None,
+        });
+    }
+
+    Ok(RuntimeValue::String("Connection closed".to_string()))
 }

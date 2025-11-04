@@ -1,0 +1,18 @@
+func main() {
+    // Test tuple destructuring with a simple tuple
+    let tuple_result = (42, "hello")
+    let (bytesRead, message) = tuple_result
+    
+    println("bytesRead: " + bytesRead.toString())
+    println("message: " + message)
+    
+    // Test with a function that returns a tuple
+    let result = createTuple()
+    let (a, b) = result
+    println("a: " + a.toString())
+    println("b: " + b)
+}
+
+func createTuple() {
+    return (100, "world")
+}

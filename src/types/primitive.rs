@@ -41,6 +41,12 @@ pub enum TypeId {
     // Async types
     Promise(u32), // promise type ID
 
+    // Result types
+    Result(u32), // result type ID
+
+    // Tuple types
+    Tuple(u32), // tuple type ID
+
     // Special types
     Unknown,
 }
@@ -357,6 +363,8 @@ impl PrimitiveType {
             TypeId::Unknown => "unknown",
             TypeId::Void => "void",
             TypeId::Promise(_) => "promise",
+            TypeId::Result(_) => "result",
+            TypeId::Tuple(_) => "tuple",
         }
     }
 
@@ -591,6 +599,7 @@ pub enum RuntimeValue {
     // Collection types
     Array(Vec<RuntimeValue>),                             // Array of values
     Slice(Vec<RuntimeValue>),                             // Slice of values (dynamic array)
+    Tuple(Vec<RuntimeValue>),                             // Tuple of values
     Map(std::collections::HashMap<String, RuntimeValue>), // Map/dictionary
     Range(i64, i64, Option<i64>),                         // Range (start, end, step)
     Integer(i64),                                         // Generic integer for compatibility
@@ -642,6 +651,7 @@ impl RuntimeValue {
             RuntimeValue::Promise(_) => PrimitiveType::Any, // Promises are treated as Any type
             RuntimeValue::Array(_) => PrimitiveType::Any, // Arrays are treated as Any type
             RuntimeValue::Slice(_) => PrimitiveType::Any, // Slices are treated as Any type
+            RuntimeValue::Tuple(_) => PrimitiveType::Any, // Tuples are treated as Any type
             RuntimeValue::Map(_) => PrimitiveType::Any,  // Maps are treated as Any type
             RuntimeValue::Range(_, _, _) => PrimitiveType::Any, // Ranges are treated as Any type
             RuntimeValue::Integer(_) => PrimitiveType::Int64, // Generic integer maps to Int64
@@ -676,6 +686,7 @@ impl RuntimeValue {
             RuntimeValue::Promise(_) => true, // Promises are always truthy (they exist)
             RuntimeValue::Array(arr) => !arr.is_empty(), // Arrays are truthy if not empty
             RuntimeValue::Slice(slice) => !slice.is_empty(), // Slices are truthy if not empty
+            RuntimeValue::Tuple(tuple) => !tuple.is_empty(), // Tuples are truthy if not empty
             RuntimeValue::Map(map) => !map.is_empty(), // Maps are truthy if not empty
             RuntimeValue::Range(start, end, _) => start != end, // Ranges are truthy if not empty
             RuntimeValue::Integer(i) => *i != 0, // Generic integer
@@ -722,6 +733,10 @@ impl RuntimeValue {
             RuntimeValue::Slice(slice) => {
                 let elements: Vec<String> = slice.iter().map(|v| v.to_string()).collect();
                 format!("[{}]", elements.join(", "))
+            }
+            RuntimeValue::Tuple(tuple) => {
+                let elements: Vec<String> = tuple.iter().map(|v| v.to_string()).collect();
+                format!("({})", elements.join(", "))
             }
             RuntimeValue::Map(map) => {
                 let pairs: Vec<String> = map
@@ -1063,6 +1078,10 @@ impl fmt::Display for RuntimeValue {
             RuntimeValue::Slice(slice) => {
                 let elements: Vec<String> = slice.iter().map(|v| v.to_string()).collect();
                 write!(f, "[{}]", elements.join(", "))
+            }
+            RuntimeValue::Tuple(tuple) => {
+                let elements: Vec<String> = tuple.iter().map(|v| v.to_string()).collect();
+                write!(f, "({})", elements.join(", "))
             }
             RuntimeValue::Map(map) => {
                 let pairs: Vec<String> = map

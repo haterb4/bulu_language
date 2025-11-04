@@ -10,6 +10,7 @@ pub enum CompositeTypeId {
     Array(Box<TypeId>),
     Slice(Box<TypeId>),
     Map(Box<TypeId>, Box<TypeId>), // key type, value type
+    Tuple(Vec<TypeId>), // tuple element types
     Struct(StructTypeInfo),
     Interface(InterfaceTypeInfo),
     Channel(ChannelTypeInfo),
@@ -119,6 +120,12 @@ impl TypeRegistry {
     /// Register a map type
     pub fn register_map_type(&mut self, key_type: TypeId, value_type: TypeId) -> u32 {
         let composite_type = CompositeTypeId::Map(Box::new(key_type), Box::new(value_type));
+        self.register_composite_type(composite_type)
+    }
+
+    /// Register a tuple type
+    pub fn register_tuple_type(&mut self, element_types: Vec<TypeId>) -> u32 {
+        let composite_type = CompositeTypeId::Tuple(element_types);
         self.register_composite_type(composite_type)
     }
 

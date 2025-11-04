@@ -721,6 +721,7 @@ impl AstPrinter {
             Pattern::Identifier(name, _) => name.clone(),
             Pattern::Struct(pat) => self.print_struct_pattern(pat),
             Pattern::Array(pat) => self.print_array_pattern(pat),
+            Pattern::Tuple(pat) => self.print_tuple_pattern(pat),
             Pattern::Range(pat) => self.print_range_pattern(pat),
             Pattern::Or(pat) => self.print_or_pattern(pat),
         }
@@ -751,6 +752,18 @@ impl AstPrinter {
             result.push_str(&self.print_pattern(element));
         }
         result.push(']');
+        result
+    }
+
+    fn print_tuple_pattern(&mut self, pat: &TuplePattern) -> String {
+        let mut result = String::from("(");
+        for (i, element) in pat.elements.iter().enumerate() {
+            if i > 0 {
+                result.push_str(", ");
+            }
+            result.push_str(&self.print_pattern(element));
+        }
+        result.push(')');
         result
     }
 

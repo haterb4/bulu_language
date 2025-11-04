@@ -1006,6 +1006,11 @@ impl SymbolResolver {
                     self.collect_pattern_variables(element_pattern, variables);
                 }
             }
+            Pattern::Tuple(tuple_pattern) => {
+                for element_pattern in &tuple_pattern.elements {
+                    self.collect_pattern_variables(element_pattern, variables);
+                }
+            }
             Pattern::Or(or_pattern) => {
                 // For OR patterns, collect from all alternatives
                 for alternative in &or_pattern.patterns {

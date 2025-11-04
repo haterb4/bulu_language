@@ -183,8 +183,71 @@ struct StructFieldDef {
 }
 
 impl Interpreter {
+    /// Create default struct definitions
+    fn create_default_struct_definitions() -> HashMap<String, StructDefinition> {
+        let mut struct_definitions = HashMap::new();
+
+        // Define the Result struct
+        let result_struct = StructDefinition {
+            name: "Result".to_string(),
+            fields: vec![
+                StructFieldDef {
+                    name: "is_ok".to_string(),
+                    field_type: crate::compiler::ir::IrType::Bool,
+                },
+                StructFieldDef {
+                    name: "value".to_string(),
+                    field_type: crate::compiler::ir::IrType::Any,
+                },
+                StructFieldDef {
+                    name: "error_msg".to_string(),
+                    field_type: crate::compiler::ir::IrType::String,
+                },
+            ],
+            methods: HashMap::new(),
+        };
+        struct_definitions.insert("Result".to_string(), result_struct);
+
+        // Define the TcpServer struct
+        let tcp_server_struct = StructDefinition {
+            name: "TcpServer".to_string(),
+            fields: vec![StructFieldDef {
+                name: "address".to_string(),
+                field_type: crate::compiler::ir::IrType::String,
+            }],
+            methods: HashMap::new(),
+        };
+        struct_definitions.insert("TcpServer".to_string(), tcp_server_struct);
+
+        // Define the TcpConnection struct
+        let tcp_connection_struct = StructDefinition {
+            name: "TcpConnection".to_string(),
+            fields: vec![StructFieldDef {
+                name: "address".to_string(),
+                field_type: crate::compiler::ir::IrType::String,
+            }],
+            methods: HashMap::new(),
+        };
+        struct_definitions.insert("TcpConnection".to_string(), tcp_connection_struct);
+
+        // Define the UdpConnection struct
+        let udp_connection_struct = StructDefinition {
+            name: "UdpConnection".to_string(),
+            fields: vec![StructFieldDef {
+                name: "address".to_string(),
+                field_type: crate::compiler::ir::IrType::String,
+            }],
+            methods: HashMap::new(),
+        };
+        struct_definitions.insert("UdpConnection".to_string(), udp_connection_struct);
+
+        struct_definitions
+    }
+
     /// Create a new interpreter
     pub fn new() -> Self {
+        let struct_definitions = Self::create_default_struct_definitions();
+
         Self {
             program: None,
             call_stack: Vec::new(),
@@ -196,7 +259,7 @@ impl Interpreter {
                 crate::runtime::promises::PromiseRegistry::new(),
             )),
             async_context_stack: Vec::new(),
-            struct_definitions: HashMap::new(),
+            struct_definitions,
             method_call_stack: Vec::new(),
             channel_registry: get_global_channel_registry().clone(),
             is_goroutine_context: false, // Normal context
@@ -212,6 +275,8 @@ impl Interpreter {
 
     /// Create a minimal interpreter for goroutine execution
     pub fn new_for_goroutine() -> Self {
+        let struct_definitions = Self::create_default_struct_definitions();
+
         Self {
             program: None,
             call_stack: Vec::new(),
@@ -223,7 +288,7 @@ impl Interpreter {
                 crate::runtime::promises::PromiseRegistry::new(),
             )),
             async_context_stack: Vec::new(),
-            struct_definitions: HashMap::new(),
+            struct_definitions,
             method_call_stack: Vec::new(),
             channel_registry: get_global_channel_registry().clone(),
             is_goroutine_context: true, // This is a goroutine context
@@ -551,6 +616,22 @@ impl Interpreter {
         member_access: &crate::ast::MemberAccessExpr,
         args: &[crate::ast::Expression],
     ) -> Result<RuntimeValue> {
+        // Check if this is a static method call (e.g., NetAddr.localhost_ipv4)
+        if let crate::ast::Expression::Identifier(type_name) = member_access.object.as_ref() {
+            let static_method_name = format!("{}_{}", type_name.name, member_access.member);
+            if self.builtin_registry.is_builtin(&static_method_name) {
+                // Evaluate arguments
+                let mut arg_values = Vec::new();
+                for arg in args {
+                    arg_values.push(self.evaluate_expression(arg)?);
+                }
+                // Get the builtin function after evaluating arguments
+                if let Some(builtin) = self.builtin_registry.get(&static_method_name) {
+                    return builtin(&arg_values);
+                }
+            }
+        }
+
         // Evaluate the object
         let object = self.evaluate_expression(&member_access.object)?;
 
@@ -588,6 +669,20 @@ impl Interpreter {
                         }
                     }
                     _ => Ok(RuntimeValue::String("unknown".to_string())),
+                }
+            }
+            "bytes" => {
+                // Convert string to byte array
+                match object {
+                    RuntimeValue::String(s) => {
+                        let bytes: Vec<RuntimeValue> =
+                            s.bytes().map(|b| RuntimeValue::Int32(b as i32)).collect();
+                        Ok(RuntimeValue::Array(bytes))
+                    }
+                    _ => Err(BuluError::Other(format!(
+                        "Cannot call 'bytes' on non-string value: {:?}",
+                        object
+                    ))),
                 }
             }
             _ => {
@@ -1648,8 +1743,6 @@ impl Interpreter {
 
     /// Load an IR program for execution
     pub fn load_program(&mut self, program: IrProgram) {
-
-        
         // Register struct definitions immediately
         for ir_struct in &program.structs {
             let mut methods = HashMap::new();
@@ -1661,17 +1754,21 @@ impl Interpreter {
 
             let struct_def = StructDefinition {
                 name: ir_struct.name.clone(),
-                fields: ir_struct.fields.iter().map(|f| StructFieldDef {
-                    name: f.name.clone(),
-                    field_type: f.field_type.clone(),
-                }).collect(),
+                fields: ir_struct
+                    .fields
+                    .iter()
+                    .map(|f| StructFieldDef {
+                        name: f.name.clone(),
+                        field_type: f.field_type.clone(),
+                    })
+                    .collect(),
                 methods,
             };
 
             self.struct_definitions
                 .insert(ir_struct.name.clone(), struct_def);
         }
-        
+
         self.program = Some(program);
     }
 
@@ -1944,7 +2041,135 @@ impl Interpreter {
     ) -> Result<(RuntimeValue, Option<RuntimeValue>)> {
         // Handle built-in methods first
         if method_name == "toString" {
-            return Ok((RuntimeValue::String(self.runtime_value_to_string(object)), None));
+            return Ok((
+                RuntimeValue::String(self.runtime_value_to_string(object)),
+                None,
+            ));
+        }
+
+        if method_name == "bytes" {
+            if let RuntimeValue::String(s) = object {
+                let bytes: Vec<RuntimeValue> =
+                    s.bytes().map(|b| RuntimeValue::Int32(b as i32)).collect();
+                return Ok((RuntimeValue::Array(bytes), None));
+            } else {
+                return Err(BuluError::Other(format!(
+                    "Cannot call 'bytes' on non-string value: {:?}",
+                    object
+                )));
+            }
+        }
+
+        // Handle Result methods
+        if let RuntimeValue::Struct { name, fields } = object {
+            if name == "Result" {
+                match method_name {
+                    "isError" => {
+                        let is_ok = fields.get("is_ok").unwrap_or(&RuntimeValue::Bool(false));
+                        if let RuntimeValue::Bool(ok) = is_ok {
+                            return Ok((RuntimeValue::Bool(!ok), None));
+                        }
+                        return Ok((RuntimeValue::Bool(true), None));
+                    }
+                    "error" => {
+                        let default_error = RuntimeValue::String("Unknown error".to_string());
+                        let error_msg = fields.get("error_msg").unwrap_or(&default_error);
+                        return Ok((error_msg.clone(), None));
+                    }
+                    "unwrap" => {
+                        let is_ok = fields.get("is_ok").unwrap_or(&RuntimeValue::Bool(false));
+                        if let RuntimeValue::Bool(true) = is_ok {
+                            let default_value = RuntimeValue::String("".to_string());
+                            let value = fields.get("value").unwrap_or(&default_value);
+                            return Ok((value.clone(), None));
+                        } else {
+                            return Err(BuluError::Other(
+                                "Called unwrap on an error Result".to_string(),
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Handle TcpServer methods
+        if let RuntimeValue::Struct { name, .. } = object {
+            if name == "TcpServer" {
+                match method_name {
+                    "accept" => {
+                        if let Some(builtin) = self.builtin_registry.get("TcpServer_accept") {
+                            let result = builtin(&[object.clone()])?;
+                            return Ok((result, None));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Handle TcpConnection methods
+        if let RuntimeValue::Struct { name, .. } = object {
+            if name == "TcpConnection" {
+                match method_name {
+                    "peer_addr" => {
+                        if let Some(builtin) = self.builtin_registry.get("TcpConnection_peer_addr")
+                        {
+                            let result = builtin(&[object.clone()])?;
+                            return Ok((result, None));
+                        }
+                    }
+                    "read" => {
+                        if let Some(builtin) = self.builtin_registry.get("TcpConnection_read") {
+                            let mut method_args = vec![object.clone()];
+                            method_args.extend(args);
+                            let result = builtin(&method_args)?;
+                            return Ok((result, None));
+                        }
+                    }
+                    "write" => {
+                        if let Some(builtin) = self.builtin_registry.get("TcpConnection_write") {
+                            let mut method_args = vec![object.clone()];
+                            method_args.extend(args);
+                            let result = builtin(&method_args)?;
+                            return Ok((result, None));
+                        }
+                    }
+                    "close" => {
+                        if let Some(builtin) = self.builtin_registry.get("TcpConnection_close") {
+                            let result = builtin(&[object.clone()])?;
+                            return Ok((result, None));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Handle UdpConnection methods
+        if let RuntimeValue::Struct { name, .. } = object {
+            if name == "UdpConnection" {
+                match method_name {
+                    "recv_from" => {
+                        if let Some(builtin) = self.builtin_registry.get("UdpConnection_recv_from")
+                        {
+                            let mut method_args = vec![object.clone()];
+                            method_args.extend(args);
+                            let result = builtin(&method_args)?;
+                            return Ok((result, None));
+                        }
+                    }
+                    "send_to" => {
+                        if let Some(builtin) = self.builtin_registry.get("UdpConnection_send_to") {
+                            let mut method_args = vec![object.clone()];
+                            method_args.extend(args);
+                            let result = builtin(&method_args)?;
+                            return Ok((result, None));
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
 
         // For struct methods, find the IR function and execute it directly
@@ -1985,8 +2210,9 @@ impl Interpreter {
 
                 // IMPORTANT: Use call_function which properly manages the call stack
                 // This is the correct way to call methods in the IR interpreter
-                let (result, modified_this) = self.call_function_with_this_tracking(&method_function, method_args)?;
-                
+                let (result, modified_this) =
+                    self.call_function_with_this_tracking(&method_function, method_args)?;
+
                 return Ok((result, modified_this));
             }
         }
@@ -2020,7 +2246,7 @@ impl Interpreter {
 
         // Execute function
         let result = self.execute_function(function)?;
-        
+
         // Capture the 'this' parameter (register 0) before popping the frame
         let modified_this = if let Some(frame) = self.call_stack.last() {
             frame.registers.get(&0).cloned()
@@ -2110,6 +2336,45 @@ impl Interpreter {
         }
     }
 
+    /// Evaluate an IR value to a runtime value
+    fn evaluate_ir_value(&mut self, value: &IrValue) -> Result<RuntimeValue> {
+        match value {
+            IrValue::Constant(constant) => {
+                match constant {
+                    IrConstant::Integer(i) => Ok(RuntimeValue::Int64(*i)),
+                    IrConstant::Float(f) => Ok(RuntimeValue::Float64(*f)),
+                    IrConstant::String(s) => Ok(RuntimeValue::String(s.clone())),
+                    IrConstant::Boolean(b) => Ok(RuntimeValue::Bool(*b)),
+                    IrConstant::Char(c) => Ok(RuntimeValue::String(c.to_string())),
+                    IrConstant::Null => Ok(RuntimeValue::Null),
+                    _ => Ok(RuntimeValue::Null), // For complex constants
+                }
+            }
+            IrValue::Register(reg) => {
+                if let Some(frame) = self.call_stack.last() {
+                    if let Some(value) = frame.registers.get(&reg.id) {
+                        Ok(value.clone())
+                    } else {
+                        Err(BuluError::Other(format!("Register {} not found", reg.id)))
+                    }
+                } else {
+                    Err(BuluError::Other("No execution frame available".to_string()))
+                }
+            }
+            IrValue::Global(name) => {
+                if let Some(value) = self.globals.get(name) {
+                    Ok(value.clone())
+                } else {
+                    Err(BuluError::Other(format!("Global variable '{}' not found", name)))
+                }
+            }
+            IrValue::Function(name) => {
+                // Function references are treated as function names
+                Ok(RuntimeValue::String(name.clone()))
+            }
+        }
+    }
+
     /// Execute a single instruction
     fn execute_instruction(&mut self, instruction: &IrInstruction) -> Result<()> {
         match instruction.opcode {
@@ -2120,12 +2385,8 @@ impl Interpreter {
                     ));
                 }
 
-
-
                 let result = match &instruction.operands[0] {
                     IrValue::Global(function_name) => {
-
-
                         // Get arguments
                         let mut args = Vec::new();
                         for operand in &instruction.operands[1..] {
@@ -2158,12 +2419,8 @@ impl Interpreter {
                         }
                     }
                     IrValue::Register(_) => {
-
-
                         // This is a method call - the callee is in a register
                         let callee = self.evaluate_value(&instruction.operands[0])?;
-
-
 
                         match callee {
                             RuntimeValue::MethodRef {
@@ -2171,8 +2428,6 @@ impl Interpreter {
                                 method_name,
                                 source_register,
                             } => {
-
-
                                 // Get method arguments
                                 let mut args = Vec::new();
                                 for operand in &instruction.operands[1..] {
@@ -2180,16 +2435,39 @@ impl Interpreter {
                                 }
 
                                 // Execute method directly without creating recursion
-                                let (method_result, modified_struct) = self.execute_method_directly(&object, &method_name, args)?;
-                                
+                                let (method_result, modified_struct) =
+                                    self.execute_method_directly(&object, &method_name, args)?;
+
                                 // If the struct was modified and we have a source register, update it
-                                if let (Some(modified), Some(reg_id)) = (modified_struct, source_register) {
+                                if let (Some(modified), Some(reg_id)) =
+                                    (modified_struct, source_register)
+                                {
                                     if let Some(frame) = self.call_stack.last_mut() {
                                         frame.registers.insert(reg_id, modified);
                                     }
                                 }
-                                
+
                                 method_result
+                            }
+                            RuntimeValue::String(s) if s.starts_with("function:") => {
+                                // Handle function calls via string identifiers
+                                let function_name = s.strip_prefix("function:").unwrap();
+
+                                // Get function arguments
+                                let mut args = Vec::new();
+                                for operand in &instruction.operands[1..] {
+                                    args.push(self.evaluate_value(operand)?);
+                                }
+
+                                // Call the builtin function
+                                if let Some(builtin) = self.builtin_registry.get(function_name) {
+                                    builtin(&args)?
+                                } else {
+                                    return Err(BuluError::Other(format!(
+                                        "Unknown function: {}",
+                                        function_name
+                                    )));
+                                }
                             }
                             _ => {
                                 return Err(BuluError::Other(format!(
@@ -2200,7 +2478,6 @@ impl Interpreter {
                         }
                     }
                     other => {
-
                         return Err(BuluError::Other(format!(
                             "Unsupported call target: {:?}",
                             other
@@ -3150,6 +3427,63 @@ impl Interpreter {
                 }
             }
 
+            IrOpcode::TupleConstruct => {
+                // Evaluate all operands to create tuple elements
+                let mut elements = Vec::new();
+                for operand in &instruction.operands {
+                    elements.push(self.evaluate_value(operand)?);
+                }
+
+                // Create tuple instance
+                let tuple_instance = RuntimeValue::Tuple(elements);
+
+                // Store result in register if specified
+                if let Some(result_reg) = &instruction.result {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.registers.insert(result_reg.id, tuple_instance);
+                    }
+                }
+            }
+
+            IrOpcode::TupleAccess => {
+                if instruction.operands.len() != 2 {
+                    return Err(BuluError::Other(
+                        "TupleAccess instruction requires exactly two operands".to_string(),
+                    ));
+                }
+
+                let tuple = self.evaluate_value(&instruction.operands[0])?;
+                let index = self.evaluate_value(&instruction.operands[1])?;
+
+                let result = match (tuple, index) {
+                    (RuntimeValue::Tuple(elements), RuntimeValue::Int64(idx)) => {
+                        let index = idx as usize;
+                        if index < elements.len() {
+                            elements[index].clone()
+                        } else {
+                            return Err(BuluError::Other(format!(
+                                "Tuple index {} out of bounds for tuple of length {}",
+                                index,
+                                elements.len()
+                            )));
+                        }
+                    }
+                    (tuple_val, _) => {
+                        return Err(BuluError::Other(format!(
+                            "Cannot access index on {:?}",
+                            tuple_val
+                        )));
+                    }
+                };
+
+                // Store result in register if specified
+                if let Some(result_reg) = &instruction.result {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.registers.insert(result_reg.id, result);
+                    }
+                }
+            }
+
             IrOpcode::StructAccess => {
                 if instruction.operands.len() != 2 {
                     return Err(BuluError::Other(
@@ -3161,10 +3495,12 @@ impl Interpreter {
                 let member_name = match &instruction.operands[1] {
                     IrValue::Global(name) => name,
                     IrValue::Constant(IrConstant::String(name)) => name,
-                    _ => return Err(BuluError::Other("Member name must be a global or string constant".to_string())),
+                    _ => {
+                        return Err(BuluError::Other(
+                            "Member name must be a global or string constant".to_string(),
+                        ))
+                    }
                 };
-
-
 
                 // Handle struct field access and built-in methods
                 let result = match &object {
@@ -3199,6 +3535,61 @@ impl Interpreter {
                                     method_name: "toString".to_string(),
                                     source_register: source_reg,
                                 }
+                            } else if struct_name == "Result"
+                                && (member_name == "isError"
+                                    || member_name == "error"
+                                    || member_name == "unwrap")
+                            {
+                                // Result-specific methods
+                                let source_reg = match &instruction.operands[0] {
+                                    IrValue::Register(reg) => Some(reg.id),
+                                    _ => None,
+                                };
+                                RuntimeValue::MethodRef {
+                                    object: Box::new(object),
+                                    method_name: member_name.clone(),
+                                    source_register: source_reg,
+                                }
+                            } else if struct_name == "TcpServer" && member_name == "accept" {
+                                // TcpServer methods
+                                let source_reg = match &instruction.operands[0] {
+                                    IrValue::Register(reg) => Some(reg.id),
+                                    _ => None,
+                                };
+                                RuntimeValue::MethodRef {
+                                    object: Box::new(object),
+                                    method_name: member_name.clone(),
+                                    source_register: source_reg,
+                                }
+                            } else if struct_name == "TcpConnection"
+                                && (member_name == "peer_addr"
+                                    || member_name == "read"
+                                    || member_name == "write"
+                                    || member_name == "close")
+                            {
+                                // TcpConnection methods
+                                let source_reg = match &instruction.operands[0] {
+                                    IrValue::Register(reg) => Some(reg.id),
+                                    _ => None,
+                                };
+                                RuntimeValue::MethodRef {
+                                    object: Box::new(object),
+                                    method_name: member_name.clone(),
+                                    source_register: source_reg,
+                                }
+                            } else if struct_name == "UdpConnection"
+                                && (member_name == "recv_from" || member_name == "send_to")
+                            {
+                                // UdpConnection methods
+                                let source_reg = match &instruction.operands[0] {
+                                    IrValue::Register(reg) => Some(reg.id),
+                                    _ => None,
+                                };
+                                RuntimeValue::MethodRef {
+                                    object: Box::new(object),
+                                    method_name: member_name.clone(),
+                                    source_register: source_reg,
+                                }
                             } else {
                                 return Err(BuluError::Other(format!(
                                     "Unknown member '{}' on struct {}",
@@ -3210,6 +3601,34 @@ impl Interpreter {
                                 "Struct definition not found for {}",
                                 struct_name
                             )));
+                        }
+                    }
+                    RuntimeValue::String(s) if s.starts_with("struct:") => {
+                        // Handle static method calls on struct types
+                        let struct_name = s.strip_prefix("struct:").unwrap();
+                        match (struct_name, member_name.as_str()) {
+                            ("NetAddr", "localhost_ipv4") => {
+                                // Return a function reference for NetAddr.localhost_ipv4
+                                RuntimeValue::String("function:NetAddr_localhost_ipv4".to_string())
+                            }
+                            ("TcpServer", "bind") => {
+                                // Return a function reference for TcpServer.bind
+                                RuntimeValue::String("function:TcpServer_bind".to_string())
+                            }
+                            ("TcpConnection", "connect") => {
+                                // Return a function reference for TcpConnection.connect
+                                RuntimeValue::String("function:TcpConnection_connect".to_string())
+                            }
+                            ("UdpConnection", "bind") => {
+                                // Return a function reference for UdpConnection.bind
+                                RuntimeValue::String("function:UdpConnection_bind".to_string())
+                            }
+                            _ => {
+                                return Err(BuluError::Other(format!(
+                                    "Unknown static method '{}' on struct {}",
+                                    member_name, struct_name
+                                )));
+                            }
                         }
                     }
                     _ => {
@@ -3225,7 +3644,51 @@ impl Interpreter {
                                     method_name: "toString".to_string(),
                                     source_register: source_reg,
                                 }
-                            },
+                            }
+                            "isError" => {
+                                let source_reg = match &instruction.operands[0] {
+                                    IrValue::Register(reg) => Some(reg.id),
+                                    _ => None,
+                                };
+                                RuntimeValue::MethodRef {
+                                    object: Box::new(object),
+                                    method_name: "isError".to_string(),
+                                    source_register: source_reg,
+                                }
+                            }
+                            "error" => {
+                                let source_reg = match &instruction.operands[0] {
+                                    IrValue::Register(reg) => Some(reg.id),
+                                    _ => None,
+                                };
+                                RuntimeValue::MethodRef {
+                                    object: Box::new(object),
+                                    method_name: "error".to_string(),
+                                    source_register: source_reg,
+                                }
+                            }
+                            "unwrap" => {
+                                let source_reg = match &instruction.operands[0] {
+                                    IrValue::Register(reg) => Some(reg.id),
+                                    _ => None,
+                                };
+                                RuntimeValue::MethodRef {
+                                    object: Box::new(object),
+                                    method_name: "unwrap".to_string(),
+                                    source_register: source_reg,
+                                }
+                            }
+                            "bytes" => {
+                                let source_reg = match &instruction.operands[0] {
+                                    IrValue::Register(reg) => Some(reg.id),
+                                    _ => None,
+                                };
+                                RuntimeValue::MethodRef {
+                                    object: Box::new(object),
+                                    method_name: "bytes".to_string(),
+                                    source_register: source_reg,
+                                }
+                            }
                             _ => {
                                 return Err(BuluError::Other(format!(
                                     "Unknown member '{}' on object {:?}",
@@ -3255,6 +3718,27 @@ impl Interpreter {
                     RuntimeValue::Array(ref arr) => arr.len() as i64,
                     RuntimeValue::Slice(ref slice) => slice.len() as i64,
                     RuntimeValue::String(ref s) => s.len() as i64,
+                    RuntimeValue::Range(start, end, step) => {
+                        // Calculate the length of the range
+                        let step_val = step.unwrap_or(1);
+                        if step_val == 0 {
+                            return Err(BuluError::Other("Range step cannot be zero".to_string()));
+                        }
+
+                        if step_val > 0 {
+                            if end > start {
+                                ((end - start + step_val - 1) / step_val).max(0)
+                            } else {
+                                0
+                            }
+                        } else {
+                            if start > end {
+                                ((start - end - step_val - 1) / (-step_val)).max(0)
+                            } else {
+                                0
+                            }
+                        }
+                    }
                     _ => {
                         return Err(BuluError::Other(format!(
                             "Cannot get length of {:?}",
@@ -3326,7 +3810,9 @@ impl Interpreter {
                         // This is struct field assignment: target.field = value
                         if let IrValue::Register(reg) = &instruction.operands[0] {
                             if let Some(frame) = self.call_stack.last_mut() {
-                                if let Some(RuntimeValue::Struct { fields, .. }) = frame.registers.get_mut(&reg.id) {
+                                if let Some(RuntimeValue::Struct { fields, .. }) =
+                                    frame.registers.get_mut(&reg.id)
+                                {
                                     fields.insert(field_name.clone(), value);
                                 } else {
                                     return Err(BuluError::Other(format!(
@@ -3395,16 +3881,24 @@ impl Interpreter {
                     RuntimeValue::Int64(i) => i.to_string(),
                     RuntimeValue::Float64(f) => f.to_string(),
                     RuntimeValue::Bool(b) => b.to_string(),
-                    _ => return Err(BuluError::Other("Map keys must be convertible to strings".to_string())),
+                    _ => {
+                        return Err(BuluError::Other(
+                            "Map keys must be convertible to strings".to_string(),
+                        ))
+                    }
                 };
 
                 // Insert into the map (struct)
                 if let IrValue::Register(reg) = &instruction.operands[0] {
                     if let Some(frame) = self.call_stack.last_mut() {
-                        if let Some(RuntimeValue::Struct { fields, .. }) = frame.registers.get_mut(&reg.id) {
+                        if let Some(RuntimeValue::Struct { fields, .. }) =
+                            frame.registers.get_mut(&reg.id)
+                        {
                             fields.insert(key_str, value);
                         } else {
-                            return Err(BuluError::Other("MapInsert target is not a struct".to_string()));
+                            return Err(BuluError::Other(
+                                "MapInsert target is not a struct".to_string(),
+                            ));
                         }
                     }
                 }
@@ -3446,6 +3940,39 @@ impl Interpreter {
                                     )));
                                 }
                             }
+                            RuntimeValue::Range(start, end, step) => {
+                                // Calculate the value at the given index in the range
+                                let step_val = step.unwrap_or(1);
+                                if step_val == 0 {
+                                    return Err(BuluError::Other(
+                                        "Range step cannot be zero".to_string(),
+                                    ));
+                                }
+
+                                let range_length = if step_val > 0 {
+                                    if end > start {
+                                        ((end - start + step_val - 1) / step_val).max(0)
+                                    } else {
+                                        0
+                                    }
+                                } else {
+                                    if start > end {
+                                        ((start - end - step_val - 1) / (-step_val)).max(0)
+                                    } else {
+                                        0
+                                    }
+                                };
+
+                                if array_index < range_length as usize {
+                                    let value = start + (array_index as i64) * step_val;
+                                    RuntimeValue::Int64(value)
+                                } else {
+                                    return Err(BuluError::Other(format!(
+                                        "Range index {} out of bounds for range of length {}",
+                                        array_index, range_length
+                                    )));
+                                }
+                            }
                             _ => {
                                 return Err(BuluError::Other(format!(
                                     "Cannot access index on {:?}",
@@ -3476,6 +4003,39 @@ impl Interpreter {
                                         "Slice index {} out of bounds for slice of length {}",
                                         array_index,
                                         slice.len()
+                                    )));
+                                }
+                            }
+                            RuntimeValue::Range(start, end, step) => {
+                                // Calculate the value at the given index in the range
+                                let step_val = step.unwrap_or(1);
+                                if step_val == 0 {
+                                    return Err(BuluError::Other(
+                                        "Range step cannot be zero".to_string(),
+                                    ));
+                                }
+
+                                let range_length = if step_val > 0 {
+                                    if end > start {
+                                        ((end - start + step_val - 1) / step_val).max(0)
+                                    } else {
+                                        0
+                                    }
+                                } else {
+                                    if start > end {
+                                        ((start - end - step_val - 1) / (-step_val)).max(0)
+                                    } else {
+                                        0
+                                    }
+                                };
+
+                                if array_index < range_length as usize {
+                                    let value = start + (array_index as i64) * step_val;
+                                    RuntimeValue::Int64(value)
+                                } else {
+                                    return Err(BuluError::Other(format!(
+                                        "Range index {} out of bounds for range of length {}",
+                                        array_index, range_length
                                     )));
                                 }
                             }
@@ -3512,6 +4072,39 @@ impl Interpreter {
                                     )));
                                 }
                             }
+                            RuntimeValue::Range(start, end, step) => {
+                                // Calculate the value at the given index in the range
+                                let step_val = step.unwrap_or(1);
+                                if step_val == 0 {
+                                    return Err(BuluError::Other(
+                                        "Range step cannot be zero".to_string(),
+                                    ));
+                                }
+
+                                let range_length = if step_val > 0 {
+                                    if end > start {
+                                        ((end - start + step_val - 1) / step_val).max(0)
+                                    } else {
+                                        0
+                                    }
+                                } else {
+                                    if start > end {
+                                        ((start - end - step_val - 1) / (-step_val)).max(0)
+                                    } else {
+                                        0
+                                    }
+                                };
+
+                                if array_index < range_length as usize {
+                                    let value = start + (array_index as i64) * step_val;
+                                    RuntimeValue::Int64(value)
+                                } else {
+                                    return Err(BuluError::Other(format!(
+                                        "Range index {} out of bounds for range of length {}",
+                                        array_index, range_length
+                                    )));
+                                }
+                            }
                             _ => {
                                 return Err(BuluError::Other(format!(
                                     "Cannot access index on {:?}",
@@ -3529,13 +4122,13 @@ impl Interpreter {
                                 } else {
                                     (start as usize).min(arr.len())
                                 };
-                                
+
                                 let end_idx = if end < 0 {
                                     arr.len()
                                 } else {
                                     (end as usize).min(arr.len())
                                 };
-                                
+
                                 if start_idx > end_idx {
                                     RuntimeValue::Slice(Vec::new())
                                 } else {
@@ -3549,13 +4142,13 @@ impl Interpreter {
                                 } else {
                                     (start as usize).min(slice_vec.len())
                                 };
-                                
+
                                 let end_idx = if end < 0 {
                                     slice_vec.len()
                                 } else {
                                     (end as usize).min(slice_vec.len())
                                 };
-                                
+
                                 if start_idx > end_idx {
                                     RuntimeValue::Slice(Vec::new())
                                 } else {
@@ -3578,8 +4171,6 @@ impl Interpreter {
                         )));
                     }
                 };
-
-
 
                 // Store result in register if specified
                 if let Some(result_reg) = &instruction.result {
@@ -3689,15 +4280,83 @@ impl Interpreter {
                 }
             }
             IrOpcode::Spawn => {
+                println!("🚀 MAIN THREAD: Processing IrOpcode::Spawn instruction with {} operands", instruction.operands.len());
+
                 // Launch a goroutine using our new goroutine system
-                if instruction.operands.len() != 1 {
+                if instruction.operands.is_empty() {
                     return Err(BuluError::Other(
-                        "Spawn instruction requires exactly 1 operand".to_string(),
+                        "Spawn instruction requires at least 1 operand".to_string(),
                     ));
                 }
 
-                // Get the operand and extract function information
+                // Check if we have multiple operands (function call with args)
+                if instruction.operands.len() > 1 {
+                    // Multiple operands: function name + arguments
+                    let function_operand = &instruction.operands[0];
+                    println!("🚀 MAIN THREAD: Spawn function operand: {:?}", function_operand);
+                    
+                    let function_name = match function_operand {
+                        IrValue::Global(name) => name.clone(),
+                        _ => {
+                            return Err(BuluError::Other(
+                                "First operand of Spawn must be a function name".to_string(),
+                            ));
+                        }
+                    };
+                    
+                    // Collect arguments
+                    let mut args = Vec::new();
+                    for arg_operand in &instruction.operands[1..] {
+                        let arg_value = self.evaluate_ir_value(arg_operand)?;
+                        args.push(arg_value);
+                    }
+                    
+                    println!("🚀 MAIN THREAD: Spawning goroutine for function '{}' with {} args", function_name, args.len());
+                    
+                    // Look up the function in the program
+                    if let Some(program) = &self.program {
+                        if program.functions.iter().any(|f| f.name == function_name) {
+                            // Initialize the goroutine runtime if not already done
+                            crate::runtime::goroutine::init_runtime(Some(4));
+
+                            // Create a goroutine task
+                            let task = crate::runtime::goroutine::GoroutineTask::Function {
+                                name: function_name.clone(),
+                                args,
+                                program: std::sync::Arc::new(program.clone()),
+                            };
+
+                            // Spawn the goroutine
+                            let goroutine_id = crate::runtime::goroutine::spawn(task);
+                            
+                            println!("🚀 MAIN THREAD: Goroutine {} spawned for function '{}', continuing main thread execution", goroutine_id, function_name);
+
+                            // Store the goroutine ID in the result register
+                            if let Some(result_reg) = &instruction.result {
+                                if let Some(frame) = self.call_stack.last_mut() {
+                                    frame.registers.insert(
+                                        result_reg.id,
+                                        RuntimeValue::Goroutine(goroutine_id as u32),
+                                    );
+                                }
+                            }
+                            
+                            println!("🚀 MAIN THREAD: Goroutine spawn completed, main thread continues");
+                            return Ok(());
+                        } else {
+                            return Err(BuluError::Other(format!(
+                                "Function '{}' not found",
+                                function_name
+                            )));
+                        }
+                    } else {
+                        return Err(BuluError::Other("No program loaded".to_string()));
+                    }
+                }
+                
+                // Single operand: legacy handling
                 let operand = &instruction.operands[0];
+                println!("🚀 MAIN THREAD: Spawn single operand: {:?}", operand);
 
                 let (function_name, args) = match operand {
                     IrValue::Function(name) => {
@@ -3709,45 +4368,73 @@ impl Interpreter {
                         (name.clone(), Vec::new())
                     }
                     _ => {
+                        println!(
+                            "🚀 MAIN THREAD: Complex expression in goroutine spawn: {:?}",
+                            operand
+                        );
+
                         // For complex expressions (like function calls with arguments),
-                        // use the old thread-based approach temporarily
-                        let goroutine_id = {
-                            static GOROUTINE_COUNTER: std::sync::atomic::AtomicU32 =
-                                std::sync::atomic::AtomicU32::new(1);
-                            GOROUTINE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                        // we need to extract the function name and arguments properly
+
+                        // Initialize the goroutine runtime if not already done
+                        crate::runtime::goroutine::init_runtime(Some(4));
+
+                        // Create a goroutine task for the complex expression
+                        let task = crate::runtime::goroutine::GoroutineTask::Expression {
+                            expr: match operand {
+                                IrValue::Register(reg) => {
+                                    // Try to get the value from the register
+                                    if let Some(frame) = self.call_stack.last() {
+                                        if let Some(value) = frame.registers.get(&reg.id) {
+                                            value.clone()
+                                        } else {
+                                            RuntimeValue::Null
+                                        }
+                                    } else {
+                                        RuntimeValue::Null
+                                    }
+                                }
+                                IrValue::Constant(constant) => {
+                                    // Convert IR constant to runtime value
+                                    match constant {
+                                        crate::compiler::ir::IrConstant::Integer(i) => {
+                                            RuntimeValue::Int64(*i)
+                                        }
+                                        crate::compiler::ir::IrConstant::Float(f) => {
+                                            RuntimeValue::Float64(*f)
+                                        }
+                                        crate::compiler::ir::IrConstant::String(s) => {
+                                            RuntimeValue::String(s.clone())
+                                        }
+                                        crate::compiler::ir::IrConstant::Boolean(b) => {
+                                            RuntimeValue::Bool(*b)
+                                        }
+                                        crate::compiler::ir::IrConstant::Char(c) => {
+                                            RuntimeValue::String(c.to_string())
+                                        }
+                                        crate::compiler::ir::IrConstant::Null => RuntimeValue::Null,
+                                        _ => RuntimeValue::Null, // For Array, Struct, Tuple - simplified for now
+                                    }
+                                }
+                                _ => {
+                                    // For other complex cases, create a function call expression
+                                    RuntimeValue::String("complex_expression".to_string())
+                                }
+                            },
                         };
 
-                        // Clone necessary data for the goroutine
-                        let globals = self.globals.clone();
-                        let program = self.program.clone();
-                        let operand_clone = operand.clone();
+                        // Spawn the goroutine using the proper goroutine system
+                        let goroutine_id = crate::runtime::goroutine::spawn(task);
 
-                        // Spawn the goroutine in a separate thread using the old approach
-                        std::thread::spawn(move || {
-                            // Create a minimal interpreter for this goroutine using the global channel registry
-                            let mut interpreter =
-                                Self::new_minimal(get_global_channel_registry().clone(), globals);
-                            if let Some(prog) = program {
-                                interpreter.program = Some(prog);
-                            }
-
-                            // Execute the operand (which should be a function call)
-                            // Create a dummy execution frame for the goroutine
-                            interpreter
-                                .call_stack
-                                .push(ExecutionFrame::new("goroutine".to_string()));
-
-                            if let Err(e) = interpreter.evaluate_value(&operand_clone) {
-                                eprintln!("Goroutine {} error: {:?}", goroutine_id, e);
-                            }
-                        });
+                        println!("🚀 MAIN THREAD: Complex goroutine {} spawned, continuing main thread execution", goroutine_id);
 
                         // Store the goroutine ID in the result register
                         if let Some(result_reg) = &instruction.result {
                             if let Some(frame) = self.call_stack.last_mut() {
-                                frame
-                                    .registers
-                                    .insert(result_reg.id, RuntimeValue::Goroutine(goroutine_id));
+                                frame.registers.insert(
+                                    result_reg.id,
+                                    RuntimeValue::Goroutine(goroutine_id as u32),
+                                );
                             }
                         }
                         return Ok(());
@@ -3757,6 +4444,11 @@ impl Interpreter {
                 // Look up the function in the program
                 if let Some(program) = &self.program {
                     if program.functions.iter().any(|f| f.name == function_name) {
+                        println!(
+                            "🚀 MAIN THREAD: About to spawn goroutine for function '{}'",
+                            function_name
+                        );
+
                         // Initialize the goroutine runtime if not already done
                         crate::runtime::goroutine::init_runtime(Some(4));
 
@@ -3770,6 +4462,8 @@ impl Interpreter {
                         // Spawn the goroutine
                         let goroutine_id = crate::runtime::goroutine::spawn(task);
 
+                        println!("🚀 MAIN THREAD: Goroutine {} spawned for function '{}', continuing main thread execution", goroutine_id, function_name);
+
                         // Store the goroutine ID in the result register
                         if let Some(result_reg) = &instruction.result {
                             if let Some(frame) = self.call_stack.last_mut() {
@@ -3779,6 +4473,10 @@ impl Interpreter {
                                 );
                             }
                         }
+
+                        println!(
+                            "🚀 MAIN THREAD: Goroutine spawn completed, main thread continues"
+                        );
                     } else {
                         return Err(BuluError::Other(format!(
                             "Function '{}' not found",
@@ -3834,6 +4532,14 @@ impl Interpreter {
                     // Generate the type identifier dynamically
                     let type_value = RuntimeValue::String(name.clone());
                     return Ok(type_value);
+                }
+
+                // Handle static method calls like NetAddr_localhost_ipv4
+                if name == "NetAddr_localhost_ipv4" {
+                    // Return a function identifier that can be called
+                    return Ok(RuntimeValue::String(
+                        "function:NetAddr_localhost_ipv4".to_string(),
+                    ));
                 }
 
                 Err(BuluError::Other(format!(
