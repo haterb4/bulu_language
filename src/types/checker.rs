@@ -142,6 +142,7 @@ impl TypeChecker {
             ("sleep", vec![TypeId::Int32], None),
             ("yield", vec![], None),
             ("timer", vec![TypeId::Int32], Some(TypeId::Any)),
+            ("waitForGoroutines", vec![], None),
             ("atomic_load", vec![TypeId::Any], Some(TypeId::Any)),
             ("atomic_store", vec![TypeId::Any, TypeId::Any], None),
             (

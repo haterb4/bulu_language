@@ -44,6 +44,9 @@ pub enum GoroutineTask {
         name: String,
         args: Vec<RuntimeValue>,
         program: Arc<IrProgram>,
+        globals: std::collections::HashMap<String, RuntimeValue>,
+        struct_definitions:
+            std::collections::HashMap<String, crate::runtime::interpreter::StructDefinition>,
     },
     /// Execute a closure/lambda
     Closure {
@@ -359,6 +362,8 @@ impl GoroutineRuntime {
                 name,
                 args,
                 program,
+                globals,
+                struct_definitions,
             } => {
                 println!(
                     "🔄 GOROUTINE {}: Executing function '{}' with {} args",
@@ -367,8 +372,12 @@ impl GoroutineRuntime {
                     args.len()
                 );
 
-                // Create a minimal interpreter for this goroutine
-                let mut interpreter = crate::runtime::interpreter::Interpreter::new_for_goroutine();
+                // Create an interpreter with the globals and struct definitions from the parent context
+                let mut interpreter =
+                    crate::runtime::interpreter::Interpreter::new_for_goroutine_with_context(
+                        globals.clone(),
+                        struct_definitions.clone(),
+                    );
                 interpreter.set_program(program.clone());
 
                 // Execute the function with proper error handling
@@ -525,4 +534,58 @@ pub fn spawn(task: GoroutineTask) -> GoroutineId {
 /// Get runtime statistics
 pub fn runtime_stats() -> RuntimeStats {
     get_runtime().stats()
+}
+
+/// Wait for all active goroutines to complete
+/// This function blocks until all goroutines have finished executing
+pub fn wait_all() {
+    println!("⏳ Waiting for all goroutines to complete...");
+
+    let runtime = get_runtime();
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(30); // 30 second timeout
+
+    loop {
+        let stats = runtime.stats();
+
+        if stats.active_goroutines == 0 {
+            println!("✅ All goroutines completed!");
+            println!(
+                "   Total: {}, Completed: {}, Panicked: {}",
+                stats.total_goroutines, stats.completed_goroutines, stats.panicked_goroutines
+            );
+            break;
+        }
+
+        if start.elapsed() > timeout {
+            println!(
+                "⚠️  Timeout waiting for goroutines. Still active: {}",
+                stats.active_goroutines
+            );
+            break;
+        }
+
+        // Sleep briefly to avoid busy waiting
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Wait for all active goroutines with a custom timeout
+pub fn wait_all_timeout(timeout: Duration) -> bool {
+    let runtime = get_runtime();
+    let start = std::time::Instant::now();
+
+    loop {
+        let stats = runtime.stats();
+
+        if stats.active_goroutines == 0 {
+            return true;
+        }
+
+        if start.elapsed() > timeout {
+            return false;
+        }
+
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }

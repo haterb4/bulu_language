@@ -14,6 +14,12 @@ func main() {
     testTcpPingPong()
     println("DEBUG: testTcpPingPong() completed")
     
+    // Wait for goroutines to finish
+    // In a real app, you'd use channels or WaitGroup
+    println("")
+    println("⏳ Waiting for goroutines to finish...")
+    sleep(2000) // 2 seconds should be enough
+    
     println("")
     println("✅ All network tests completed!")
 }

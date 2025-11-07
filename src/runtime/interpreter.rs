@@ -170,7 +170,7 @@ pub struct Interpreter {
 }
 
 #[derive(Debug, Clone)]
-struct StructDefinition {
+pub struct StructDefinition {
     name: String,
     fields: Vec<StructFieldDef>,
     methods: HashMap<String, String>, // method_name -> function_name
@@ -4319,11 +4319,13 @@ impl Interpreter {
                             // Initialize the goroutine runtime if not already done
                             crate::runtime::goroutine::init_runtime(Some(4));
 
-                            // Create a goroutine task
+                            // Create a goroutine task with globals and struct definitions
                             let task = crate::runtime::goroutine::GoroutineTask::Function {
                                 name: function_name.clone(),
                                 args,
                                 program: std::sync::Arc::new(program.clone()),
+                                globals: self.globals.clone(),
+                                struct_definitions: self.struct_definitions.clone(),
                             };
 
                             // Spawn the goroutine
@@ -4452,11 +4454,13 @@ impl Interpreter {
                         // Initialize the goroutine runtime if not already done
                         crate::runtime::goroutine::init_runtime(Some(4));
 
-                        // Create a goroutine task
+                        // Create a goroutine task with globals and struct definitions
                         let task = crate::runtime::goroutine::GoroutineTask::Function {
                             name: function_name.clone(),
                             args,
                             program: std::sync::Arc::new(program.clone()),
+                            globals: self.globals.clone(),
+                            struct_definitions: self.struct_definitions.clone(),
                         };
 
                         // Spawn the goroutine

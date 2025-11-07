@@ -212,6 +212,7 @@ impl BuiltinRegistry {
         self.register("atomic_add", builtin_atomic_add);
         self.register("atomic_sub", builtin_atomic_sub);
         self.register("atomic_cas", builtin_atomic_cas);
+        self.register("waitForGoroutines", builtin_wait_for_goroutines);
     }
 
     /// Register network functions
@@ -1434,6 +1435,20 @@ pub fn builtin_yield(args: &[RuntimeValue]) -> Result<RuntimeValue> {
     }
 
     yield_now();
+    Ok(RuntimeValue::Null)
+}
+
+/// Wait for all active goroutines to complete
+pub fn builtin_wait_for_goroutines(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if !args.is_empty() {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "waitForGoroutines() expects no arguments".to_string(),
+        });
+    }
+
+    // Call the goroutine runtime's wait_all function
+    crate::runtime::goroutine::wait_all();
     Ok(RuntimeValue::Null)
 }
 
