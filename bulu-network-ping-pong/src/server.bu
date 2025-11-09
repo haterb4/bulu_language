@@ -1,0 +1,70 @@
+// Bulu TCP Server - Ping-Pong Example
+// Run this first, then run client.bu in another terminal
+
+import { TcpServer, NetAddr } from "std/net"
+
+func main() {
+    println("=== BULU TCP SERVER ===")
+    println("")
+    
+    let port = 9090
+    let addr = NetAddr.localhost_ipv4(port)
+    
+    println("🚀 Starting TCP server on localhost:" + port.toString())
+    
+    let server = TcpServer.bind(addr)
+    if server.isError() {
+        println("❌ Failed to bind TCP server: " + server.error().toString())
+        return
+    }
+    
+    let server_unwrapped = server.unwrap()
+    println("✅ TCP Server listening on " + addr.toString())
+    println("⏳ Waiting for client connection...")
+    println("")
+    
+    // Accept connection
+    let conn = server_unwrapped.accept()
+    if conn.isError() {
+        println("❌ Failed to accept connection: " + conn.error().toString())
+        return
+    }
+    
+    let conn_unwrapped = conn.unwrap()
+    println("📞 Client connected!")
+    println("")
+    
+    // Ping-pong loop
+    for i in 0..10 {
+        // Read ping from client
+        let buffer = make([]byte, 1024)
+        let bytesRead = conn_unwrapped.read(buffer)
+        if bytesRead.isError() {
+            println("❌ Error reading from client: " + bytesRead.error().toString())
+            break
+        }
+        
+        let bytesRead_unwrapped = bytesRead.unwrap()
+        if bytesRead_unwrapped == 0 {
+            println("🔌 Client disconnected")
+            break
+        }
+        
+        let message = string(buffer[0:bytesRead_unwrapped])
+        println("📨 Server received: " + message)
+        
+        // Send pong back
+        let pongMessage = "PONG " + i.toString()
+        let bytesWritten = conn_unwrapped.write(pongMessage.bytes())
+        if bytesWritten.isError() {
+            println("❌ Error writing to client: " + bytesWritten.error().toString())
+            break
+        }
+        
+        println("📤 Server sent: " + pongMessage)
+        println("")
+    }
+    
+    conn_unwrapped.close()
+    println("✅ Server finished - connection closed")
+}

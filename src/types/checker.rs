@@ -66,7 +66,7 @@ impl TypeChecker {
             structs: HashMap::new(),
             type_name_to_id: HashMap::new(),
             type_id_to_name: HashMap::new(),
-            next_type_id: 1000, // Start from 1000 to avoid conflicts with primitive types
+            next_type_id: 1100, // Start from 1100 to avoid conflicts with std types (1001-1099 reserved)
             collecting_functions: false,
             current_file: None,
         };
@@ -465,7 +465,9 @@ impl TypeChecker {
                 .insert("UdpConnection".to_string(), TypeId::Struct(1005));
 
             // Register tuple type (int64, NetAddr) for recv_from return
-            let tuple_id = self.type_registry.register_tuple_type(vec![TypeId::Int64, TypeId::Struct(1001)]);
+            let tuple_id = self
+                .type_registry
+                .register_tuple_type(vec![TypeId::Int64, TypeId::Struct(1001)]);
 
             // Add UdpConnection.bind static method
             let udp_connection_bind_symbol = Symbol {
@@ -491,7 +493,10 @@ impl TypeChecker {
                     return_type: Some(TypeId::Result(tuple_id)), // returns Result<(int64, NetAddr)> tuple
                 }),
             };
-            global_scope.insert("UdpConnection.recv_from".to_string(), udp_connection_recv_from_symbol);
+            global_scope.insert(
+                "UdpConnection.recv_from".to_string(),
+                udp_connection_recv_from_symbol,
+            );
 
             // Add UdpConnection.send_to method
             let udp_connection_send_to_symbol = Symbol {
@@ -504,7 +509,10 @@ impl TypeChecker {
                     return_type: Some(TypeId::Result(1013)), // returns Result<int64> (bytes sent)
                 }),
             };
-            global_scope.insert("UdpConnection.send_to".to_string(), udp_connection_send_to_symbol);
+            global_scope.insert(
+                "UdpConnection.send_to".to_string(),
+                udp_connection_send_to_symbol,
+            );
         }
     }
 
@@ -1510,12 +1518,37 @@ impl TypeChecker {
                         Expression::Identifier(type_ident) => {
                             // Check if it's a valid type for make()
                             let valid_types = vec![
-                                "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32",
-                                "uint64", "float32", "float64", "bool", "string", "char", "byte",
-                                "rune", "any", "chan", "slice_byte", "slice_int8", "slice_int16", 
-                                "slice_int32", "slice_int64", "slice_uint8", "slice_uint16", 
-                                "slice_uint32", "slice_uint64", "slice_float32", "slice_float64",
-                                "slice_bool", "slice_char", "slice_string",
+                                "int8",
+                                "int16",
+                                "int32",
+                                "int64",
+                                "uint8",
+                                "uint16",
+                                "uint32",
+                                "uint64",
+                                "float32",
+                                "float64",
+                                "bool",
+                                "string",
+                                "char",
+                                "byte",
+                                "rune",
+                                "any",
+                                "chan",
+                                "slice_byte",
+                                "slice_int8",
+                                "slice_int16",
+                                "slice_int32",
+                                "slice_int64",
+                                "slice_uint8",
+                                "slice_uint16",
+                                "slice_uint32",
+                                "slice_uint64",
+                                "slice_float32",
+                                "slice_float64",
+                                "slice_bool",
+                                "slice_char",
+                                "slice_string",
                             ];
 
                             if valid_types.contains(&type_ident.name.as_str()) {
@@ -1546,70 +1579,83 @@ impl TypeChecker {
                                     "chan" => Ok(TypeId::Any), // Channel type
                                     "int8" => Ok(TypeId::Int8),
                                     "int16" => Ok(TypeId::Int16),
-                                    "int32" => Ok(TypeId::Int32), 
-                                    "uint8" => Ok(TypeId::UInt8), 
-                                    "uint16" => Ok(TypeId::UInt16), 
+                                    "int32" => Ok(TypeId::Int32),
+                                    "uint8" => Ok(TypeId::UInt8),
+                                    "uint16" => Ok(TypeId::UInt16),
                                     "uint32" => Ok(TypeId::UInt32),
-                                    | "byte" | "rune" => Ok(TypeId::Int8),
+                                    "byte" | "rune" => Ok(TypeId::Int8),
                                     "uint64" => Ok(TypeId::UInt64),
-                                    "int64"  => Ok(TypeId::Int64),
+                                    "int64" => Ok(TypeId::Int64),
                                     "float32" | "float64" => Ok(TypeId::Float64),
                                     "bool" => Ok(TypeId::Bool),
                                     "string" | "char" => Ok(TypeId::String),
                                     "any" => Ok(TypeId::Any),
                                     // Handle slice types
                                     "slice_byte" | "slice_uint8" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::UInt8);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::UInt8);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_int8" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::Int8);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::Int8);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_int16" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::Int16);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::Int16);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_int32" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::Int32);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::Int32);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_int64" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::Int64);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::Int64);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_uint16" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::UInt16);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::UInt16);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_uint32" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::UInt32);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::UInt32);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_uint64" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::UInt64);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::UInt64);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_float32" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::Float32);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::Float32);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_float64" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::Float64);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::Float64);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_bool" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::Bool);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::Bool);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_char" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::Char);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::Char);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     "slice_string" => {
-                                        let slice_id = self.type_registry.register_slice_type(TypeId::String);
+                                        let slice_id =
+                                            self.type_registry.register_slice_type(TypeId::String);
                                         Ok(TypeId::Slice(slice_id))
-                                    },
+                                    }
                                     _ => Ok(TypeId::Any),
                                 };
                             } else {
@@ -1807,8 +1853,14 @@ impl TypeChecker {
 
                 // Look up the method in the object's type
                 let type_name = self.get_type_name_from_expression(&member_access.object)?;
-                let type_name_for_error =
-                    type_name.clone().unwrap_or_else(|| "unknown".to_string());
+
+                // For error messages, prefer the type name from expression over TypeId lookup
+                // This avoids confusion when TypeIds get reused or mismatched
+                let type_name_for_error = if let Some(ref name) = type_name {
+                    name.clone()
+                } else {
+                    self.type_name_for_error(object_type)
+                };
 
                 match object_type {
                     TypeId::Struct(_) => {
@@ -1894,12 +1946,16 @@ impl TypeChecker {
                                     1004 => return Ok(TypeId::Struct(1004)), // TcpConnection
                                     1005 => return Ok(TypeId::Struct(1005)), // UdpConnection
                                     1012 => return Ok(TypeId::Int64),        // bytes read (int64)
-                                    1013 => return Ok(TypeId::Int64),        // bytes written (int64)
+                                    1013 => return Ok(TypeId::Int64), // bytes written (int64)
                                     _ => {
                                         // For other IDs, check if it's a registered tuple type
-                                        if let Some(composite_type) = self.type_registry.get_composite_type(inner_type) {
+                                        if let Some(composite_type) =
+                                            self.type_registry.get_composite_type(inner_type)
+                                        {
                                             match composite_type {
-                                                crate::types::composite::CompositeTypeId::Tuple(_) => {
+                                                crate::types::composite::CompositeTypeId::Tuple(
+                                                    _,
+                                                ) => {
                                                     return Ok(TypeId::Tuple(inner_type));
                                                 }
                                                 _ => {}
@@ -1920,10 +1976,11 @@ impl TypeChecker {
                             "bytes" => {
                                 // string.bytes() returns []byte (slice of bytes)
                                 if matches!(object_type, TypeId::String) {
-                                    let slice_id = self.type_registry.register_slice_type(TypeId::UInt8);
+                                    let slice_id =
+                                        self.type_registry.register_slice_type(TypeId::UInt8);
                                     return Ok(TypeId::Slice(slice_id));
                                 }
-                            },
+                            }
                             _ => {}
                         }
                     }
@@ -2049,7 +2106,7 @@ impl TypeChecker {
                             return Ok(TypeId::Tuple(inner_type_id));
                         }
                         return Ok(TypeId::Void);
-                    },
+                    }
                     _ => {}
                 }
             }
@@ -2063,7 +2120,7 @@ impl TypeChecker {
                             let slice_id = self.type_registry.register_slice_type(TypeId::UInt8);
                             return Ok(TypeId::Slice(slice_id));
                         }
-                    },
+                    }
                     _ => {}
                 }
             }
@@ -3025,6 +3082,10 @@ impl TypeChecker {
                     Ok(None)
                 }
             }
+            Expression::StructLiteral(struct_lit) => {
+                // For struct literals like DisplayFormatter{}, return the struct name
+                Ok(Some(struct_lit.type_name.clone()))
+            }
             Expression::Call(call) => {
                 // Handle method calls like obj.method()
                 if let Expression::MemberAccess(member_access) = &*call.callee {
@@ -3166,8 +3227,12 @@ impl TypeChecker {
                 match value_type {
                     TypeId::Tuple(tuple_type_id) => {
                         // Get the tuple type from the registry
-                        let element_types = if let Some(composite_type) = self.type_registry.get_composite_type(tuple_type_id) {
-                            if let crate::types::composite::CompositeTypeId::Tuple(element_types) = composite_type {
+                        let element_types = if let Some(composite_type) =
+                            self.type_registry.get_composite_type(tuple_type_id)
+                        {
+                            if let crate::types::composite::CompositeTypeId::Tuple(element_types) =
+                                composite_type
+                            {
                                 element_types.clone()
                             } else {
                                 return Err(BuluError::TypeError {
@@ -3185,7 +3250,7 @@ impl TypeChecker {
                                 file: self.current_file.clone(),
                             });
                         };
-                        
+
                         // Check that the number of patterns matches the number of tuple elements
                         if tuple_pattern.elements.len() != element_types.len() {
                             return Err(BuluError::TypeError {
@@ -3199,9 +3264,11 @@ impl TypeChecker {
                                 file: self.current_file.clone(),
                             });
                         }
-                        
+
                         // Destructure each element with its corresponding type
-                        for (pattern, element_type) in tuple_pattern.elements.iter().zip(element_types.iter()) {
+                        for (pattern, element_type) in
+                            tuple_pattern.elements.iter().zip(element_types.iter())
+                        {
                             self.check_pattern_and_add_variables(pattern, *element_type)?;
                         }
                     }

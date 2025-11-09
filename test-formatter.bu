@@ -1,0 +1,12 @@
+// Test simple du DisplayFormatter
+
+struct DisplayFormatter {
+    func formatTitle(title: string): string {
+        return "=== " + title + " ==="
+    }
+}
+
+func main() {
+    let formatter = DisplayFormatter{}
+    println(formatter.formatTitle("TEST"))
+}

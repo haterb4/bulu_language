@@ -1,0 +1,63 @@
+// Bulu TCP Client - Ping-Pong Example
+// Make sure server.bu is running first!
+
+import { TcpConnection, NetAddr } from "std/net"
+import { sleep } from "std/time"
+
+func main() {
+    println("=== BULU TCP CLIENT ===")
+    println("")
+    
+    let port = 9090
+    let addr = NetAddr.localhost_ipv4(port)
+    
+    println("🔗 Connecting to TCP server at localhost:" + port.toString() + "...")
+    
+    let conn = TcpConnection.connect(addr)
+    if conn.isError() {
+        println("❌ Failed to connect to server: " + conn.error().toString())
+        println("💡 Make sure the server is running first!")
+        return
+    }
+    
+    let conn_unwrapped = conn.unwrap()
+    println("✅ Connected to server at " + addr.toString())
+    println("")
+    
+    // Ping-pong loop
+    for i in 0..10 {
+        // Send ping
+        let pingMessage = "PING " + i.toString()
+        let bytesWritten = conn_unwrapped.write(pingMessage.bytes())
+        if bytesWritten.isError() {
+            println("❌ Error writing to server: " + bytesWritten.error().toString())
+            break
+        }
+        
+        println("📤 Client sent: " + pingMessage)
+        
+        // Read pong response
+        let buffer = make([]byte, 1024)
+        let bytesRead = conn_unwrapped.read(buffer)
+        if bytesRead.isError() {
+            println("❌ Error reading from server: " + bytesRead.error().toString())
+            break
+        }
+        
+        let bytesRead_unwrapped = bytesRead.unwrap()
+        if bytesRead_unwrapped == 0 {
+            println("🔌 Server disconnected")
+            break
+        }
+        
+        let message = string(buffer[0:bytesRead_unwrapped])
+        println("📨 Client received: " + message)
+        println("")
+        
+        // Small delay between messages
+        sleep(200) // 200ms
+    }
+    
+    conn_unwrapped.close()
+    println("✅ Client finished - connection closed")
+}
