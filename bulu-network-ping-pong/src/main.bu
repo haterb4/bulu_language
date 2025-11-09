@@ -12,6 +12,12 @@ func main() {
     println("🔗 Testing TCP Ping-Pong...")
     testTcpPingPong()
     
+    // Wait for goroutines to finish
+    // In a real app, you'd use channels or WaitGroup
+    println("")
+    println("⏳ Waiting for goroutines to finish...")
+    sleep(2000) // 2 seconds should be enough
+    
     println("")
     
     // Test UDP Ping-Pong  
@@ -34,8 +40,8 @@ func testTcpPingPong() {
     // Give server time to start
     sleep(100) // 100ms
     
-    // Connect as client and send ping-pong messages
-    runTcpClient(addr)
+    // Connect as client and send ping-pong messages in a goroutine
+    run runTcpClient(addr)
 }
 
 func runTcpServer(addr: NetAddr) {
@@ -56,7 +62,7 @@ func runTcpServer(addr: NetAddr) {
     }
     
     let conn_unwrapped = conn.unwrap()
-    println("📞 Client connected from " + conn_unwrapped.peer_addr().toString())
+    println("📞 Client connected")
     
     // Ping-pong loop
     for i in 0..5 {
@@ -141,13 +147,15 @@ func testUdpPingPong() {
     
     // Start UDP server in a goroutine
     run runUdpServer(serverAddr, clientAddr)
-
     
     // Give server time to start
     sleep(100) // 100ms
     
-    // Run UDP client
-    runUdpClient(clientAddr, serverAddr)
+    // Run UDP client in a goroutine
+    run runUdpClient(clientAddr, serverAddr)
+    
+    // Wait for UDP goroutines to finish
+    sleep(2000) // 2 seconds
 }
 
 func runUdpServer(serverAddr: NetAddr, clientAddr: NetAddr) {

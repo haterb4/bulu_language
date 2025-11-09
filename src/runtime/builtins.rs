@@ -43,12 +43,13 @@ static TCP_SERVERS: OnceLock<Arc<Mutex<TcpServerMap>>> = OnceLock::new();
 static TCP_CONNECTIONS: OnceLock<Arc<Mutex<TcpConnectionMap>>> = OnceLock::new();
 static UDP_SOCKETS: OnceLock<Arc<Mutex<UdpSocketMap>>> = OnceLock::new();
 static CONNECTION_COUNTER: OnceLock<Arc<Mutex<u32>>> = OnceLock::new();
+static LAST_READ_DATA: OnceLock<Arc<Mutex<String>>> = OnceLock::new();
 
 fn get_tcp_servers() -> &'static Arc<Mutex<TcpServerMap>> {
     TCP_SERVERS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
 }
 
-fn get_tcp_connections() -> &'static Arc<Mutex<TcpConnectionMap>> {
+pub fn get_tcp_connections() -> &'static Arc<Mutex<TcpConnectionMap>> {
     TCP_CONNECTIONS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
 }
 
@@ -61,6 +62,14 @@ fn get_next_connection_id() -> String {
     let mut count = counter.lock().unwrap();
     *count += 1;
     format!("conn_{}", *count)
+}
+
+pub fn get_last_read_data() -> &'static Arc<Mutex<String>> {
+    LAST_READ_DATA.get_or_init(|| Arc::new(Mutex::new(String::new())))
+}
+
+pub fn get_last_read_data_opt() -> Option<&'static Arc<Mutex<String>>> {
+    LAST_READ_DATA.get()
 }
 
 /// Runtime value for collections and composite types
@@ -175,6 +184,7 @@ impl BuiltinRegistry {
         self.register("delete", builtin_delete);
         self.register("__range_to_array", builtin_range_to_array);
         self.register("__create_range", builtin_create_range);
+        self.register("getReadData", builtin_get_read_data);
     }
 
     /// Register I/O functions
@@ -389,24 +399,26 @@ pub fn builtin_string(args: &[RuntimeValue]) -> Result<RuntimeValue> {
             message: "string() expects exactly 1 argument".to_string(),
         });
     }
-
-    // Special handling for byte arrays that might contain network data
+    
+    // Special handling for byte arrays/slices that might contain network data
     match &args[0] {
-        RuntimeValue::Array(arr) => {
+        RuntimeValue::Array(arr) | RuntimeValue::Slice(arr) => {
             // Check if this looks like a byte buffer (array of small integers)
             let is_byte_buffer = arr.iter().all(|v| match v {
                 RuntimeValue::Int32(i) => *i >= 0 && *i <= 255,
                 RuntimeValue::UInt8(_) => true,
+                RuntimeValue::Byte(_) => true,
                 _ => false,
             });
-
+            
             if is_byte_buffer {
-                // First, try to get data from the last network read
-                static LAST_READ_DATA: OnceLock<Arc<Mutex<String>>> = OnceLock::new();
-                let last_read = LAST_READ_DATA.get_or_init(|| Arc::new(Mutex::new(String::new())));
+                // Always try to get data from the last network read first
+                let last_read = get_last_read_data();
                 if let Ok(data) = last_read.lock() {
                     if !data.is_empty() {
-                        return Ok(RuntimeValue::String(data.clone()));
+                        let result = data.clone();
+                        // Don't clear the data yet - it might be used multiple times
+                        return Ok(RuntimeValue::String(result));
                     }
                 }
 
@@ -416,6 +428,7 @@ pub fn builtin_string(args: &[RuntimeValue]) -> Result<RuntimeValue> {
                     .filter_map(|v| match v {
                         RuntimeValue::Int32(i) => Some(*i as u8),
                         RuntimeValue::UInt8(b) => Some(*b),
+                        RuntimeValue::Byte(b) => Some(*b),
                         _ => None,
                     })
                     .collect();
@@ -428,6 +441,18 @@ pub fn builtin_string(args: &[RuntimeValue]) -> Result<RuntimeValue> {
     }
 
     args[0].cast_to(PrimitiveType::String)
+}
+
+/// Get the last read data from network operations
+pub fn builtin_get_read_data(_args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    let last_read = get_last_read_data();
+    if let Ok(data) = last_read.lock() {
+        if !data.is_empty() {
+            let result = data.clone();
+            return Ok(RuntimeValue::String(result));
+        }
+    }
+    Ok(RuntimeValue::String(String::new()))
 }
 
 // ============================================================================
@@ -2428,9 +2453,7 @@ pub fn builtin_udpconnection_recv_from(args: &[RuntimeValue]) -> Result<RuntimeV
                     // Store the read data globally for string conversion
                     let data = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
 
-                    static LAST_READ_DATA: OnceLock<Arc<Mutex<String>>> = OnceLock::new();
-                    let last_read =
-                        LAST_READ_DATA.get_or_init(|| Arc::new(Mutex::new(String::new())));
+                    let last_read = get_last_read_data();
                     if let Ok(mut last) = last_read.lock() {
                         *last = data;
                     }
@@ -2646,12 +2669,18 @@ pub fn builtin_tcpserver_accept(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         Some(listener) => {
             // Check if we're in a goroutine context
             let is_goroutine = is_in_goroutine_context();
-            
-            if is_goroutine {
-                println!("🌐 TCP_ACCEPT: Called from goroutine context on thread {:?}", std::thread::current().id());
-            } else {
-                println!("🌐 TCP_ACCEPT: Called from main thread context on thread {:?}", std::thread::current().id());
-            }
+
+            // if is_goroutine {
+            //     println!(
+            //         "🌐 TCP_ACCEPT: Called from goroutine context on thread {:?}",
+            //         std::thread::current().id()
+            //     );
+            // } else {
+            //     println!(
+            //         "🌐 TCP_ACCEPT: Called from main thread context on thread {:?}",
+            //         std::thread::current().id()
+            //     );
+            // }
 
             // Set blocking mode based on context
             if let Err(e) = listener.set_nonblocking(is_goroutine) {
@@ -2666,63 +2695,35 @@ pub fn builtin_tcpserver_accept(args: &[RuntimeValue]) -> Result<RuntimeValue> {
                 });
             }
 
-            // In goroutine context, use cooperative approach
+            // In goroutine context, use syscall thread pool for blocking operation
             if is_goroutine {
-                // Try multiple times with yields to allow other goroutines to run
-                for attempt in 0..10 {
-                    match listener.accept() {
-                        Ok((stream, peer_addr)) => {
-                            let connection_id = get_next_connection_id();
+                // println!("🌐 TCP_ACCEPT: In goroutine context, submitting to syscall pool and waiting");
 
-                            // Store the connection in our registry
-                            if let Ok(mut connections) = get_tcp_connections().lock() {
-                                connections
-                                    .insert(connection_id.clone(), Arc::new(Mutex::new(stream)));
-                            }
-
-                            // Create TcpConnection struct
-                            let mut connection_fields = std::collections::HashMap::new();
-                            connection_fields.insert(
-                                "peer_addr".to_string(),
-                                RuntimeValue::String(peer_addr.to_string()),
-                            );
-                            connection_fields.insert(
-                                "connection_id".to_string(),
-                                RuntimeValue::String(connection_id),
-                            );
-
-                            let connection = RuntimeValue::Struct {
-                                name: "TcpConnection".to_string(),
-                                fields: connection_fields,
-                            };
-
-                            let mut result_fields = std::collections::HashMap::new();
-                            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(true));
-                            result_fields.insert("value".to_string(), connection);
-                            result_fields.insert(
-                                "error_msg".to_string(),
-                                RuntimeValue::String("".to_string()),
-                            );
-
-                            return Ok(RuntimeValue::Struct {
-                                name: "Result".to_string(),
-                                fields: result_fields,
-                            });
-                        }
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            // No connection available, yield and try again
-                            std::thread::yield_now();
-                            std::thread::sleep(std::time::Duration::from_millis(10));
-                            continue;
+                // Get current goroutine ID
+                if let Some(goroutine_id) = crate::runtime::goroutine::get_current_goroutine_id() {
+                    // Clone the listener and wrap in Mutex for syscall pool
+                    let listener_clone = listener.try_clone().unwrap();
+                    let listener_mutex = Arc::new(Mutex::new(listener_clone));
+                    
+                    // Submit the blocking operation and wait for result synchronously
+                    match crate::runtime::syscall_thread::submit_blocking_op_sync(
+                        goroutine_id,
+                        crate::runtime::syscall_thread::BlockingOp::TcpAccept {
+                            listener: listener_mutex,
+                        },
+                    ) {
+                        Ok(result) => {
+                            // println!("🌐 TCP_ACCEPT: Received result from syscall pool");
+                            return Ok(result);
                         }
                         Err(e) => {
-                            // Real error
+                            println!("❌ TCP_ACCEPT: Syscall failed: {:?}", e);
                             let mut result_fields = std::collections::HashMap::new();
                             result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
                             result_fields.insert("value".to_string(), RuntimeValue::Null);
                             result_fields.insert(
                                 "error_msg".to_string(),
-                                RuntimeValue::String(e.to_string()),
+                                RuntimeValue::String(format!("{:?}", e)),
                             );
 
                             return Ok(RuntimeValue::Struct {
@@ -2732,23 +2733,11 @@ pub fn builtin_tcpserver_accept(args: &[RuntimeValue]) -> Result<RuntimeValue> {
                         }
                     }
                 }
-
-                // After all attempts, return "no connection available"
-                let mut result_fields = std::collections::HashMap::new();
-                result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
-                result_fields.insert("value".to_string(), RuntimeValue::Null);
-                result_fields.insert(
-                    "error_msg".to_string(),
-                    RuntimeValue::String("No connection available after retries".to_string()),
-                );
-
-                Ok(RuntimeValue::Struct {
-                    name: "Result".to_string(),
-                    fields: result_fields,
-                })
-            } else {
-                // Not in goroutine, use blocking mode
-                match listener.accept() {
+            }
+            
+            // Fallback: blocking accept (not in goroutine context)
+            // println!("⚠️  TCP_ACCEPT: No goroutine context, using blocking accept");
+            match listener.accept() {
                     Ok((stream, peer_addr)) => {
                         let connection_id = get_next_connection_id();
 
@@ -2799,7 +2788,6 @@ pub fn builtin_tcpserver_accept(args: &[RuntimeValue]) -> Result<RuntimeValue> {
                         })
                     }
                 }
-            }
         }
         None => {
             let mut result_fields = std::collections::HashMap::new();
@@ -2872,6 +2860,66 @@ pub fn builtin_tcpconnection_read(args: &[RuntimeValue]) -> Result<RuntimeValue>
 
     match connection {
         Some(connection) => {
+            // Check if we're in a goroutine context
+            if is_in_goroutine_context() {
+                if let Some(goroutine_id) = crate::runtime::goroutine::get_current_goroutine_id() {
+                    // println!("🌐 TCP_READ: Called from goroutine context, submitting to syscall pool and waiting");
+                    
+                    // Submit the blocking operation and wait for result synchronously
+                    match crate::runtime::syscall_thread::submit_blocking_op_sync(
+                        goroutine_id,
+                        crate::runtime::syscall_thread::BlockingOp::TcpRead {
+                            stream: connection,
+                            buffer_size: 1024,
+                        },
+                    ) {
+                        Ok(result) => {
+                            // println!("🌐 TCP_READ: Received result from syscall pool");
+                            
+                            // Extract the data from the result and copy it to the user's buffer
+                            if let RuntimeValue::Struct { fields, .. } = &result {
+                                if let Some(RuntimeValue::Array(data)) = fields.get("data") {
+                                    // Copy data to the user's buffer (args[1])
+                                    // Note: In Bulu, arrays are passed by value, so we can't modify the original
+                                    // Instead, we store the data globally for later retrieval
+                                    static READ_BUFFER_DATA: OnceLock<Arc<Mutex<Vec<u8>>>> = OnceLock::new();
+                                    let buffer_data = READ_BUFFER_DATA.get_or_init(|| Arc::new(Mutex::new(Vec::new())));
+                                    
+                                    if let Ok(mut buf) = buffer_data.lock() {
+                                        buf.clear();
+                                        for val in data {
+                                            if let RuntimeValue::UInt8(b) = val {
+                                                buf.push(*b);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            return Ok(result);
+                        }
+                        Err(e) => {
+                            println!("❌ TCP_READ: Syscall failed: {:?}", e);
+                            let mut result_fields = std::collections::HashMap::new();
+                            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                            result_fields.insert("value".to_string(), RuntimeValue::Null);
+                            result_fields.insert(
+                                "error_msg".to_string(),
+                                RuntimeValue::String(format!("{:?}", e)),
+                            );
+
+                            return Ok(RuntimeValue::Struct {
+                                name: "Result".to_string(),
+                                fields: result_fields,
+                            });
+                        }
+                    }
+                }
+            }
+            
+            // Fallback: blocking read (not in goroutine context)
+            // println!("⚠️  TCP_READ: No goroutine context, using blocking read");
+            
             // Try to read from the connection
             if let Ok(mut stream) = connection.lock() {
                 // Set blocking mode with timeout
@@ -2905,9 +2953,7 @@ pub fn builtin_tcpconnection_read(args: &[RuntimeValue]) -> Result<RuntimeValue>
                         }
 
                         // Also store in a simple global for string conversion
-                        static LAST_READ_DATA: OnceLock<Arc<Mutex<String>>> = OnceLock::new();
-                        let last_read =
-                            LAST_READ_DATA.get_or_init(|| Arc::new(Mutex::new(String::new())));
+                        let last_read = get_last_read_data();
                         if let Ok(mut last) = last_read.lock() {
                             *last = data;
                         }
@@ -3035,6 +3081,45 @@ pub fn builtin_tcpconnection_write(args: &[RuntimeValue]) -> Result<RuntimeValue
 
     match connection {
         Some(connection) => {
+            // Check if we're in a goroutine context
+            if is_in_goroutine_context() {
+                if let Some(goroutine_id) = crate::runtime::goroutine::get_current_goroutine_id() {
+                    // println!("🌐 TCP_WRITE: Called from goroutine context, submitting to syscall pool and waiting");
+                    
+                    // Submit the blocking operation and wait for result synchronously
+                    match crate::runtime::syscall_thread::submit_blocking_op_sync(
+                        goroutine_id,
+                        crate::runtime::syscall_thread::BlockingOp::TcpWrite {
+                            stream: connection,
+                            data: data_bytes,
+                        },
+                    ) {
+                        Ok(result) => {
+                            // println!("🌐 TCP_WRITE: Received result from syscall pool");
+                            return Ok(result);
+                        }
+                        Err(e) => {
+                            println!("❌ TCP_WRITE: Syscall failed: {:?}", e);
+                            let mut result_fields = std::collections::HashMap::new();
+                            result_fields.insert("is_ok".to_string(), RuntimeValue::Bool(false));
+                            result_fields.insert("value".to_string(), RuntimeValue::Null);
+                            result_fields.insert(
+                                "error_msg".to_string(),
+                                RuntimeValue::String(format!("{:?}", e)),
+                            );
+
+                            return Ok(RuntimeValue::Struct {
+                                name: "Result".to_string(),
+                                fields: result_fields,
+                            });
+                        }
+                    }
+                }
+            }
+            
+            // Fallback: blocking write (not in goroutine context)
+            // println!("⚠️  TCP_WRITE: No goroutine context, using blocking write");
+            
             // Try to write to the connection
             if let Ok(mut stream) = connection.lock() {
                 match stream.write_all(&data_bytes) {

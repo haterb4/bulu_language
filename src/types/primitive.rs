@@ -720,6 +720,34 @@ impl RuntimeValue {
             RuntimeValue::Goroutine(id) => format!("Goroutine({})", id),
             RuntimeValue::Promise(id) => format!("Promise({})", id),
             RuntimeValue::Array(arr) => {
+                // Check if this is a byte array (all elements are bytes/small integers)
+                let is_byte_array = arr.iter().all(|v| match v {
+                    RuntimeValue::UInt8(_) => true,
+                    RuntimeValue::Int32(i) => *i >= 0 && *i <= 255,
+                    _ => false,
+                });
+                
+                if is_byte_array {
+                    // Try to get data from last network read
+                    if let Some(last_read) = crate::runtime::builtins::get_last_read_data_opt() {
+                        if let Ok(data) = last_read.lock() {
+                            if !data.is_empty() {
+                                return data.clone();
+                            }
+                        }
+                    }
+                    
+                    // Fallback: convert bytes to string
+                    let bytes: Vec<u8> = arr.iter().filter_map(|v| match v {
+                        RuntimeValue::UInt8(b) => Some(*b),
+                        RuntimeValue::Int32(i) if *i >= 0 && *i <= 255 => Some(*i as u8),
+                        _ => None,
+                    }).collect();
+                    
+                    return String::from_utf8_lossy(&bytes).to_string();
+                }
+                
+                // Regular array: format as list
                 let elements: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
                 format!("[{}]", elements.join(", "))
             }

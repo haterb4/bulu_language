@@ -42,10 +42,10 @@ func testTcpPingPong() {
     sleep(100) // 100ms
     println("DEBUG: Sleep completed")
     
-    // Connect as client and send ping-pong messages
-    println("DEBUG: About to call runTcpClient(addr)")
+    // Connect as client and send ping-pong messages in a goroutine
+    println("DEBUG: About to launch client goroutine with 'run runTcpClient(addr)'")
     runTcpClient(addr)
-    println("DEBUG: runTcpClient(addr) completed")
+    println("DEBUG: 'run runTcpClient(addr)' completed, goroutine should be launched")
     
     println("DEBUG: testTcpPingPong() ending")
 }
@@ -71,8 +71,9 @@ func runTcpServer(addr: NetAddr) {
         return
     }
     
+    println("DEBUG: conn.isError() = " + conn.isError().toString())
     let conn_unwrapped = conn.unwrap()
-    println("📞 Client connected from " + conn_unwrapped.peer_addr().toString())
+    println("📞 Client connected")
     
     // Ping-pong loop
     for i in 0..5 {

@@ -7,6 +7,10 @@
 pub mod gc;
 // pub mod scheduler; // Removed - using new goroutine system
 pub mod goroutine;
+pub mod netpoller;
+pub mod io_state;
+pub mod async_executor;
+pub mod syscall_thread;
 pub mod builtins;
 pub mod memory;
 pub mod error_handler;

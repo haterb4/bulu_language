@@ -4280,7 +4280,7 @@ impl Interpreter {
                 }
             }
             IrOpcode::Spawn => {
-                println!("🚀 MAIN THREAD: Processing IrOpcode::Spawn instruction with {} operands", instruction.operands.len());
+                // println!("🚀 MAIN THREAD: Processing IrOpcode::Spawn instruction with {} operands", instruction.operands.len());
 
                 // Launch a goroutine using our new goroutine system
                 if instruction.operands.is_empty() {
@@ -4293,7 +4293,7 @@ impl Interpreter {
                 if instruction.operands.len() > 1 {
                     // Multiple operands: function name + arguments
                     let function_operand = &instruction.operands[0];
-                    println!("🚀 MAIN THREAD: Spawn function operand: {:?}", function_operand);
+                    // println!("🚀 MAIN THREAD: Spawn function operand: {:?}", function_operand);
                     
                     let function_name = match function_operand {
                         IrValue::Global(name) => name.clone(),
@@ -4311,7 +4311,7 @@ impl Interpreter {
                         args.push(arg_value);
                     }
                     
-                    println!("🚀 MAIN THREAD: Spawning goroutine for function '{}' with {} args", function_name, args.len());
+                    // println!("🚀 MAIN THREAD: Spawning goroutine for function '{}' with {} args", function_name, args.len());
                     
                     // Look up the function in the program
                     if let Some(program) = &self.program {
@@ -4331,7 +4331,7 @@ impl Interpreter {
                             // Spawn the goroutine
                             let goroutine_id = crate::runtime::goroutine::spawn(task);
                             
-                            println!("🚀 MAIN THREAD: Goroutine {} spawned for function '{}', continuing main thread execution", goroutine_id, function_name);
+                            // println!("🚀 MAIN THREAD: Goroutine {} spawned for function '{}', continuing main thread execution", goroutine_id, function_name);
 
                             // Store the goroutine ID in the result register
                             if let Some(result_reg) = &instruction.result {
@@ -4343,7 +4343,7 @@ impl Interpreter {
                                 }
                             }
                             
-                            println!("🚀 MAIN THREAD: Goroutine spawn completed, main thread continues");
+                            // println!("🚀 MAIN THREAD: Goroutine spawn completed, main thread continues");
                             return Ok(());
                         } else {
                             return Err(BuluError::Other(format!(
@@ -4358,7 +4358,7 @@ impl Interpreter {
                 
                 // Single operand: legacy handling
                 let operand = &instruction.operands[0];
-                println!("🚀 MAIN THREAD: Spawn single operand: {:?}", operand);
+                // println!("🚀 MAIN THREAD: Spawn single operand: {:?}", operand);
 
                 let (function_name, args) = match operand {
                     IrValue::Function(name) => {
@@ -4428,7 +4428,7 @@ impl Interpreter {
                         // Spawn the goroutine using the proper goroutine system
                         let goroutine_id = crate::runtime::goroutine::spawn(task);
 
-                        println!("🚀 MAIN THREAD: Complex goroutine {} spawned, continuing main thread execution", goroutine_id);
+                        // println!("🚀 MAIN THREAD: Complex goroutine {} spawned, continuing main thread execution", goroutine_id);
 
                         // Store the goroutine ID in the result register
                         if let Some(result_reg) = &instruction.result {
@@ -4466,7 +4466,7 @@ impl Interpreter {
                         // Spawn the goroutine
                         let goroutine_id = crate::runtime::goroutine::spawn(task);
 
-                        println!("🚀 MAIN THREAD: Goroutine {} spawned for function '{}', continuing main thread execution", goroutine_id, function_name);
+                        // println!("🚀 MAIN THREAD: Goroutine {} spawned for function '{}', continuing main thread execution", goroutine_id, function_name);
 
                         // Store the goroutine ID in the result register
                         if let Some(result_reg) = &instruction.result {

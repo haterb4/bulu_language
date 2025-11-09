@@ -1640,7 +1640,7 @@ impl IrGenerator {
             }
 
             Expression::Run(run_expr) => {
-                println!("🔧 IR_GENERATOR: Processing Expression::Run");
+                // println!("🔧 IR_GENERATOR: Processing Expression::Run");
                 
                 // For goroutine spawn, we need to handle the expression specially
                 // We DON'T want to execute it now, but defer it for the goroutine
@@ -1659,7 +1659,7 @@ impl IrGenerator {
                             }
                         };
                         
-                        println!("🔧 IR_GENERATOR: Run expression is a function call: {}", function_name);
+                        // println!("🔧 IR_GENERATOR: Run expression is a function call: {}", function_name);
                         
                         // Generate arguments but don't execute the function yet
                         let mut operands = vec![IrValue::Global(function_name.clone())];
@@ -1669,7 +1669,7 @@ impl IrGenerator {
                             operands.push(arg_val);
                         }
                         
-                        println!("🔧 IR_GENERATOR: Emitting IrOpcode::Spawn with function '{}' and {} args", function_name, call_expr.args.len());
+                        // println!("🔧 IR_GENERATOR: Emitting IrOpcode::Spawn with function '{}' and {} args", function_name, call_expr.args.len());
                         
                         self.emit_instruction(IrInstruction {
                             opcode: IrOpcode::Spawn,
@@ -1680,7 +1680,7 @@ impl IrGenerator {
                     }
                     _ => {
                         // For other expressions, generate them normally
-                        println!("🔧 IR_GENERATOR: Run expression is not a function call, generating normally");
+                        // println!("🔧 IR_GENERATOR: Run expression is not a function call, generating normally");
                         let expr_val = self.generate_expression(&run_expr.expr)?;
                         
                         self.emit_instruction(IrInstruction {
@@ -1692,7 +1692,7 @@ impl IrGenerator {
                     }
                 }
                 
-                println!("🔧 IR_GENERATOR: IrOpcode::Spawn instruction emitted");
+                // println!("🔧 IR_GENERATOR: IrOpcode::Spawn instruction emitted");
                 
                 Ok(IrValue::Register(result_register))
             }
