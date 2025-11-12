@@ -1497,16 +1497,18 @@ fn publish_package(verbose: bool, dry_run: bool) -> Result<()> {
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
 
     rt.block_on(async {
+        println!("{} Loading project configuration...", "→".blue());
         let project = Project::load_current()?;
+        println!("{} Project loaded: {}", "✓".green(), project.config.package.name);
 
-        if verbose {
-            println!("{} Publishing package: {}", "Publishing".blue().bold(), project.config.package.name);
-        }
+        println!("{} Publishing package: {} v{}", 
+            "Publishing".blue().bold(), 
+            project.config.package.name,
+            project.config.package.version
+        );
 
         // Create tarball
-        if verbose {
-            println!("  {} Creating tarball...", "→".blue());
-        }
+        println!("  {} Creating tarball...", "→".blue());
 
         let tarball_path = project.root.join(format!("{}-{}.tar.gz", 
             project.config.package.name, 
@@ -1527,25 +1529,39 @@ fn publish_package(verbose: bool, dry_run: bool) -> Result<()> {
         // Add src directory
         let src_dir = project.root.join("src");
         if src_dir.exists() {
+            println!("    {} Adding src directory: {}", "→".blue(), src_dir.display());
             builder.append_dir_all("src", &src_dir)
                 .map_err(|e| BuluError::Other(format!("Failed to add src: {}", e)))?;
+            println!("    {} src directory added", "✓".green());
+        } else {
+            println!("    {} src directory not found", "⚠".yellow());
         }
 
         // Add lang.toml
+        println!("    {} Adding lang.toml", "→".blue());
         builder.append_path_with_name(project.root.join("lang.toml"), "lang.toml")
             .map_err(|e| BuluError::Other(format!("Failed to add lang.toml: {}", e)))?;
+        println!("    {} lang.toml added", "✓".green());
 
         // Add README if exists
         let readme_path = project.root.join("README.md");
         if readme_path.exists() {
+            println!("    {} Adding README.md", "→".blue());
             builder.append_path_with_name(&readme_path, "README.md")
                 .map_err(|e| BuluError::Other(format!("Failed to add README: {}", e)))?;
+            println!("    {} README.md added", "✓".green());
         }
 
-        builder.finish()
-            .map_err(|e| BuluError::Other(format!("Failed to finish tarball: {}", e)))?;
+        let encoder = builder.into_inner()
+            .map_err(|e| BuluError::Other(format!("Failed to finish tar builder: {}", e)))?;
+        
+        encoder.finish()
+            .map_err(|e| BuluError::Other(format!("Failed to finish gzip encoder: {}", e)))?;
+
+        println!("  {} Tarball created: {}", "✓".green(), tarball_path.display());
 
         // Read and encode tarball
+        println!("  {} Reading tarball...", "→".blue());
         let mut tarball_file = fs::File::open(&tarball_path)
             .map_err(|e| BuluError::Other(format!("Failed to read tarball: {}", e)))?;
         
@@ -1553,8 +1569,7 @@ fn publish_package(verbose: bool, dry_run: bool) -> Result<()> {
         tarball_file.read_to_end(&mut tarball_data)
             .map_err(|e| BuluError::Other(format!("Failed to read tarball data: {}", e)))?;
 
-        use base64::{Engine as _, engine::general_purpose};
-        let tarball_base64 = general_purpose::STANDARD.encode(&tarball_data);
+        println!("  {} Tarball size: {} bytes", "✓".green(), tarball_data.len());
 
         if dry_run {
             println!("Would publish: {} v{}", project.config.package.name, project.config.package.version);
@@ -1564,6 +1579,7 @@ fn publish_package(verbose: bool, dry_run: bool) -> Result<()> {
         }
 
         // Prepare dependencies
+        println!("  {} Preparing package metadata...", "→".blue());
         let mut dependencies = std::collections::HashMap::new();
         for (name, spec) in &project.config.dependencies {
             let version_str = match spec {
@@ -1574,8 +1590,10 @@ fn publish_package(verbose: bool, dry_run: bool) -> Result<()> {
             };
             dependencies.insert(name.clone(), version_str);
         }
+        println!("  {} Dependencies: {}", "✓".green(), dependencies.len());
 
         // Create publish request
+        println!("  {} Creating publish request...", "→".blue());
         let request = PublishRequest {
             name: project.config.package.name.clone(),
             version: project.config.package.version.clone(),
@@ -1585,21 +1603,31 @@ fn publish_package(verbose: bool, dry_run: bool) -> Result<()> {
             repository: project.config.package.repository.clone(),
             keywords: project.config.package.keywords.clone().unwrap_or_default(),
             dependencies,
-            tarball: tarball_base64,
+            tarball: tarball_data,
         };
 
         // Publish
-        if verbose {
-            println!("  {} Uploading to registry...", "→".blue());
-        }
-
         let registry_url = std::env::var("BULU_REGISTRY")
             .unwrap_or_else(|_| "https://bulu-language.onrender.com".to_string());
 
-        let client = RegistryHttpClient::new(registry_url);
-        client.publish(request).await?;
+        println!("  {} Uploading to registry: {}", "→".blue(), registry_url);
+        println!("  {} Package: {} v{}", "→".blue(), request.name, request.version);
+
+        let client = RegistryHttpClient::new(registry_url.clone());
+        
+        match client.publish(request).await {
+            Ok(_) => {
+                println!("  {} Upload successful!", "✓".green());
+            }
+            Err(e) => {
+                eprintln!("  {} Upload failed: {}", "✗".red(), e);
+                fs::remove_file(&tarball_path).ok();
+                return Err(e);
+            }
+        }
 
         // Clean up tarball
+        println!("  {} Cleaning up tarball...", "→".blue());
         fs::remove_file(&tarball_path).ok();
 
         println!("{} Published: {} v{}", 

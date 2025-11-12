@@ -22,7 +22,7 @@ pub struct PublishRequest {
     pub repository: Option<String>,
     pub keywords: Vec<String>,
     pub dependencies: HashMap<String, String>,
-    pub tarball: String, // Base64 encoded
+    pub tarball: Vec<u8>, // Raw bytes
 }
 
 #[derive(Debug, Deserialize)]
@@ -197,18 +197,23 @@ impl RegistryHttpClient {
 
     /// Publish a package
     pub async fn publish(&self, request: PublishRequest) -> Result<()> {
-        let url = format!("{}/api/publish", self.base_url);
+        let url = format!("{}/api/packages/{}/{}", self.base_url, request.name, request.version);
         
         let response = self.client
             .post(&url)
             .json(&request)
             .send()
             .await
-            .map_err(|e| BuluError::Other(format!("Failed to publish: {}", e)))?;
+            .map_err(|e| BuluError::Other(format!("Network error while publishing to {}: {}", self.base_url, e)))?;
 
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(BuluError::Other(format!("Publish failed: {}", error_text)));
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unable to read error response".to_string());
+            return Err(BuluError::Other(format!(
+                "Registry returned error (HTTP {}): {}",
+                status.as_u16(),
+                error_text
+            )));
         }
 
         Ok(())
