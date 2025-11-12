@@ -53,8 +53,17 @@ struct PackageInfo {
 
 #[derive(Debug, Serialize)]
 struct SearchResponse {
-    packages: Vec<PackageInfo>,
+    packages: Vec<SearchPackage>,
     total: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct SearchPackage {
+    name: String,
+    version: String,
+    description: Option<String>,
+    downloads: i64,
+    updated_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -494,6 +503,8 @@ async fn search_packages(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let mut result = Vec::new();
+    
+    // Flatten: create one SearchPackage entry per version
     for pkg in packages {
         let versions = state
             .db
@@ -501,51 +512,16 @@ async fn search_packages(
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-        let keywords = state
-            .db
-            .get_keywords(pkg.id)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-        let total_downloads = state
-            .db
-            .get_total_downloads(pkg.id)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-        let mut version_infos = Vec::new();
+        // Add each version as a separate search result
         for v in versions {
-            let authors = state
-                .db
-                .get_authors(v.id)
-                .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-            let dependencies = state
-                .db
-                .get_dependencies(v.id)
-                .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-            version_infos.push(VersionInfo {
+            result.push(SearchPackage {
+                name: pkg.name.clone(),
                 version: v.version,
-                description: v.description,
-                license: v.license,
-                authors,
-                dependencies,
-                published_at: v.published_at,
+                description: v.description.or(pkg.description.clone()),
                 downloads: v.downloads,
-                checksum: v.checksum,
+                updated_at: v.published_at.to_rfc3339(),
             });
         }
-
-        result.push(PackageInfo {
-            name: pkg.name,
-            description: pkg.description,
-            repository: pkg.repository,
-            versions: version_infos,
-            keywords,
-            total_downloads,
-        });
     }
 
     let total = result.len();
