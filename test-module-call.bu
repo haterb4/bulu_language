@@ -1,0 +1,7 @@
+import "std/os" as os
+
+func main() {
+    println("Calling os.args()")
+    let myArgs = os.args()
+    println("Done")
+}

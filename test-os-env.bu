@@ -1,0 +1,18 @@
+import { getEnv, cwd } from "std/os"
+
+func main() {
+    println("=== Test getEnv et cwd ===")
+    
+    // Test getEnv
+    let home = getEnv("HOME")
+    println("HOME = " + home)
+    
+    let user = getEnv("USER")
+    println("USER = " + user)
+    
+    // Test cwd
+    let dir = cwd()
+    println("Current directory: " + dir)
+    
+    println("✅ Test réussi!")
+}

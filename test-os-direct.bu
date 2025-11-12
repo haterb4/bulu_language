@@ -1,0 +1,21 @@
+// Test direct sans import
+
+func main() {
+    println("=== Test direct des fonctions OS ===")
+    
+    // Appeler directement les builtins
+    let myArgs = args()
+    println("Nombre d'arguments: " + len(myArgs).toString())
+    
+    for i in 0..len(myArgs) {
+        println("  args[" + i.toString() + "] = " + myArgs[i])
+    }
+    
+    println("")
+    
+    let currentDir = cwd()
+    println("Répertoire courant: " + currentDir)
+    
+    println("")
+    println("✅ Test réussi!")
+}

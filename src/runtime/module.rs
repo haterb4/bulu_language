@@ -61,7 +61,7 @@ impl ModuleResolver {
         // Create mock standard library modules for now
         let std_modules = vec![
             "io", "fmt", "strings", "arrays", "math", "time", "sync", "os", "path", "http", "net",
-            "json", "xml", "csv", "crypto", "db", "test", "random",
+            "json", "xml", "csv", "crypto", "db", "test", "random", "flag",
         ];
 
         for module_name in std_modules {
@@ -104,6 +104,35 @@ impl ModuleResolver {
                 }
                 "time" => {
                     exports.insert("sleep".to_string(), RuntimeValue::Null);
+                }
+                "os" => {
+                    exports.insert("args".to_string(), RuntimeValue::Null);
+                    exports.insert("getEnv".to_string(), RuntimeValue::Null);
+                    exports.insert("cwd".to_string(), RuntimeValue::Null);
+                    exports.insert("exit".to_string(), RuntimeValue::Null);
+                }
+                "flag" => {
+                    exports.insert("String".to_string(), RuntimeValue::String("function:String".to_string()));
+                    // Integer types
+                    exports.insert("Int8".to_string(), RuntimeValue::String("function:Int8".to_string()));
+                    exports.insert("Int16".to_string(), RuntimeValue::String("function:Int16".to_string()));
+                    exports.insert("Int32".to_string(), RuntimeValue::String("function:Int32".to_string()));
+                    exports.insert("Int64".to_string(), RuntimeValue::String("function:Int64".to_string()));
+                    // Unsigned integer types
+                    exports.insert("UInt8".to_string(), RuntimeValue::String("function:UInt8".to_string()));
+                    exports.insert("UInt16".to_string(), RuntimeValue::String("function:UInt16".to_string()));
+                    exports.insert("UInt32".to_string(), RuntimeValue::String("function:UInt32".to_string()));
+                    exports.insert("UInt64".to_string(), RuntimeValue::String("function:UInt64".to_string()));
+                    exports.insert("Byte".to_string(), RuntimeValue::String("function:Byte".to_string()));
+                    // Other types
+                    exports.insert("Bool".to_string(), RuntimeValue::String("function:Bool".to_string()));
+                    exports.insert("Float32".to_string(), RuntimeValue::String("function:Float32".to_string()));
+                    exports.insert("Float64".to_string(), RuntimeValue::String("function:Float64".to_string()));
+                    // Functions
+                    exports.insert("Parse".to_string(), RuntimeValue::String("function:Parse".to_string()));
+                    exports.insert("Get".to_string(), RuntimeValue::String("function:Get".to_string()));
+                    exports.insert("Args".to_string(), RuntimeValue::String("function:Args".to_string()));
+                    exports.insert("Usage".to_string(), RuntimeValue::String("function:Usage".to_string()));
                 }
                 _ => {
                     // Add a generic export for other modules

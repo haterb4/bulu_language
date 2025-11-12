@@ -8,6 +8,8 @@ pub mod resolver;
 pub mod commands;
 pub mod lockfile;
 pub mod vendor;
+pub mod local_registry;
+pub mod http_client;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

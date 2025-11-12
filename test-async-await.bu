@@ -1,0 +1,83 @@
+// Test async/await, select et yield
+
+async func fetchData(id: int32): string {
+    println("Fetching data for ID: " + id.toString())
+    sleep(100) // Simulate async operation
+    return "Data for ID " + id.toString()
+}
+
+async func processData(data: string): string {
+    println("Processing: " + data)
+    sleep(50)
+    return "Processed: " + data
+}
+
+func testAsyncAwait() {
+    println("=== Test Async/Await ===")
+    
+    // Test simple async/await
+    let result = await fetchData(1)
+    println("Result: " + result)
+    
+    // Test chained async/await
+    let data = await fetchData(2)
+    let processed = await processData(data)
+    println("Final: " + processed)
+    
+    println("✅ Async/Await test passed")
+}
+
+func testSelect() {
+    println("\n=== Test Select ===")
+    
+    let ch1 = make(chan string, 1)
+    let ch2 = make(chan int32, 1)
+    
+    // Send values to channels
+    ch1 <- "Hello"
+    ch2 <- 42
+    
+    // Select from multiple channels (Bulu syntax with ->)
+    // Using := for channel receive with variable binding (like Go)
+    select {
+        msg := <-ch1 -> println("Received from ch1: " + msg)
+        num := <-ch2 -> println("Received from ch2: " + num.toString())
+        _ -> println("No data available")
+    }
+    
+    println("✅ Select test passed")
+}
+
+func producer(ch: chan<- int32, count: int32) {
+    for i in 0..<count {
+        ch <- i
+        println("Produced: " + string(i))
+    }
+    close(ch)
+}
+
+func consumer(ch: <-chan int32) {
+    for value in ch {
+        println("Consumed: " + string(value))
+    }
+}
+
+func testChannels() {
+    let ch = make(chan int32, 5)
+    
+    run producer(ch, 10)
+    run consumer(ch)
+    
+    // Wait a bit for goroutines to finish
+    sleep(100)
+    
+    println("✅ Channel test passed")
+}
+
+func main() {
+    testAsyncAwait()
+    testSelect()
+    testChannels()
+    
+    println("\n🎉 All tests passed!")
+}

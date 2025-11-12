@@ -1,0 +1,24 @@
+import "std/os" as os
+
+func main() {
+    println("=== Test import avec alias ===")
+    
+    // Test os.args()
+    let myArgs = os.args()
+    println("Arguments: " + len(myArgs).toString())
+    for i in 0..len(myArgs) {
+        println("  [" + i.toString() + "] = " + myArgs[i])
+    }
+    
+    // Test os.cwd()
+    let dir = os.cwd()
+    println("")
+    println("Répertoire courant: " + dir)
+    
+    // Test os.getEnv()
+    let home = os.getEnv("HOME")
+    println("HOME: " + home)
+    
+    println("")
+    println("✅ Tous les tests réussis!")
+}

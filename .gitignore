@@ -48,6 +48,9 @@ node_modules/
 # dotenv environment variables file
 .env
 .env.test
+.env.example
+*.env
+*.env.example
 
 # Bulu specific
 *.bu.o
@@ -64,3 +67,9 @@ node_modules/
 
 # Documentation build
 /docs/build/
+/registry-server/target/
+/registry-server/.env
+/registry-server/.env.test
+/registry-server/.env.example
+/registry-server/migrations/
+registry-server/target/

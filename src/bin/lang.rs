@@ -52,11 +52,12 @@ fn main() -> Result<()> {
         .subcommand(
             Command::new("run")
                 .about("Run a Bulu program (bytecode by default, source with --source)")
+                .trailing_var_arg(true)
                 .arg(
                     Arg::new("file")
-                        .help("Bulu file to run (bytecode or source)")
+                        .help("Bulu file to run followed by program arguments")
                         .value_name("FILE")
-                        .index(1)
+                        .num_args(1..)
                         .required(false),
                 )
                 .arg(
@@ -70,7 +71,9 @@ fn main() -> Result<()> {
                         .long("release")
                         .help("Run in release mode (only for source)")
                         .action(clap::ArgAction::SetTrue),
-                ),
+                )
+                .allow_external_subcommands(false)
+                .disable_help_subcommand(false),
         )
         .subcommand(
             Command::new("test")
@@ -330,10 +333,23 @@ fn main() -> Result<()> {
             build_project(release, verbose, target)
         }
         Some(("run", sub_matches)) => {
-            let file = sub_matches.get_one::<String>("file");
             let release = sub_matches.get_flag("release");
             let is_source = sub_matches.get_flag("source");
-            run_project(file, release, is_source)
+            
+            // Get all positional arguments (file + args)
+            let positional: Vec<String> = sub_matches
+                .get_many::<String>("file")
+                .map(|vals| vals.map(|s| s.to_string()).collect())
+                .unwrap_or_default();
+            
+            let file = positional.first();
+            let args = if positional.len() > 1 {
+                positional[1..].to_vec()
+            } else {
+                Vec::new()
+            };
+            
+            run_project(file, release, is_source, args)
         }
         Some(("test", sub_matches)) => {
             let verbose = sub_matches.get_flag("verbose");
@@ -504,7 +520,7 @@ fn find_project_entrypoint() -> Result<PathBuf> {
     ))
 }
 
-fn run_project(file: Option<&String>, _release: bool, is_source: bool) -> Result<()> {
+fn run_project(file: Option<&String>, _release: bool, is_source: bool, args: Vec<String>) -> Result<()> {
     if let Some(file_path) = file {
         // Run a specific file
         let path = Path::new(file_path);
@@ -514,7 +530,7 @@ fn run_project(file: Option<&String>, _release: bool, is_source: bool) -> Result
 
         if is_source {
             // Treat as source code
-            execute_source_file(path)?;
+            execute_source_file_with_args(path, Some(args))?;
         } else {
             // Treat as bytecode (default)
             execute_bytecode_file(path)?;
@@ -524,7 +540,7 @@ fn run_project(file: Option<&String>, _release: bool, is_source: bool) -> Result
         // No file specified - look for project entrypoint
         if is_source {
             let entrypoint = find_project_entrypoint()?;
-            execute_source_file(&entrypoint)?;
+            execute_source_file_with_args(&entrypoint, Some(args))?;
         } else {
             // Look for compiled bytecode in target/debug
             let bytecode_path = find_project_bytecode()?;
@@ -536,6 +552,22 @@ fn run_project(file: Option<&String>, _release: bool, is_source: bool) -> Result
 
 /// Execute a Bulu source file with full compilation pipeline
 fn execute_source_file(path: &Path) -> Result<RuntimeValue> {
+    execute_source_file_with_args(path, None)
+}
+
+/// Execute a Bulu source file with optional program arguments
+fn execute_source_file_with_args(path: &Path, extra_args: Option<Vec<String>>) -> Result<RuntimeValue> {
+    // Initialize program arguments for os module
+    let file_path_str = path.to_string_lossy().to_string();
+    let mut program_args = vec![file_path_str.clone()];
+    
+    // Add extra arguments if provided
+    if let Some(args) = extra_args {
+        program_args.extend(args);
+    }
+    
+    bulu::std::os::init_args(program_args);
+    
     // Read source code
     let source = fs::read_to_string(path)
         .map_err(|e| BuluError::Other(format!("Failed to read file: {}", e)))?;
@@ -611,13 +643,73 @@ fn execute_source_file(path: &Path) -> Result<RuntimeValue> {
         // For now, we'll add the imported symbols as string identifiers
         // This allows the interpreter to recognize them as available globals
         match imported_symbol.symbol_type {
+            SymbolType::Module => {
+                // For modules imported with alias (e.g., import "std/os" as os)
+                // Create a map with the module's exports
+                let mut module_exports = std::collections::HashMap::new();
+                
+                // Handle std modules
+                if imported_symbol.module_path.starts_with("std/") || imported_symbol.module_path.starts_with("std.") {
+                    let module_name = imported_symbol.module_path
+                        .strip_prefix("std/")
+                        .or_else(|| imported_symbol.module_path.strip_prefix("std."))
+                        .unwrap_or(&imported_symbol.module_path);
+                    
+                    match module_name {
+                        "os" => {
+                            // Add os module exports as function references
+                            module_exports.insert("args".to_string(), RuntimeValue::String("function:args".to_string()));
+                            module_exports.insert("getEnv".to_string(), RuntimeValue::String("function:getEnv".to_string()));
+                            module_exports.insert("cwd".to_string(), RuntimeValue::String("function:cwd".to_string()));
+                            module_exports.insert("exit".to_string(), RuntimeValue::String("function:exit".to_string()));
+                        }
+                        "net" => {
+                            module_exports.insert("TcpServer".to_string(), RuntimeValue::String("struct:TcpServer".to_string()));
+                            module_exports.insert("TcpConnection".to_string(), RuntimeValue::String("struct:TcpConnection".to_string()));
+                            module_exports.insert("UdpConnection".to_string(), RuntimeValue::String("struct:UdpConnection".to_string()));
+                            module_exports.insert("NetAddr".to_string(), RuntimeValue::String("struct:NetAddr".to_string()));
+                        }
+                        "time" => {
+                            module_exports.insert("sleep".to_string(), RuntimeValue::String("function:sleep".to_string()));
+                        }
+                        "flag" => {
+                            // Add flag module exports as function references
+                            module_exports.insert("String".to_string(), RuntimeValue::String("function:String".to_string()));
+                            // Integer types
+                            module_exports.insert("Int8".to_string(), RuntimeValue::String("function:Int8".to_string()));
+                            module_exports.insert("Int16".to_string(), RuntimeValue::String("function:Int16".to_string()));
+                            module_exports.insert("Int32".to_string(), RuntimeValue::String("function:Int32".to_string()));
+                            module_exports.insert("Int64".to_string(), RuntimeValue::String("function:Int64".to_string()));
+                            // Unsigned integer types
+                            module_exports.insert("UInt8".to_string(), RuntimeValue::String("function:UInt8".to_string()));
+                            module_exports.insert("UInt16".to_string(), RuntimeValue::String("function:UInt16".to_string()));
+                            module_exports.insert("UInt32".to_string(), RuntimeValue::String("function:UInt32".to_string()));
+                            module_exports.insert("UInt64".to_string(), RuntimeValue::String("function:UInt64".to_string()));
+                            module_exports.insert("Byte".to_string(), RuntimeValue::String("function:Byte".to_string()));
+                            // Other types
+                            module_exports.insert("Bool".to_string(), RuntimeValue::String("function:Bool".to_string()));
+                            module_exports.insert("Float32".to_string(), RuntimeValue::String("function:Float32".to_string()));
+                            module_exports.insert("Float64".to_string(), RuntimeValue::String("function:Float64".to_string()));
+                            // Functions
+                            module_exports.insert("Parse".to_string(), RuntimeValue::String("function:Parse".to_string()));
+                            module_exports.insert("Get".to_string(), RuntimeValue::String("function:Get".to_string()));
+                            module_exports.insert("Args".to_string(), RuntimeValue::String("function:Args".to_string()));
+                            module_exports.insert("Usage".to_string(), RuntimeValue::String("function:Usage".to_string()));
+                        }
+                        _ => {}
+                    }
+                }
+                
+                interpreter.set_global(name.clone(), RuntimeValue::Map(module_exports));
+            }
             SymbolType::Struct => {
                 // For types like NetAddr, TcpServer, etc., add them as struct identifiers
                 interpreter.set_global(name.clone(), RuntimeValue::String(format!("struct:{}", name)));
             }
             SymbolType::Function => {
                 // For functions like sleep, add them as function identifiers
-                interpreter.set_global(name.clone(), RuntimeValue::String(format!("function:{}", name)));
+                // Use original_name to preserve the actual function name even with aliases
+                interpreter.set_global(name.clone(), RuntimeValue::String(format!("function:{}", imported_symbol.original_name)));
             }
             _ => {
                 // For other symbols, add them as generic identifiers
@@ -1039,124 +1131,484 @@ fn run_benchmarks(verbose: bool) -> Result<()> {
 // Package management functions
 
 fn add_dependency(package: &str, version: Option<&str>, verbose: bool) -> Result<()> {
+    use bulu::package::http_client::RegistryHttpClient;
+    use std::fs;
+    use std::io::Write;
+
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
 
     rt.block_on(async {
-        let project = Project::load_current()?;
-        let mut package_manager = PackageManager::new(project)?;
+        if verbose {
+            println!("{} Adding dependency: {}", "Adding".green().bold(), package);
+        }
 
-        let options = PackageOptions {
-            verbose,
-            dry_run: false,
-            force: false,
+        // Load project
+        let mut project = Project::load_current()?;
+        
+        // Get registry URL from config or use default
+        let registry_url = std::env::var("BULU_REGISTRY")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+
+        // Create HTTP client
+        let client = RegistryHttpClient::new(registry_url);
+
+        // Find the version to use
+        let version_to_use = if let Some(v) = version {
+            v.to_string()
+        } else {
+            // Get latest version
+            let versions = client.get_package_versions(package).await?;
+            versions.last()
+                .ok_or_else(|| BuluError::Other(format!("No versions found for {}", package)))?
+                .clone()
         };
 
-        package_manager
-            .add_dependency(package, version, &options)
-            .await
+        if verbose {
+            println!("  {} Using version: {}", "→".blue(), version_to_use);
+        }
+
+        // Add to dependencies in lang.toml
+        let version_spec = if version.is_some() {
+            version_to_use.clone()
+        } else {
+            format!("^{}", version_to_use)
+        };
+
+        project.config.dependencies.insert(
+            package.to_string(),
+            bulu::project::DependencySpec::Simple(version_spec.clone())
+        );
+
+        // Save lang.toml
+        let config_content = toml::to_string_pretty(&project.config)
+            .map_err(|e| BuluError::Other(format!("Failed to serialize config: {}", e)))?;
+        
+        fs::write(project.root.join("lang.toml"), config_content)
+            .map_err(|e| BuluError::Other(format!("Failed to write lang.toml: {}", e)))?;
+
+        // Download and install the package
+        if verbose {
+            println!("  {} Downloading {}...", "→".blue(), package);
+        }
+
+        let tarball = client.download_package(package, &version_to_use).await?;
+
+        // Extract to vendor directory
+        let vendor_dir = project.root.join("vendor").join(package);
+        fs::create_dir_all(&vendor_dir)
+            .map_err(|e| BuluError::Other(format!("Failed to create vendor directory: {}", e)))?;
+
+        // Extract tarball
+        use flate2::read::GzDecoder;
+        use tar::Archive;
+        use std::io::Cursor;
+
+        let cursor = Cursor::new(tarball);
+        let decoder = GzDecoder::new(cursor);
+        let mut archive = Archive::new(decoder);
+        
+        archive.unpack(&vendor_dir)
+            .map_err(|e| BuluError::Other(format!("Failed to extract package: {}", e)))?;
+
+        println!("{} Added {} v{}", "Success".green().bold(), package, version_to_use);
+
+        Ok(())
     })
 }
 
 fn remove_dependency(package: &str, verbose: bool) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
+    use std::fs;
 
-    rt.block_on(async {
-        let project = Project::load_current()?;
-        let mut package_manager = PackageManager::new(project)?;
+    if verbose {
+        println!("{} Removing dependency: {}", "Removing".red().bold(), package);
+    }
 
-        let options = PackageOptions {
-            verbose,
-            dry_run: false,
-            force: false,
-        };
+    let mut project = Project::load_current()?;
 
-        package_manager.remove_dependency(package, &options).await
-    })
+    if !project.config.dependencies.contains_key(package) {
+        return Err(BuluError::Other(format!("Dependency {} not found", package)));
+    }
+
+    // Remove from dependencies
+    project.config.dependencies.remove(package);
+
+    // Save lang.toml
+    let config_content = toml::to_string_pretty(&project.config)
+        .map_err(|e| BuluError::Other(format!("Failed to serialize config: {}", e)))?;
+    
+    fs::write(project.root.join("lang.toml"), config_content)
+        .map_err(|e| BuluError::Other(format!("Failed to write lang.toml: {}", e)))?;
+
+    // Remove from vendor directory
+    let vendor_dir = project.root.join("vendor").join(package);
+    if vendor_dir.exists() {
+        fs::remove_dir_all(&vendor_dir)
+            .map_err(|e| BuluError::Other(format!("Failed to remove vendor directory: {}", e)))?;
+    }
+
+    println!("{} Removed dependency: {}", "Success".green().bold(), package);
+
+    Ok(())
 }
 
 fn update_dependencies(verbose: bool) -> Result<()> {
+    use bulu::package::http_client::RegistryHttpClient;
+    use std::fs;
+
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
 
     rt.block_on(async {
+        if verbose {
+            println!("{} Updating dependencies...", "Updating".blue().bold());
+        }
+
         let project = Project::load_current()?;
-        let mut package_manager = PackageManager::new(project)?;
+        
+        if project.config.dependencies.is_empty() {
+            println!("No dependencies to update");
+            return Ok(());
+        }
 
-        let options = PackageOptions {
-            verbose,
-            dry_run: false,
-            force: false,
-        };
+        let registry_url = std::env::var("BULU_REGISTRY")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
 
-        package_manager.update_dependencies(&options).await
+        let client = RegistryHttpClient::new(registry_url);
+
+        let mut updated = 0;
+
+        for (name, _spec) in &project.config.dependencies {
+            if verbose {
+                println!("  {} Updating {}...", "→".blue(), name);
+            }
+
+            // Get latest version
+            let versions = client.get_package_versions(name).await?;
+            let latest_version = versions.last()
+                .ok_or_else(|| BuluError::Other(format!("No versions found for {}", name)))?;
+
+            // Download
+            let tarball = client.download_package(name, latest_version).await?;
+
+            // Remove old version
+            let vendor_dir = project.root.join("vendor").join(name);
+            if vendor_dir.exists() {
+                fs::remove_dir_all(&vendor_dir)
+                    .map_err(|e| BuluError::Other(format!("Failed to remove old version: {}", e)))?;
+            }
+
+            // Extract new version
+            fs::create_dir_all(&vendor_dir)
+                .map_err(|e| BuluError::Other(format!("Failed to create vendor directory: {}", e)))?;
+
+            use flate2::read::GzDecoder;
+            use tar::Archive;
+            use std::io::Cursor;
+
+            let cursor = Cursor::new(tarball);
+            let decoder = GzDecoder::new(cursor);
+            let mut archive = Archive::new(decoder);
+            
+            archive.unpack(&vendor_dir)
+                .map_err(|e| BuluError::Other(format!("Failed to extract package: {}", e)))?;
+
+            if verbose {
+                println!("    {} {} v{}", "✓".green(), name, latest_version);
+            }
+
+            updated += 1;
+        }
+
+        println!("{} Updated {} dependencies", "Success".green().bold(), updated);
+
+        Ok(())
     })
 }
 
 fn install_dependencies(verbose: bool) -> Result<()> {
+    use bulu::package::http_client::RegistryHttpClient;
+    use std::fs;
+
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
 
     rt.block_on(async {
+        if verbose {
+            println!("{} Installing dependencies...", "Installing".blue().bold());
+        }
+
         let project = Project::load_current()?;
-        let mut package_manager = PackageManager::new(project)?;
+        
+        if project.config.dependencies.is_empty() {
+            println!("No dependencies to install");
+            return Ok(());
+        }
 
-        let options = PackageOptions {
-            verbose,
-            dry_run: false,
-            force: false,
-        };
+        let registry_url = std::env::var("BULU_REGISTRY")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
 
-        package_manager.install_dependencies(&options).await
+        let client = RegistryHttpClient::new(registry_url);
+
+        let mut installed = 0;
+
+        for (name, spec) in &project.config.dependencies {
+            if verbose {
+                println!("  {} Installing {}...", "→".blue(), name);
+            }
+
+            // Parse version spec
+            let version_str = match spec {
+                bulu::project::DependencySpec::Simple(v) => v.clone(),
+                bulu::project::DependencySpec::Detailed { version, .. } => {
+                    version.clone().unwrap_or_else(|| "*".to_string())
+                }
+            };
+
+            // Get versions and find matching one
+            let versions = client.get_package_versions(name).await?;
+            let version_to_use = versions.last()
+                .ok_or_else(|| BuluError::Other(format!("No versions found for {}", name)))?;
+
+            // Download
+            let tarball = client.download_package(name, version_to_use).await?;
+
+            // Extract
+            let vendor_dir = project.root.join("vendor").join(name);
+            fs::create_dir_all(&vendor_dir)
+                .map_err(|e| BuluError::Other(format!("Failed to create vendor directory: {}", e)))?;
+
+            use flate2::read::GzDecoder;
+            use tar::Archive;
+            use std::io::Cursor;
+
+            let cursor = Cursor::new(tarball);
+            let decoder = GzDecoder::new(cursor);
+            let mut archive = Archive::new(decoder);
+            
+            archive.unpack(&vendor_dir)
+                .map_err(|e| BuluError::Other(format!("Failed to extract package: {}", e)))?;
+
+            if verbose {
+                println!("    {} {} v{}", "✓".green(), name, version_to_use);
+            }
+
+            installed += 1;
+        }
+
+        println!("{} Installed {} dependencies", "Success".green().bold(), installed);
+
+        Ok(())
     })
 }
 
 fn list_dependencies(verbose: bool) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
+    let project = Project::load_current()?;
 
-    rt.block_on(async {
-        let project = Project::load_current()?;
-        let package_manager = PackageManager::new(project)?;
+    if project.config.dependencies.is_empty() {
+        println!("No dependencies");
+        return Ok(());
+    }
 
-        let options = PackageOptions {
-            verbose,
-            dry_run: false,
-            force: false,
+    println!("{}", "Dependencies:".bold());
+    
+    for (name, spec) in &project.config.dependencies {
+        let version_str = match spec {
+            bulu::project::DependencySpec::Simple(v) => v.clone(),
+            bulu::project::DependencySpec::Detailed { version, path, git, .. } => {
+                if let Some(path) = path {
+                    format!("path:{}", path)
+                } else if let Some(git) = git {
+                    format!("git:{}", git)
+                } else if let Some(version) = version {
+                    version.clone()
+                } else {
+                    "*".to_string()
+                }
+            }
         };
 
-        package_manager.list_dependencies(&options).await
-    })
+        println!("  {} {}", 
+            name.cyan(), 
+            version_str.green()
+        );
+
+        if verbose {
+            // Check if installed
+            let vendor_path = project.root.join("vendor").join(name);
+            if vendor_path.exists() {
+                println!("    {} Installed at {}", "✓".green(), vendor_path.display());
+            } else {
+                println!("    {} Not installed", "✗".red());
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn search_packages(query: &str, limit: Option<usize>) -> Result<()> {
+    use bulu::package::http_client::RegistryHttpClient;
+
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
 
     rt.block_on(async {
-        let project = Project::load_current()?;
-        let package_manager = PackageManager::new(project)?;
+        println!("{} Searching for: {}", "Searching".blue().bold(), query);
 
-        package_manager.search_packages(query, limit).await
+        let registry_url = std::env::var("BULU_REGISTRY")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+
+        let client = RegistryHttpClient::new(registry_url);
+        let results = client.search(query, limit).await?;
+
+        if results.packages.is_empty() {
+            println!("No packages found matching '{}'", query);
+            return Ok(());
+        }
+
+        println!("Found {} packages:", results.packages.len());
+        
+        for package in &results.packages {
+            println!("  {} {} - {}", 
+                package.name.cyan().bold(),
+                package.version.green(),
+                package.description.as_deref().unwrap_or("No description").dimmed()
+            );
+            println!("    {} downloads", 
+                package.downloads.to_string().yellow()
+            );
+        }
+
+        if results.total > results.packages.len() {
+            println!("\n... and {} more results", results.total - results.packages.len());
+        }
+
+        Ok(())
     })
 }
 
 fn publish_package(verbose: bool, dry_run: bool) -> Result<()> {
+    use bulu::package::http_client::{RegistryHttpClient, PublishRequest};
+    use std::fs;
+    use std::io::Read;
+
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| BuluError::Other(format!("Failed to create async runtime: {}", e)))?;
 
     rt.block_on(async {
         let project = Project::load_current()?;
-        let package_manager = PackageManager::new(project)?;
 
-        let options = PackageOptions {
-            verbose,
-            dry_run,
-            force: false,
+        if verbose {
+            println!("{} Publishing package: {}", "Publishing".blue().bold(), project.config.package.name);
+        }
+
+        // Create tarball
+        if verbose {
+            println!("  {} Creating tarball...", "→".blue());
+        }
+
+        let tarball_path = project.root.join(format!("{}-{}.tar.gz", 
+            project.config.package.name, 
+            project.config.package.version
+        ));
+
+        // Create tar.gz
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use tar::Builder;
+
+        let tarball_file = fs::File::create(&tarball_path)
+            .map_err(|e| BuluError::Other(format!("Failed to create tarball: {}", e)))?;
+        
+        let encoder = GzEncoder::new(tarball_file, Compression::default());
+        let mut builder = Builder::new(encoder);
+
+        // Add src directory
+        let src_dir = project.root.join("src");
+        if src_dir.exists() {
+            builder.append_dir_all("src", &src_dir)
+                .map_err(|e| BuluError::Other(format!("Failed to add src: {}", e)))?;
+        }
+
+        // Add lang.toml
+        builder.append_path_with_name(project.root.join("lang.toml"), "lang.toml")
+            .map_err(|e| BuluError::Other(format!("Failed to add lang.toml: {}", e)))?;
+
+        // Add README if exists
+        let readme_path = project.root.join("README.md");
+        if readme_path.exists() {
+            builder.append_path_with_name(&readme_path, "README.md")
+                .map_err(|e| BuluError::Other(format!("Failed to add README: {}", e)))?;
+        }
+
+        builder.finish()
+            .map_err(|e| BuluError::Other(format!("Failed to finish tarball: {}", e)))?;
+
+        // Read and encode tarball
+        let mut tarball_file = fs::File::open(&tarball_path)
+            .map_err(|e| BuluError::Other(format!("Failed to read tarball: {}", e)))?;
+        
+        let mut tarball_data = Vec::new();
+        tarball_file.read_to_end(&mut tarball_data)
+            .map_err(|e| BuluError::Other(format!("Failed to read tarball data: {}", e)))?;
+
+        use base64::{Engine as _, engine::general_purpose};
+        let tarball_base64 = general_purpose::STANDARD.encode(&tarball_data);
+
+        if dry_run {
+            println!("Would publish: {} v{}", project.config.package.name, project.config.package.version);
+            println!("  Tarball size: {} bytes", tarball_data.len());
+            fs::remove_file(&tarball_path).ok();
+            return Ok(());
+        }
+
+        // Prepare dependencies
+        let mut dependencies = std::collections::HashMap::new();
+        for (name, spec) in &project.config.dependencies {
+            let version_str = match spec {
+                bulu::project::DependencySpec::Simple(v) => v.clone(),
+                bulu::project::DependencySpec::Detailed { version, .. } => {
+                    version.clone().unwrap_or_else(|| "*".to_string())
+                }
+            };
+            dependencies.insert(name.clone(), version_str);
+        }
+
+        // Create publish request
+        let request = PublishRequest {
+            name: project.config.package.name.clone(),
+            version: project.config.package.version.clone(),
+            description: project.config.package.description.clone(),
+            authors: project.config.package.authors.clone(),
+            license: project.config.package.license.clone(),
+            repository: project.config.package.repository.clone(),
+            keywords: project.config.package.keywords.clone().unwrap_or_default(),
+            dependencies,
+            tarball: tarball_base64,
         };
 
-        package_manager.publish_package(&options).await
+        // Publish
+        if verbose {
+            println!("  {} Uploading to registry...", "→".blue());
+        }
+
+        let registry_url = std::env::var("BULU_REGISTRY")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+
+        let client = RegistryHttpClient::new(registry_url);
+        client.publish(request).await?;
+
+        // Clean up tarball
+        fs::remove_file(&tarball_path).ok();
+
+        println!("{} Published: {} v{}", 
+            "Success".green().bold(), 
+            project.config.package.name, 
+            project.config.package.version
+        );
+
+        Ok(())
     })
 }
 

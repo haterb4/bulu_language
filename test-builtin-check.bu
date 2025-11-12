@@ -1,0 +1,12 @@
+// Test pour vérifier que les builtins fonctionnent
+
+func main() {
+    println("Test des builtins:")
+    
+    // Test input (devrait fonctionner)
+    println("typeof fonctionne: " + typeof(42))
+    
+    // Test args
+    let myArgs = args()
+    println("args fonctionne!")
+}

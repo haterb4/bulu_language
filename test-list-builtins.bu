@@ -1,0 +1,17 @@
+func main() {
+    // Test tous les builtins connus
+    println("Testing builtins:")
+    
+    // Test len
+    let x = len("test")
+    println("len works: " + x.toString())
+    
+    // Test input (commenté car interactif)
+    // let y = input("test: ")
+    
+    // Test typeof
+    let z = typeof(5)
+    println("typeof works: " + z)
+    
+    println("All basic builtins work!")
+}

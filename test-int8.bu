@@ -1,0 +1,5 @@
+func main() {
+    println("Test int8")
+    let x = int8(5)
+    println("int8 works")
+}

@@ -1,0 +1,5 @@
+func main() {
+    println("Test println")
+    let x = len("hello")
+    println("len result: " + x.toString())
+}

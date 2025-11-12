@@ -1,0 +1,39 @@
+import { String, Int64, Bool, Float64, Parse, Get, Args as flagArgs, Usage } from "std/flag"
+import { args } from "std/os"
+
+func main() {
+    println("=== Test std/flag avec import ===")
+    
+    // Définir les flags
+    String("name", "John", "Nom de l'utilisateur", "n")
+    Int64("age", 25, "Âge de l'utilisateur", "a")
+    Bool("verbose", false, "Mode verbeux", "v")
+    Float64("score", 0.0, "Score", "s")
+    
+    // Parser les arguments
+    let myArgs = args()
+    Parse(myArgs)
+    
+    // Récupérer les valeurs
+    let name = Get("name")
+    let age = Get("age")
+    let verbose = Get("verbose")
+    let score = Get("score")
+    
+    println("Configuration:")
+    println("  Name: " + name)
+    println("  Age: " + (age as float32).toString())
+    println("  Verbose: " + verbose.toString())
+    println("  Score: " + score.toString())
+    
+    // Récupérer les arguments positionnels
+    let positional = flagArgs()
+    println("")
+    println("Arguments positionnels: " + len(positional).toString())
+    for i in 0..len(positional) {
+        println("  [" + i.toString() + "] = " + positional[i])
+    }
+    
+    println("")
+    println("✅ Test réussi!")
+}

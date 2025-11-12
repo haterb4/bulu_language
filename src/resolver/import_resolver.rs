@@ -90,7 +90,12 @@ impl ImportResolver {
         module: &super::Module,
         import_stmt: &ImportStmt,
     ) -> Result<()> {
-        // Check if the symbol exists in the module
+        // First check if the symbol is in the exports (for virtual std modules)
+        if module.is_exported(&item.name) {
+            return Ok(());
+        }
+        
+        // Then check if the symbol exists in the module's symbol table
         if let Some(symbol) = module.symbols.lookup(&item.name) {
             // Check if the symbol is exported
             if !symbol.is_exported() {
@@ -108,8 +113,8 @@ impl ImportResolver {
             // Symbol doesn't exist in the module
             return Err(BuluError::parse_error(
                 format!(
-                    "Symbol '{}' does not exist in module '{}'",
-                    item.name, module_name
+                    "Module '{}' does not export '{}'",
+                    import_stmt.path, item.name
                 ),
                 item.position.line,
                 item.position.column,

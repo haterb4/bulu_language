@@ -7,6 +7,8 @@ pub mod arrays;
 pub mod math;
 pub mod random;
 pub mod time;
+pub mod os;
+pub mod flag;
 
 // Testing module
 pub mod test;

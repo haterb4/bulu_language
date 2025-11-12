@@ -1,0 +1,23 @@
+// Test des fonctions d'entrée/sortie
+
+func main(args: []string) {
+    println("=== Test des arguments ===")
+    println("Nombre d'arguments: " + len(args).toString())
+    
+    for i in 0..len(args) {
+        println("  arg[" + i.toString() + "] = " + args[i].toString())
+    }
+    
+    println("")
+    println("=== Test de input ===")
+    let name = input("Entrez votre nom: ")
+    println("Bonjour, " + name + "!")
+    
+    println("")
+    println("=== Test de eprint/eprintln ===")
+    eprint("Ceci est sur stderr (sans newline) ")
+    eprintln("et ceci aussi (avec newline)")
+    
+    println("")
+    println("✅ Tests terminés!")
+}

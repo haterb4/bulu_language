@@ -1,0 +1,6 @@
+func main() {
+    println("Before getArgs call")
+    let a = getArgs()
+    println("After getArgs call")
+    println("Length: " + len(a).toString())
+}

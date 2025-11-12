@@ -1,0 +1,23 @@
+[package]
+name = "math-utils"
+version = "1.0.0"
+authors = ["Bulu Team <team@bulu-lang.org>"]
+description = "Utilitaires mathématiques pour Bulu"
+license = "MIT"
+repository = "https://github.com/bulu-lang/math-utils"
+keywords = ["math", "utils", "geometry"]
+categories = ["mathematics"]
+
+[dependencies]
+# Pas de dépendances pour cet exemple simple
+
+[build]
+optimization = "2"
+target = "native"
+incremental = true
+parallel = true
+
+[test]
+parallel = true
+timeout = 30
+coverage = false

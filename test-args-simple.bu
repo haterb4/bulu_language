@@ -1,0 +1,5 @@
+func main() {
+    println("Test args")
+    let a = args()
+    println("Got args")
+}

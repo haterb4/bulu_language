@@ -1,0 +1,6 @@
+func main() {
+    println("Test input")
+    // let name = input("Enter name: ")
+    // println("Hello " + name)
+    println("Done")
+}

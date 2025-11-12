@@ -1,0 +1,5 @@
+func main() {
+    println("Entrez votre nom:")
+    let name = readLine()
+    println("Bonjour, " + name + "!")
+}

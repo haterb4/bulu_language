@@ -1,0 +1,18 @@
+// Test simple des arguments style Go
+
+func main() {
+    println("=== Test args() (style Go os.Args) ===")
+    
+    // Accès aux arguments comme os.Args en Go
+    let myArgs = args()
+    
+    println("Nombre d'arguments: " + len(myArgs).toString())
+    println("")
+    
+    for i in 0..len(myArgs) {
+        println("args[" + i.toString() + "] = " + myArgs[i])
+    }
+    
+    println("")
+    println("✅ Test terminé!")
+}

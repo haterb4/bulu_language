@@ -1,0 +1,5 @@
+func main() {
+    // args() sans import - devrait échouer
+    let myArgs = args()
+    println("Args: " + len(myArgs).toString())
+}

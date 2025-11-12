@@ -280,6 +280,8 @@ impl ModuleResolver {
             "time" => self.create_time_module(),
             "io" => self.create_io_module(),
             "math" => self.create_math_module(),
+            "os" => self.create_os_module(),
+            "flag" => self.create_flag_module(),
             _ => Err(BuluError::Other(format!("Unknown standard library module: {}", module_path)))
         }
     }
@@ -350,6 +352,74 @@ impl ModuleResolver {
         
         let pow_symbol = Symbol::new("pow".to_string(), SymbolKind::Function, Visibility::Public, position);
         module.add_export("pow".to_string(), pow_symbol);
+
+        Ok(module)
+    }
+
+    /// Create the std/os module
+    fn create_os_module(&self) -> Result<Module> {
+        let mut module = Module::new(PathBuf::from("std/os"), "os".to_string());
+        
+        // Add exports for OS functions
+        let position = Position::new(0, 0, 0);
+        
+        let args_symbol = Symbol::new("args".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(args_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("args".to_string(), args_symbol);
+        
+        let get_env_symbol = Symbol::new("getEnv".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(get_env_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("getEnv".to_string(), get_env_symbol);
+        
+        let cwd_symbol = Symbol::new("cwd".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(cwd_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("cwd".to_string(), cwd_symbol);
+        
+        let exit_symbol = Symbol::new("exit".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(exit_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("exit".to_string(), exit_symbol);
+
+        Ok(module)
+    }
+
+    /// Create the std/flag module
+    fn create_flag_module(&self) -> Result<Module> {
+        let mut module = Module::new(PathBuf::from("std/flag"), "flag".to_string());
+        
+        // Add exports for flag parsing functions
+        let position = Position::new(0, 0, 0);
+        
+        let string_symbol = Symbol::new("string".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(string_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("string".to_string(), string_symbol);
+        
+        let int_symbol = Symbol::new("int".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(int_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("int".to_string(), int_symbol);
+        
+        let bool_symbol = Symbol::new("bool".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(bool_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("bool".to_string(), bool_symbol);
+        
+        let float_symbol = Symbol::new("float".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(float_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("float".to_string(), float_symbol);
+        
+        let parse_symbol = Symbol::new("parse".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(parse_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("parse".to_string(), parse_symbol);
+        
+        let get_symbol = Symbol::new("get".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(get_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("get".to_string(), get_symbol);
+        
+        let args_symbol = Symbol::new("args".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(args_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("args".to_string(), args_symbol);
+        
+        let usage_symbol = Symbol::new("usage".to_string(), SymbolKind::Function, Visibility::Public, position);
+        module.symbols.define(usage_symbol.clone()).map_err(|e| BuluError::Other(e))?;
+        module.add_export("usage".to_string(), usage_symbol);
 
         Ok(module)
     }

@@ -85,6 +85,16 @@ pub struct AstInterpreter {
     current_file: Option<String>,
     /// Struct definitions for type checking and default values
     struct_definitions: HashMap<String, StructDecl>,
+    /// Function definitions for execution
+    function_definitions: HashMap<String, FunctionDecl>,
+    /// Channel registry for managing channels
+    channel_registry: HashMap<u32, std::sync::Arc<crate::runtime::channels::Channel>>,
+    /// Promise registry for managing promises
+    promise_registry: HashMap<u32, std::sync::Arc<std::sync::Mutex<crate::runtime::promises::RuntimePromise>>>,
+    /// Next channel ID
+    next_channel_id: u32,
+    /// Next promise ID
+    next_promise_id: u32,
 }
 
 impl AstInterpreter {
@@ -96,6 +106,11 @@ impl AstInterpreter {
             globals: Environment::new(),
             current_file: None,
             struct_definitions: HashMap::new(),
+            function_definitions: HashMap::new(),
+            channel_registry: HashMap::new(),
+            promise_registry: HashMap::new(),
+            next_channel_id: 1,
+            next_promise_id: 1,
         };
         
         // Add built-in identifiers
@@ -352,9 +367,11 @@ impl AstInterpreter {
 
     /// Execute function declaration
     fn execute_function_decl(&mut self, decl: &FunctionDecl) -> Result<RuntimeValue> {
-        // For now, just store function as a placeholder
-        let function_value = RuntimeValue::String(format!("function:{}", decl.name));
+        // Store the function declaration for later execution
+        self.function_definitions.insert(decl.name.clone(), decl.clone());
         
+        // Store function reference in environment
+        let function_value = RuntimeValue::String(format!("function:{}", decl.name));
         self.environment.define(decl.name.clone(), function_value.clone());
 
         // If exported, also add to globals
@@ -644,7 +661,13 @@ impl AstInterpreter {
             RuntimeValue::String(func_name) => {
                 if func_name.starts_with("function:") {
                     let name = func_name.strip_prefix("function:").unwrap();
-                    // Handle specific function calls
+                    
+                    // Check if this is a user-defined function
+                    if let Some(func_decl) = self.function_definitions.get(name).cloned() {
+                        return self.call_user_function(&func_decl, &args);
+                    }
+                    
+                    // Handle specific built-in function calls
                     match name {
                         "UdpConnection_bind" => {
                             // Return a mock UdpConnection wrapped in a Result
@@ -671,6 +694,33 @@ impl AstInterpreter {
                             } else {
                                 Ok(RuntimeValue::String("127.0.0.1:8080".to_string()))
                             }
+                        }
+                        // Handle flag functions - check specific names first
+                        "String" | "Int8" | "Int16" | "Int32" | "Int64" | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "Byte" | "Bool" | "Float32" | "Float64" | "Parse" | "Get" | "Args" | "Usage" => {
+                            // Map the function name to the builtin function
+                            let builtin_name = match name {
+                                "String" => "flag_string",
+                                "Int8" => "flag_int8",
+                                "Int16" => "flag_int16",
+                                "Int32" => "flag_int32",
+                                "Int64" => "flag_int64",
+                                "UInt8" => "flag_uint8",
+                                "UInt16" => "flag_uint16",
+                                "UInt32" => "flag_uint32",
+                                "UInt64" => "flag_uint64",
+                                "Byte" => "flag_byte",
+                                "Bool" => "flag_bool",
+                                "Float32" => "flag_float32",
+                                "Float64" => "flag_float64",
+                                "Parse" => "flag_parse",
+                                "Get" => "flag_get",
+                                "Args" => "flag_args",
+                                "Usage" => "flag_usage",
+                                _ => name,
+                            };
+                            
+                            // Call the builtin function
+                            self.call_builtin_function(builtin_name, &args)
                         }
                         _ => Ok(RuntimeValue::String(format!("result_of_{}", name)))
                     }
@@ -1078,20 +1128,215 @@ impl AstInterpreter {
         Ok(RuntimeValue::Null)
     }
 
-    fn execute_async_expr(&mut self, _expr: &AsyncExpr) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+    fn execute_async_expr(&mut self, expr: &AsyncExpr) -> Result<RuntimeValue> {
+        use crate::runtime::promises::{RuntimePromise, PromiseState};
+        
+        // For simple expressions, execute synchronously and return resolved promise
+        // For function calls, we could spawn a thread, but for now keep it simple
+        let result = self.execute_expression(&expr.expr)?;
+        
+        // Create a new promise
+        let promise_id = self.next_promise_id;
+        self.next_promise_id += 1;
+        
+        let promise = RuntimePromise::resolved(promise_id as usize, result);
+        self.promise_registry.insert(promise_id, std::sync::Arc::new(std::sync::Mutex::new(promise)));
+        
+        Ok(RuntimeValue::Promise(promise_id))
     }
 
-    fn execute_await_expr(&mut self, _expr: &AwaitExpr) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+    fn execute_await_expr(&mut self, expr: &AwaitExpr) -> Result<RuntimeValue> {
+        use crate::runtime::promises::PromiseState;
+        use std::time::Duration;
+        
+        // Evaluate the expression (should be a promise)
+        let value = self.execute_expression(&expr.expr)?;
+        
+        match value {
+            RuntimeValue::Promise(promise_id) => {
+                // Get the promise from registry
+                let promise_arc = self.promise_registry.get(&promise_id)
+                    .ok_or_else(|| BuluError::RuntimeError {
+                        message: format!("Promise {} not found", promise_id),
+                        file: self.current_file.clone(),
+                    })?
+                    .clone();
+                
+                // Poll the promise until it's resolved or rejected
+                loop {
+                    let promise = promise_arc.lock().unwrap();
+                    
+                    match &promise.state {
+                        PromiseState::Resolved(val) => {
+                            return Ok(val.clone());
+                        }
+                        PromiseState::Rejected(err) => {
+                            return Err(BuluError::RuntimeError {
+                                message: format!("Promise rejected: {}", err),
+                                file: self.current_file.clone(),
+                            });
+                        }
+                        PromiseState::Pending => {
+                            // Release the lock before sleeping
+                            drop(promise);
+                            
+                            // Sleep briefly to avoid busy-waiting
+                            std::thread::sleep(Duration::from_millis(1));
+                            
+                            // Continue polling
+                            continue;
+                        }
+                    }
+                }
+            }
+            // If it's not a promise, just return it as-is (for compatibility)
+            other => Ok(other),
+        }
     }
 
-    fn execute_run_expr(&mut self, _expr: &RunExpr) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+    fn execute_run_expr(&mut self, expr: &RunExpr) -> Result<RuntimeValue> {
+        // Spawn a goroutine to execute the expression
+        // For a real implementation, we need to clone the interpreter state
+        // and run in a separate thread
+        
+        // Clone the necessary state
+        let expr_clone = expr.expr.clone();
+        let env_clone = self.environment.clone();
+        let globals_clone = self.globals.clone();
+        let current_file = self.current_file.clone();
+        let function_defs = self.function_definitions.clone();
+        let struct_defs = self.struct_definitions.clone();
+        let channel_registry = self.channel_registry.clone();
+        let promise_registry = self.promise_registry.clone();
+        
+        // Spawn a thread to execute the goroutine
+        std::thread::spawn(move || {
+            // Create a new interpreter instance for this goroutine
+            let mut goroutine_interpreter = AstInterpreter {
+                environment: env_clone,
+                module_resolver: ModuleResolver::new(),
+                globals: globals_clone,
+                current_file,
+                struct_definitions: struct_defs,
+                function_definitions: function_defs,
+                channel_registry,
+                promise_registry,
+                next_channel_id: 1000, // Use different range to avoid conflicts
+                next_promise_id: 1000,
+            };
+            
+            // Execute the expression
+            match goroutine_interpreter.execute_expression(&expr_clone) {
+                Ok(_) => {},
+                Err(e) => eprintln!("Goroutine error: {:?}", e),
+            }
+        });
+        
+        // Return goroutine ID
+        static GOROUTINE_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+        let goroutine_id = GOROUTINE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        
+        Ok(RuntimeValue::Goroutine(goroutine_id))
     }
 
-    fn execute_channel_expr(&mut self, _expr: &ChannelExpr) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+    fn execute_channel_expr(&mut self, expr: &ChannelExpr) -> Result<RuntimeValue> {
+        use crate::ast::nodes::ChannelDirection;
+        
+        let channel_value = self.execute_expression(&expr.channel)?;
+        
+        match channel_value {
+            RuntimeValue::Channel(channel_id) => {
+                let channel = self.channel_registry.get(&channel_id)
+                    .ok_or_else(|| BuluError::RuntimeError {
+                        message: format!("Channel {} not found in registry", channel_id),
+                        file: self.current_file.clone(),
+                    })?
+                    .clone();
+                
+                match expr.direction {
+                    ChannelDirection::Send => {
+                        // Send operation: channel <- value
+                        if let Some(ref value_expr) = expr.value {
+                            let value = self.execute_expression(value_expr)?;
+                            
+                            // Blocking send
+                            match channel.send(value) {
+                                Ok(_) => Ok(RuntimeValue::Null),
+                                Err(e) => Err(e),
+                            }
+                        } else {
+                            Err(BuluError::RuntimeError {
+                                message: "Send operation requires a value".to_string(),
+                                file: self.current_file.clone(),
+                            })
+                        }
+                    }
+                    ChannelDirection::Receive => {
+                        // Receive operation: <-channel
+                        use crate::runtime::channels::ChannelResult;
+                        
+                        match channel.receive() {
+                            Ok(ChannelResult::Ok(value)) => Ok(value),
+                            Ok(ChannelResult::Closed) => {
+                                Err(BuluError::RuntimeError {
+                                    message: "Cannot receive from closed channel".to_string(),
+                                    file: self.current_file.clone(),
+                                })
+                            }
+                            Ok(ChannelResult::WouldBlock) => {
+                                // This shouldn't happen with blocking receive
+                                Err(BuluError::RuntimeError {
+                                    message: "Unexpected WouldBlock on blocking receive".to_string(),
+                                    file: self.current_file.clone(),
+                                })
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                    ChannelDirection::Bidirectional => {
+                        // Bidirectional channel - determine operation based on presence of value
+                        if expr.value.is_some() {
+                            // Has value, so it's a send operation
+                            if let Some(ref value_expr) = expr.value {
+                                let value = self.execute_expression(value_expr)?;
+                                
+                                // Blocking send
+                                match channel.send(value) {
+                                    Ok(_) => Ok(RuntimeValue::Null),
+                                    Err(e) => Err(e),
+                                }
+                            } else {
+                                Ok(RuntimeValue::Null)
+                            }
+                        } else {
+                            // No value, so it's a receive operation
+                            use crate::runtime::channels::ChannelResult;
+                            
+                            match channel.receive() {
+                                Ok(ChannelResult::Ok(value)) => Ok(value),
+                                Ok(ChannelResult::Closed) => {
+                                    Err(BuluError::RuntimeError {
+                                        message: "Cannot receive from closed channel".to_string(),
+                                        file: self.current_file.clone(),
+                                    })
+                                }
+                                Ok(ChannelResult::WouldBlock) => {
+                                    Err(BuluError::RuntimeError {
+                                        message: "Unexpected WouldBlock on blocking receive".to_string(),
+                                        file: self.current_file.clone(),
+                                    })
+                                }
+                                Err(e) => Err(e),
+                            }
+                        }
+                    }
+                }
+            }
+            _ => Err(BuluError::RuntimeError {
+                message: "Channel operation requires a channel".to_string(),
+                file: self.current_file.clone(),
+            }),
+        }
     }
 
     fn execute_select_expr(&mut self, _expr: &SelectExpr) -> Result<RuntimeValue> {
@@ -1362,6 +1607,55 @@ impl AstInterpreter {
                 }
                 Ok(RuntimeValue::Null)
             }
+            RuntimeValue::Channel(channel_id) => {
+                // Iterate over channel - receive until closed
+                let channel = self.channel_registry.get(&channel_id)
+                    .ok_or_else(|| BuluError::RuntimeError {
+                        message: format!("Channel {} not found", channel_id),
+                        file: self.current_file.clone(),
+                    })?
+                    .clone();
+                
+                use crate::runtime::channels::ChannelResult;
+                
+                loop {
+                    // Receive from channel (blocking)
+                    match channel.receive() {
+                        Ok(ChannelResult::Ok(value)) => {
+                            // Create new scope for each iteration
+                            let parent_env = self.environment.clone();
+                            self.environment = Environment::with_parent(parent_env.clone());
+                            
+                            // Set the loop variable
+                            self.environment.define(stmt.variable.clone(), value);
+                            
+                            // Execute the body
+                            let result = self.execute_block_stmt(&stmt.body);
+                            
+                            // Restore environment
+                            self.environment = parent_env;
+                            
+                            match result {
+                                Ok(_) => continue,
+                                Err(BuluError::Break) => break,
+                                Err(BuluError::Continue) => continue,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        Ok(ChannelResult::Closed) => {
+                            // Channel closed, exit loop
+                            break;
+                        }
+                        Ok(ChannelResult::WouldBlock) => {
+                            // This shouldn't happen with blocking receive
+                            break;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+                
+                Ok(RuntimeValue::Null)
+            }
             _ => {
                 Err(BuluError::RuntimeError {
                     message: format!("Cannot iterate over value of type: {:?}", iterable_value),
@@ -1375,8 +1669,192 @@ impl AstInterpreter {
         Ok(RuntimeValue::Null)
     }
 
-    fn execute_select_stmt(&mut self, _stmt: &SelectStmt) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+    fn execute_select_stmt(&mut self, stmt: &SelectStmt) -> Result<RuntimeValue> {
+        use crate::runtime::channels::{ChannelResult, SendResult};
+        
+        // First pass: try all operations non-blocking
+        let mut has_default = false;
+        let mut default_arm_index = None;
+        
+        for (index, arm) in stmt.arms.iter().enumerate() {
+            if arm.channel_op.is_none() {
+                has_default = true;
+                default_arm_index = Some(index);
+                continue;
+            }
+            
+            let channel_op = arm.channel_op.as_ref().unwrap();
+            
+            if channel_op.is_send {
+                // Send operation: channel <- value
+                let channel_value = self.execute_expression(&channel_op.channel)?;
+                
+                if let RuntimeValue::Channel(channel_id) = channel_value {
+                    let channel = self.channel_registry.get(&channel_id)
+                        .ok_or_else(|| BuluError::RuntimeError {
+                            message: format!("Channel {} not found", channel_id),
+                            file: self.current_file.clone(),
+                        })?
+                        .clone();
+                    
+                    if let Some(ref value_expr) = channel_op.value {
+                        let value = self.execute_expression(value_expr)?;
+                        
+                        // Try non-blocking send
+                        match channel.try_send(value) {
+                            Ok(SendResult::Ok) => {
+                                // Send succeeded, execute this arm
+                                return self.execute_statement(&arm.body);
+                            }
+                            Ok(SendResult::WouldBlock) => {
+                                // Channel full, try next arm
+                                continue;
+                            }
+                            Ok(SendResult::Closed) => {
+                                return Err(BuluError::RuntimeError {
+                                    message: "Cannot send on closed channel".to_string(),
+                                    file: self.current_file.clone(),
+                                });
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                } else {
+                    return Err(BuluError::RuntimeError {
+                        message: "Select send operation requires a channel".to_string(),
+                        file: self.current_file.clone(),
+                    });
+                }
+            } else {
+                // Receive operation: <-channel or variable := <-channel
+                let channel_value = self.execute_expression(&channel_op.channel)?;
+                
+                if let RuntimeValue::Channel(channel_id) = channel_value {
+                    let channel = self.channel_registry.get(&channel_id)
+                        .ok_or_else(|| BuluError::RuntimeError {
+                            message: format!("Channel {} not found", channel_id),
+                            file: self.current_file.clone(),
+                        })?
+                        .clone();
+                    
+                    // Try non-blocking receive
+                    match channel.try_receive() {
+                        Ok(ChannelResult::Ok(value)) => {
+                            // Receive succeeded
+                            // If there's a variable binding, add it to the environment
+                            if let Some(ref var_name) = channel_op.variable {
+                                self.environment.define(var_name.clone(), value);
+                            }
+                            
+                            // Execute this arm
+                            return self.execute_statement(&arm.body);
+                        }
+                        Ok(ChannelResult::WouldBlock) => {
+                            // No data available, try next arm
+                            continue;
+                        }
+                        Ok(ChannelResult::Closed) => {
+                            // Channel closed, try next arm
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                } else {
+                    return Err(BuluError::RuntimeError {
+                        message: "Select receive operation requires a channel".to_string(),
+                        file: self.current_file.clone(),
+                    });
+                }
+            }
+        }
+        
+        // If we reach here, no operation succeeded
+        // If there's a default case, execute it
+        if has_default {
+            if let Some(index) = default_arm_index {
+                return self.execute_statement(&stmt.arms[index].body);
+            }
+        }
+        
+        // No default case and no operation succeeded
+        // Block until at least one operation can proceed
+        // We'll poll all operations in a loop with a small sleep
+        use std::time::Duration;
+        
+        loop {
+            // Try all operations again (non-blocking)
+            for arm in &stmt.arms {
+                if let Some(ref channel_op) = arm.channel_op {
+                    if channel_op.is_send {
+                        // Try send operation
+                        let channel_value = self.execute_expression(&channel_op.channel)?;
+                        
+                        if let RuntimeValue::Channel(channel_id) = channel_value {
+                            let channel = self.channel_registry.get(&channel_id)
+                                .ok_or_else(|| BuluError::RuntimeError {
+                                    message: format!("Channel {} not found", channel_id),
+                                    file: self.current_file.clone(),
+                                })?
+                                .clone();
+                            
+                            if let Some(ref value_expr) = channel_op.value {
+                                let value = self.execute_expression(value_expr)?;
+                                
+                                match channel.try_send(value) {
+                                    Ok(SendResult::Ok) => {
+                                        return self.execute_statement(&arm.body);
+                                    }
+                                    Ok(SendResult::WouldBlock) => {
+                                        // Try next arm
+                                        continue;
+                                    }
+                                    Ok(SendResult::Closed) => {
+                                        return Err(BuluError::RuntimeError {
+                                            message: "Cannot send on closed channel".to_string(),
+                                            file: self.current_file.clone(),
+                                        });
+                                    }
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                        }
+                    } else {
+                        // Try receive operation
+                        let channel_value = self.execute_expression(&channel_op.channel)?;
+                        
+                        if let RuntimeValue::Channel(channel_id) = channel_value {
+                            let channel = self.channel_registry.get(&channel_id)
+                                .ok_or_else(|| BuluError::RuntimeError {
+                                    message: format!("Channel {} not found", channel_id),
+                                    file: self.current_file.clone(),
+                                })?
+                                .clone();
+                            
+                            match channel.try_receive() {
+                                Ok(ChannelResult::Ok(value)) => {
+                                    if let Some(ref var_name) = channel_op.variable {
+                                        self.environment.define(var_name.clone(), value);
+                                    }
+                                    return self.execute_statement(&arm.body);
+                                }
+                                Ok(ChannelResult::WouldBlock) => {
+                                    // Try next arm
+                                    continue;
+                                }
+                                Ok(ChannelResult::Closed) => {
+                                    // Channel closed, try next arm
+                                    continue;
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // No operation succeeded, sleep briefly and retry
+            std::thread::sleep(Duration::from_micros(100));
+        }
     }
 
     fn execute_return_stmt(&mut self, _stmt: &ReturnStmt) -> Result<RuntimeValue> {
@@ -1576,12 +2054,22 @@ impl AstInterpreter {
     }
 
     fn create_channel(&mut self, capacity: Option<usize>) -> Result<RuntimeValue> {
-        // Generate a unique channel ID
-        static CHANNEL_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-        let channel_id = CHANNEL_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        use crate::runtime::channels::Channel;
+        use crate::types::primitive::TypeId;
         
-        // For now, just return the channel ID
-        // In a full implementation, this would create an actual channel and store it in a registry
+        // Create the actual channel
+        let channel = if let Some(cap) = capacity {
+            Channel::new_buffered(TypeId::Any, cap)
+        } else {
+            Channel::new_unbuffered(TypeId::Any)
+        };
+        
+        // Get a unique ID and store in registry
+        let channel_id = self.next_channel_id;
+        self.next_channel_id += 1;
+        
+        self.channel_registry.insert(channel_id, std::sync::Arc::new(channel));
+        
         Ok(RuntimeValue::Channel(channel_id))
     }
 
@@ -1649,9 +2137,34 @@ impl AstInterpreter {
         Ok(RuntimeValue::Null)
     }
 
-    fn execute_close_call(&mut self, _expr: &CallExpr) -> Result<RuntimeValue> {
-        // TODO: Implement close
-        Ok(RuntimeValue::Null)
+    fn execute_close_call(&mut self, expr: &CallExpr) -> Result<RuntimeValue> {
+        // close(channel) - close a channel
+        if expr.args.is_empty() {
+            return Err(BuluError::RuntimeError {
+                message: "close() requires a channel argument".to_string(),
+                file: self.current_file.clone(),
+            });
+        }
+        
+        let channel_value = self.execute_expression(&expr.args[0])?;
+        
+        match channel_value {
+            RuntimeValue::Channel(channel_id) => {
+                let channel = self.channel_registry.get(&channel_id)
+                    .ok_or_else(|| BuluError::RuntimeError {
+                        message: format!("Channel {} not found", channel_id),
+                        file: self.current_file.clone(),
+                    })?
+                    .clone();
+                
+                channel.close();
+                Ok(RuntimeValue::Null)
+            }
+            _ => Err(BuluError::RuntimeError {
+                message: "close() requires a channel argument".to_string(),
+                file: self.current_file.clone(),
+            }),
+        }
     }
 
     fn value_to_string(&self, value: &RuntimeValue) -> String {
@@ -1687,6 +2200,76 @@ impl AstInterpreter {
     /// Check if a symbol is accessible (not exported means not accessible from outside)
     pub fn is_symbol_accessible(&self, symbol: &str) -> bool {
         self.globals.contains(symbol)
+    }
+    
+    /// Call a user-defined function
+    fn call_user_function(&mut self, func_decl: &FunctionDecl, args: &[RuntimeValue]) -> Result<RuntimeValue> {
+        use crate::runtime::promises::RuntimePromise;
+        
+        // Create a new environment for the function
+        let saved_env = self.environment.clone();
+        self.environment = Environment::with_parent(saved_env.clone());
+        
+        // Bind parameters to arguments
+        for (param, arg) in func_decl.params.iter().zip(args.iter()) {
+            self.environment.define(param.name.clone(), arg.clone());
+        }
+        
+        // Execute the function body
+        let result = self.execute_statement(&Statement::Block(func_decl.body.clone()));
+        
+        // Restore the environment
+        self.environment = saved_env;
+        
+        // If the function is async, wrap the result in a promise
+        if func_decl.is_async {
+            let promise_id = self.next_promise_id;
+            self.next_promise_id += 1;
+            
+            match result {
+                Ok(value) => {
+                    let promise = RuntimePromise::resolved(promise_id as usize, value);
+                    self.promise_registry.insert(promise_id, std::sync::Arc::new(std::sync::Mutex::new(promise)));
+                    Ok(RuntimeValue::Promise(promise_id))
+                }
+                Err(e) => {
+                    let promise = RuntimePromise::rejected(promise_id as usize, e.to_string());
+                    self.promise_registry.insert(promise_id, std::sync::Arc::new(std::sync::Mutex::new(promise)));
+                    Ok(RuntimeValue::Promise(promise_id))
+                }
+            }
+        } else {
+            result
+        }
+    }
+    
+    /// Call a builtin function by name
+    fn call_builtin_function(&mut self, name: &str, args: &[RuntimeValue]) -> Result<RuntimeValue> {
+        use crate::runtime::builtins::*;
+        
+        match name {
+            "flag_string" => builtin_flag_string(args),
+            "flag_int8" => builtin_flag_int8(args),
+            "flag_int16" => builtin_flag_int16(args),
+            "flag_int32" => builtin_flag_int32(args),
+            "flag_int64" => builtin_flag_int64(args),
+            "flag_uint8" => builtin_flag_uint8(args),
+            "flag_uint16" => builtin_flag_uint16(args),
+            "flag_uint32" => builtin_flag_uint32(args),
+            "flag_uint64" => builtin_flag_uint64(args),
+            "flag_byte" => builtin_flag_byte(args),
+            "flag_bool" => builtin_flag_bool(args),
+            "flag_float32" => builtin_flag_float32(args),
+            "flag_float64" => builtin_flag_float64(args),
+            "flag_parse" => builtin_flag_parse(args),
+            "flag_get" => builtin_flag_get(args),
+            "flag_args" => builtin_flag_args(args),
+            "flag_usage" => builtin_flag_usage(args),
+            _ => Err(BuluError::RuntimeError {
+                message: format!("Unknown builtin function: {}", name),
+                file: self.current_file.clone(),
+            }),
+        }
     }
 }
 

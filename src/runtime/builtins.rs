@@ -109,6 +109,8 @@ impl BuiltinRegistry {
         registry.register_utility_functions();
         registry.register_channel_functions();
         registry.register_synchronization_functions();
+        registry.register_os_functions();
+        registry.register_flag_functions();
         registry.register_network_functions();
 
         registry
@@ -193,6 +195,10 @@ impl BuiltinRegistry {
         self.register("println", builtin_println);
         self.register("printf", builtin_printf);
         self.register("input", builtin_input);
+        self.register("readLine", builtin_read_line);
+        self.register("readAll", builtin_read_all);
+        self.register("eprint", builtin_eprint);
+        self.register("eprintln", builtin_eprintln);
     }
 
     /// Register utility functions
@@ -223,6 +229,57 @@ impl BuiltinRegistry {
         self.register("atomic_sub", builtin_atomic_sub);
         self.register("atomic_cas", builtin_atomic_cas);
         self.register("waitForGoroutines", builtin_wait_for_goroutines);
+    }
+
+    /// Register OS functions
+    fn register_os_functions(&mut self) {
+        self.register("args", builtin_args);
+        self.register("getEnv", builtin_get_env);
+        self.register("cwd", builtin_cwd);
+        self.register("exit", builtin_exit);
+    }
+
+    /// Register flag parsing functions
+    fn register_flag_functions(&mut self) {
+        // Register with both flag_ prefix and without for imports
+        self.register("flag_string", builtin_flag_string);
+        self.register("String", builtin_flag_string);
+        // Integer types
+        self.register("flag_int8", builtin_flag_int8);
+        self.register("Int8", builtin_flag_int8);
+        self.register("flag_int16", builtin_flag_int16);
+        self.register("Int16", builtin_flag_int16);
+        self.register("flag_int32", builtin_flag_int32);
+        self.register("Int32", builtin_flag_int32);
+        self.register("flag_int64", builtin_flag_int64);
+        self.register("Int64", builtin_flag_int64);
+        // Unsigned integer types
+        self.register("flag_uint8", builtin_flag_uint8);
+        self.register("UInt8", builtin_flag_uint8);
+        self.register("flag_uint16", builtin_flag_uint16);
+        self.register("UInt16", builtin_flag_uint16);
+        self.register("flag_uint32", builtin_flag_uint32);
+        self.register("UInt32", builtin_flag_uint32);
+        self.register("flag_uint64", builtin_flag_uint64);
+        self.register("UInt64", builtin_flag_uint64);
+        self.register("flag_byte", builtin_flag_byte);
+        self.register("Byte", builtin_flag_byte);
+        // Other types
+        self.register("flag_bool", builtin_flag_bool);
+        self.register("Bool", builtin_flag_bool);
+        self.register("flag_float32", builtin_flag_float32);
+        self.register("Float32", builtin_flag_float32);
+        self.register("flag_float64", builtin_flag_float64);
+        self.register("Float64", builtin_flag_float64);
+        // Functions
+        self.register("flag_parse", builtin_flag_parse);
+        self.register("Parse", builtin_flag_parse);
+        self.register("flag_get", builtin_flag_get);
+        self.register("Get", builtin_flag_get);
+        self.register("flag_args", builtin_flag_args);
+        self.register("Args", builtin_flag_args);
+        self.register("flag_usage", builtin_flag_usage);
+        self.register("Usage", builtin_flag_usage);
     }
 
     /// Register network functions
@@ -1163,6 +1220,71 @@ pub fn builtin_input(args: &[RuntimeValue]) -> Result<RuntimeValue> {
     Ok(RuntimeValue::String(input))
 }
 
+/// Read a line from stdin (alias for input with no prompt)
+pub fn builtin_read_line(_args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|e| BuluError::RuntimeError {
+            file: None,
+            message: format!("Failed to read from stdin: {}", e),
+        })?;
+
+    // Remove trailing newline
+    if input.ends_with('\n') {
+        input.pop();
+        if input.ends_with('\r') {
+            input.pop();
+        }
+    }
+
+    Ok(RuntimeValue::String(input))
+}
+
+/// Read all input from stdin until EOF
+pub fn builtin_read_all(_args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    let mut content = String::new();
+    io::stdin()
+        .read_to_string(&mut content)
+        .map_err(|e| BuluError::RuntimeError {
+            file: None,
+            message: format!("Failed to read from stdin: {}", e),
+        })?;
+
+    Ok(RuntimeValue::String(content))
+}
+
+/// Print to stderr
+pub fn builtin_eprint(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.is_empty() {
+        return Ok(RuntimeValue::Null);
+    }
+
+    if let RuntimeValue::String(text) = &args[0] {
+        eprint!("{}", text);
+        io::stderr().flush().map_err(|e| BuluError::RuntimeError {
+            file: None,
+            message: format!("Failed to flush stderr: {}", e),
+        })?;
+    }
+
+    Ok(RuntimeValue::Null)
+}
+
+/// Print to stderr with newline
+pub fn builtin_eprintln(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.is_empty() {
+        eprintln!();
+        return Ok(RuntimeValue::Null);
+    }
+
+    if let RuntimeValue::String(text) = &args[0] {
+        eprintln!("{}", text);
+    }
+
+    Ok(RuntimeValue::Null)
+}
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -1673,6 +1795,55 @@ pub fn builtin_atomic_cas(args: &[RuntimeValue]) -> Result<RuntimeValue> {
 }
 
 // ============================================================================
+// OS FUNCTIONS
+// ============================================================================
+
+/// Get command-line arguments
+pub fn builtin_args(_args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    crate::std::os::get_args()
+}
+
+/// Get environment variable
+pub fn builtin_get_env(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.is_empty() {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "getEnv() requires 1 argument (variable name)".to_string(),
+        });
+    }
+
+    if let RuntimeValue::String(name) = &args[0] {
+        crate::std::os::get_env(name)
+    } else {
+        Err(BuluError::RuntimeError {
+            file: None,
+            message: "getEnv() argument must be a string".to_string(),
+        })
+    }
+}
+
+/// Get current working directory
+pub fn builtin_cwd(_args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    crate::std::os::get_cwd()
+}
+
+/// Exit the program with a status code
+pub fn builtin_exit(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    let code = if args.is_empty() {
+        0
+    } else if let RuntimeValue::Int32(c) = &args[0] {
+        *c
+    } else {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "exit() argument must be an integer".to_string(),
+        });
+    };
+    
+    crate::std::os::exit(code)
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
@@ -1889,24 +2060,20 @@ pub fn builtin_close(args: &[RuntimeValue]) -> Result<RuntimeValue> {
 
     match &args[0] {
         RuntimeValue::Channel(channel_id) => {
-            // Use a global channel registry for simplicity
-            // In a full implementation, this would be passed from the interpreter context
-            thread_local! {
-                static CHANNEL_REGISTRY: std::cell::RefCell<ChannelRegistry> = std::cell::RefCell::new(ChannelRegistry::new());
+            // Use the global channel registry
+            let mut registry = crate::runtime::interpreter::get_global_channel_registry()
+                .lock()
+                .unwrap();
+            
+            if let Some(channel) = registry.get_mut(*channel_id) {
+                channel.close()?;
+                Ok(RuntimeValue::Null)
+            } else {
+                Err(BuluError::RuntimeError {
+                    file: None,
+                    message: format!("Channel {} not found", channel_id),
+                })
             }
-
-            CHANNEL_REGISTRY.with(|registry| {
-                let reg = registry.borrow();
-                if let Some(channel) = reg.get(*channel_id as usize) {
-                    channel.close()?;
-                    Ok(RuntimeValue::Null)
-                } else {
-                    Err(BuluError::RuntimeError {
-                        file: None,
-                        message: format!("Channel {} not found", channel_id),
-                    })
-                }
-            })
         }
         _ => Err(BuluError::RuntimeError {
             file: None,
@@ -3195,4 +3362,685 @@ pub fn builtin_tcpconnection_close(args: &[RuntimeValue]) -> Result<RuntimeValue
     }
 
     Ok(RuntimeValue::String("Connection closed".to_string()))
+}
+
+// ============================================================================
+// FLAG PARSING FUNCTIONS (std/flag module)
+// ============================================================================
+
+/// Define a string flag
+pub fn builtin_flag_string(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.string() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.string() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.string() default value must be a string".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.string() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag.string() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::string_flag(name, short_name, default_value, description)
+}
+
+/// Define an integer flag (deprecated, use int32 or int64)
+pub fn builtin_flag_int(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    // Default to int64 for backward compatibility
+    builtin_flag_int64(args)
+}
+
+/// Define a boolean flag
+pub fn builtin_flag_bool(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.bool() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.bool() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::Bool(b) => *b,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.bool() default value must be a boolean".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.bool() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag.bool() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::bool_flag(name, short_name, default_value, description)
+}
+
+/// Define a float flag (deprecated, use float32 or float64)
+pub fn builtin_flag_float(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    // Default to float64 for backward compatibility
+    builtin_flag_float64(args)
+}
+
+/// Parse command-line arguments
+pub fn builtin_flag_parse(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 1 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.parse() expects exactly 1 argument (args array)".to_string(),
+        });
+    }
+
+    let args_array = match &args[0] {
+        RuntimeValue::Array(arr) => {
+            arr.iter()
+                .filter_map(|v| match v {
+                    RuntimeValue::String(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<String>>()
+        }
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.parse() expects an array of strings".to_string(),
+        }),
+    };
+
+    crate::std::flag::parse(args_array)
+}
+
+/// Get the value of a flag
+pub fn builtin_flag_get(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 1 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.get() expects exactly 1 argument (flag name)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag.get() name must be a string".to_string(),
+        }),
+    };
+
+    crate::std::flag::get(name)
+}
+
+/// Define an Int8 flag
+pub fn builtin_flag_int8(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int8() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int8() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::Int8(i) => *i,
+        RuntimeValue::Int32(i) => *i as i8,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int8() default value must be an integer".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int8() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag_int8() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::int8_flag(name, short_name, default_value, description)
+}
+
+/// Define an Int16 flag
+pub fn builtin_flag_int16(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int16() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int16() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::Int16(i) => *i,
+        RuntimeValue::Int32(i) => *i as i16,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int16() default value must be an integer".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int16() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag_int16() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::int16_flag(name, short_name, default_value, description)
+}
+
+/// Define an Int32 flag
+pub fn builtin_flag_int32(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int32() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int32() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::Int32(i) => *i,
+        RuntimeValue::Int64(i) => *i as i32,
+        RuntimeValue::Integer(i) => *i as i32,
+        RuntimeValue::Int8(i) => *i as i32,
+        RuntimeValue::Int16(i) => *i as i32,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int32() default value must be an integer".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int32() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag_int32() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::int32_flag(name, short_name, default_value, description)
+}
+
+/// Define an Int64 flag
+pub fn builtin_flag_int64(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int64() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int64() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::Int64(i) => *i,
+        RuntimeValue::Int32(i) => *i as i64,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int64() default value must be an integer".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_int64() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag_int64() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::int64_flag(name, short_name, default_value, description)
+}
+
+/// Define a UInt8 flag
+pub fn builtin_flag_uint8(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint8() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint8() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::UInt8(i) => *i,
+        RuntimeValue::Int32(i) => *i as u8,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint8() default value must be an integer".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint8() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag_uint8() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::uint8_flag(name, short_name, default_value, description)
+}
+
+/// Define a UInt16 flag
+pub fn builtin_flag_uint16(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint16() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint16() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::UInt16(i) => *i,
+        RuntimeValue::Int32(i) => *i as u16,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint16() default value must be an integer".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint16() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag_uint16() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::uint16_flag(name, short_name, default_value, description)
+}
+
+/// Define a UInt32 flag
+pub fn builtin_flag_uint32(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint32() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint32() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::UInt32(i) => *i,
+        RuntimeValue::Int32(i) => *i as u32,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint32() default value must be an integer".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint32() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag_uint32() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::uint32_flag(name, short_name, default_value, description)
+}
+
+/// Define a UInt64 flag
+pub fn builtin_flag_uint64(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint64() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint64() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::UInt64(i) => *i,
+        RuntimeValue::Int32(i) => *i as u64,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint64() default value must be an integer".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_uint64() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag_uint64() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::uint64_flag(name, short_name, default_value, description)
+}
+
+/// Define a Byte flag (alias for UInt8)
+pub fn builtin_flag_byte(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    builtin_flag_uint8(args)
+}
+
+/// Define a Float32 flag
+pub fn builtin_flag_float32(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_float32() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_float32() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::Float32(f) => *f,
+        RuntimeValue::Float64(f) => *f as f32,
+        RuntimeValue::Int32(i) => *i as f32,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_float32() default value must be a float".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_float32() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag_float32() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::float32_flag(name, short_name, default_value, description)
+}
+
+/// Define a Float64 flag
+pub fn builtin_flag_float64(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() < 3 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_float64() expects at least 3 arguments (name, default, description)".to_string(),
+        });
+    }
+
+    let name = match &args[0] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_float64() name must be a string".to_string(),
+        }),
+    };
+
+    let default_value = match &args[1] {
+        RuntimeValue::Float64(f) => *f,
+        RuntimeValue::Float32(f) => *f as f64,
+        RuntimeValue::Int32(i) => *i as f64,
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_float64() default value must be a float".to_string(),
+        }),
+    };
+
+    let description = match &args[2] {
+        RuntimeValue::String(s) => s.as_str(),
+        _ => return Err(BuluError::RuntimeError {
+            file: None,
+            message: "flag_float64() description must be a string".to_string(),
+        }),
+    };
+
+    let short_name = if args.len() > 3 {
+        match &args[3] {
+            RuntimeValue::String(s) => Some(s.as_str()),
+            RuntimeValue::Null => None,
+            _ => return Err(BuluError::RuntimeError {
+                file: None,
+                message: "flag_float64() short name must be a string or null".to_string(),
+            }),
+        }
+    } else {
+        None
+    };
+
+    crate::std::flag::float64_flag(name, short_name, default_value, description)
+}
+
+/// Get positional arguments
+pub fn builtin_flag_args(_args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    crate::std::flag::args()
+}
+
+/// Print usage information
+pub fn builtin_flag_usage(_args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    crate::std::flag::usage()
 }

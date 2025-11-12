@@ -1,0 +1,10 @@
+// Test simple sans arguments
+
+func main() {
+    println("=== Test de input ===")
+    let name = input("Entrez votre nom: ")
+    println("Bonjour, " + name + "!")
+    
+    println("")
+    println("✅ Test terminé!")
+}

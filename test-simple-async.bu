@@ -1,0 +1,11 @@
+// Test simple async
+
+async func simpleAsync(): string {
+    return "Hello"
+}
+
+func main() {
+    println("Starting")
+    let result = await simpleAsync()
+    println("Result: " + result)
+}

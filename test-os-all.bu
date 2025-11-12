@@ -1,0 +1,4 @@
+func main() {
+    let age: string = input("enter your age: ")
+    println("your age is", int32(age))
+}

@@ -3,7 +3,7 @@
 use crate::ast::*;
 use crate::error::{BuluError, Result};
 use crate::lexer::token::Position;
-use crate::types::composite::TypeRegistry;
+use crate::types::composite::{ChannelTypeInfo, TypeRegistry};
 use crate::types::primitive::{PrimitiveType, TypeId};
 use std::collections::HashMap;
 
@@ -15,6 +15,7 @@ pub struct Symbol {
     pub is_mutable: bool,
     pub position: Position,
     pub function_info: Option<FunctionInfo>,
+    pub module_exports: Option<HashMap<String, Symbol>>,
 }
 
 /// Function signature information
@@ -100,7 +101,11 @@ impl TypeChecker {
             ("print", vec![], None),
             ("println", vec![], None),
             ("printf", vec![TypeId::String], None),
-            ("input", vec![], Some(TypeId::String)),
+            ("input", vec![TypeId::String], Some(TypeId::String)), // input(prompt) -> string
+            ("readLine", vec![], Some(TypeId::String)),
+            ("readAll", vec![], Some(TypeId::String)),
+            ("eprint", vec![TypeId::String], None),
+            ("eprintln", vec![TypeId::String], None),
             // Type conversion functions
             ("int8", vec![TypeId::Any], Some(TypeId::Int8)),
             ("int16", vec![TypeId::Any], Some(TypeId::Int16)),
@@ -142,6 +147,11 @@ impl TypeChecker {
             ("sleep", vec![TypeId::Int32], None),
             ("yield", vec![], None),
             ("timer", vec![TypeId::Int32], Some(TypeId::Any)),
+            // OS functions
+            ("args", vec![], Some(TypeId::Array(0))),
+            ("getEnv", vec![TypeId::String], Some(TypeId::String)),
+            ("cwd", vec![], Some(TypeId::String)),
+            ("exit", vec![TypeId::Int32], None),
             ("waitForGoroutines", vec![], None),
             ("atomic_load", vec![TypeId::Any], Some(TypeId::Any)),
             ("atomic_store", vec![TypeId::Any, TypeId::Any], None),
@@ -160,6 +170,24 @@ impl TypeChecker {
                 vec![TypeId::Any, TypeId::Any, TypeId::Any],
                 Some(TypeId::Bool),
             ),
+            // Flag parsing functions
+            ("flag_string", vec![TypeId::String, TypeId::String, TypeId::String, TypeId::String], None),
+            ("flag_int8", vec![TypeId::String, TypeId::Int8, TypeId::String, TypeId::String], None),
+            ("flag_int16", vec![TypeId::String, TypeId::Int16, TypeId::String, TypeId::String], None),
+            ("flag_int32", vec![TypeId::String, TypeId::Int32, TypeId::String, TypeId::String], None),
+            ("flag_int64", vec![TypeId::String, TypeId::Int64, TypeId::String, TypeId::String], None),
+            ("flag_uint8", vec![TypeId::String, TypeId::UInt8, TypeId::String, TypeId::String], None),
+            ("flag_uint16", vec![TypeId::String, TypeId::UInt16, TypeId::String, TypeId::String], None),
+            ("flag_uint32", vec![TypeId::String, TypeId::UInt32, TypeId::String, TypeId::String], None),
+            ("flag_uint64", vec![TypeId::String, TypeId::UInt64, TypeId::String, TypeId::String], None),
+            ("flag_byte", vec![TypeId::String, TypeId::UInt8, TypeId::String, TypeId::String], None),
+            ("flag_bool", vec![TypeId::String, TypeId::Bool, TypeId::String, TypeId::String], None),
+            ("flag_float32", vec![TypeId::String, TypeId::Float32, TypeId::String, TypeId::String], None),
+            ("flag_float64", vec![TypeId::String, TypeId::Float64, TypeId::String, TypeId::String], None),
+            ("flag_parse", vec![TypeId::Array(0)], None),
+            ("flag_get", vec![TypeId::String], Some(TypeId::Any)),
+            ("flag_args", vec![], Some(TypeId::Array(0))),
+            ("flag_usage", vec![], Some(TypeId::String)),
         ];
 
         // Add primitive type identifiers for make() calls
@@ -192,6 +220,7 @@ impl TypeChecker {
                     is_mutable: false,
                     position: Position::new(0, 0, 0),
                     function_info: None,
+                    module_exports: None,
                 };
                 global_scope.insert(name.to_string(), symbol);
             }
@@ -207,6 +236,7 @@ impl TypeChecker {
                         param_types,
                         return_type,
                     }),
+                    module_exports: None,
                 };
                 // Force insert to ensure builtin functions are always available
                 global_scope.insert(name.to_string(), symbol);
@@ -239,6 +269,7 @@ impl TypeChecker {
                     is_mutable: false,
                     position: Position::new(0, 0, 0),
                     function_info: None,
+                    module_exports: None,
                 };
                 global_scope.insert(chan_type.to_string(), symbol);
             }
@@ -269,6 +300,7 @@ impl TypeChecker {
                     is_mutable: false,
                     position: Position::new(0, 0, 0),
                     function_info: None,
+                   module_exports: None,
                 };
                 global_scope.insert(slice_type.to_string(), symbol);
             }
@@ -285,6 +317,7 @@ impl TypeChecker {
                 is_mutable: false,
                 position: Position::new(0, 0, 0),
                 function_info: None,
+                module_exports: None,
             };
             global_scope.insert("NetAddr".to_string(), net_addr_symbol);
 
@@ -304,6 +337,7 @@ impl TypeChecker {
                     param_types: vec![],               // no parameters (method on self)
                     return_type: Some(TypeId::String), // returns string
                 }),
+                module_exports: None,
             };
             global_scope.insert("NetAddr.toString".to_string(), net_addr_tostring_symbol);
 
@@ -317,6 +351,7 @@ impl TypeChecker {
                     param_types: vec![TypeId::Int32],        // port parameter
                     return_type: Some(TypeId::Struct(1001)), // returns NetAddr
                 }),
+                module_exports: None,
             };
             // Add as a method on NetAddr (we'll need to handle this in method resolution)
             global_scope.insert("NetAddr.localhost_ipv4".to_string(), localhost_ipv4_symbol);
@@ -328,6 +363,7 @@ impl TypeChecker {
                 is_mutable: false,
                 position: Position::new(0, 0, 0),
                 function_info: None,
+                module_exports: None,
             };
             global_scope.insert("TcpServer".to_string(), tcp_server_symbol);
 
@@ -346,6 +382,7 @@ impl TypeChecker {
                     param_types: vec![],                     // no parameters (method on self)
                     return_type: Some(TypeId::Result(1004)), // returns Result<TcpConnection>
                 }),
+                module_exports: None,
             };
             global_scope.insert("TcpServer.accept".to_string(), tcp_server_accept_symbol);
 
@@ -359,6 +396,7 @@ impl TypeChecker {
                     param_types: vec![TypeId::Struct(1001)], // NetAddr parameter
                     return_type: Some(TypeId::Result(1003)), // returns Result<TcpServer>
                 }),
+                module_exports: None,
             };
             global_scope.insert("TcpServer.bind".to_string(), tcp_server_bind_symbol);
 
@@ -368,6 +406,7 @@ impl TypeChecker {
                 is_mutable: false,
                 position: Position::new(0, 0, 0),
                 function_info: None,
+                module_exports: None,
             };
             global_scope.insert("TcpConnection".to_string(), tcp_connection_symbol);
 
@@ -386,6 +425,7 @@ impl TypeChecker {
                     param_types: vec![],                     // no parameters (method on self)
                     return_type: Some(TypeId::Struct(1001)), // returns NetAddr
                 }),
+                module_exports: None,
             };
             global_scope.insert(
                 "TcpConnection.peer_addr".to_string(),
@@ -401,6 +441,7 @@ impl TypeChecker {
                     param_types: vec![TypeId::Array(0)], // buffer parameter ([]byte)
                     return_type: Some(TypeId::Result(1012)), // returns Result<int64> (bytes read)
                 }),
+                module_exports: None,
             };
             global_scope.insert("TcpConnection.read".to_string(), tcp_connection_read_symbol);
 
@@ -413,6 +454,7 @@ impl TypeChecker {
                     param_types: vec![TypeId::Array(0)], // data parameter ([]byte)
                     return_type: Some(TypeId::Result(1013)), // returns Result<int64> (bytes written)
                 }),
+                module_exports: None,
             };
             global_scope.insert(
                 "TcpConnection.write".to_string(),
@@ -428,6 +470,7 @@ impl TypeChecker {
                     param_types: vec![], // no parameters (method on self)
                     return_type: None,   // returns void
                 }),
+                module_exports: None,
             };
             global_scope.insert(
                 "TcpConnection.close".to_string(),
@@ -444,6 +487,7 @@ impl TypeChecker {
                     param_types: vec![TypeId::Struct(1001)], // NetAddr parameter
                     return_type: Some(TypeId::Result(1004)), // returns Result<TcpConnection>
                 }),
+                module_exports: None,
             };
             global_scope.insert(
                 "TcpConnection.connect".to_string(),
@@ -456,6 +500,7 @@ impl TypeChecker {
                 is_mutable: false,
                 position: Position::new(0, 0, 0),
                 function_info: None,
+                module_exports: None,
             };
             global_scope.insert("UdpConnection".to_string(), udp_connection_symbol);
 
@@ -479,6 +524,7 @@ impl TypeChecker {
                     param_types: vec![TypeId::Struct(1001)], // NetAddr parameter
                     return_type: Some(TypeId::Result(1005)), // returns Result<UdpConnection>
                 }),
+                module_exports: None,
             };
             global_scope.insert("UdpConnection.bind".to_string(), udp_connection_bind_symbol);
 
@@ -492,6 +538,7 @@ impl TypeChecker {
                     param_types: vec![TypeId::Array(0)], // buffer parameter ([]byte)
                     return_type: Some(TypeId::Result(tuple_id)), // returns Result<(int64, NetAddr)> tuple
                 }),
+                module_exports: None,
             };
             global_scope.insert(
                 "UdpConnection.recv_from".to_string(),
@@ -508,6 +555,7 @@ impl TypeChecker {
                     param_types: vec![TypeId::Array(0), TypeId::Struct(1001)], // buffer ([]byte), NetAddr
                     return_type: Some(TypeId::Result(1013)), // returns Result<int64> (bytes sent)
                 }),
+                module_exports: None,
             };
             global_scope.insert(
                 "UdpConnection.send_to".to_string(),
@@ -537,6 +585,7 @@ impl TypeChecker {
                     param_types: vec![],             // no parameters (method on self)
                     return_type: Some(TypeId::Bool), // returns bool
                 }),
+                module_exports: None,
             };
             global_scope.insert("Result.isError".to_string(), is_error_symbol);
 
@@ -550,6 +599,7 @@ impl TypeChecker {
                     param_types: vec![],               // no parameters (method on self)
                     return_type: Some(TypeId::String), // returns error string
                 }),
+                module_exports: None,
             };
             global_scope.insert("Result.error".to_string(), error_symbol);
 
@@ -563,6 +613,7 @@ impl TypeChecker {
                     param_types: vec![], // no parameters (method on self)
                     return_type: None,   // return type depends on the Result<T> - will be T
                 }),
+                module_exports: None,
             };
             global_scope.insert("Result.unwrap".to_string(), unwrap_symbol);
         }
@@ -611,6 +662,22 @@ impl TypeChecker {
                 let result_type = self.ast_type_to_type_id(&promise_type.result_type);
                 let promise_id = self.type_registry.register_promise_type(result_type);
                 TypeId::Promise(promise_id)
+            }
+            Type::Channel(channel_type) => {
+                let element_type = self.ast_type_to_type_id(&channel_type.element_type);
+                let direction = match channel_type.direction {
+                    crate::ast::ChannelDirection::Bidirectional => crate::types::composite::ChannelDirection::Bidirectional,
+                    crate::ast::ChannelDirection::Send => crate::types::composite::ChannelDirection::SendOnly,
+                    crate::ast::ChannelDirection::Receive => crate::types::composite::ChannelDirection::ReceiveOnly,
+                };
+                let channel_info = ChannelTypeInfo {
+                    element_type,
+                    direction,
+                    buffered: false,
+                    capacity: None,
+                };
+                let channel_id = self.type_registry.register_channel_type(channel_info);
+                TypeId::Channel(channel_id)
             }
             Type::Function(_) => TypeId::Function(0), // Placeholder
             Type::Named(name) => {
@@ -764,6 +831,7 @@ impl TypeChecker {
             is_mutable: !decl.is_const,
             position: decl.position,
             function_info: None,
+            module_exports: None,
         };
 
         self.add_symbol(symbol)?;
@@ -828,6 +896,7 @@ impl TypeChecker {
                 is_mutable: !decl.is_const,
                 position: decl.position,
                 function_info: None,
+                module_exports: None,
             };
 
             self.add_symbol(symbol)?;
@@ -929,6 +998,7 @@ impl TypeChecker {
                 param_types,
                 return_type: actual_return_type,
             }),
+            module_exports: None,
         };
 
         self.add_symbol(func_symbol)?;
@@ -997,6 +1067,7 @@ impl TypeChecker {
                 is_mutable: true, // Parameters are mutable by default
                 position: param.position,
                 function_info: None,
+                module_exports: None,
             };
             self.add_symbol(symbol)?;
         }
@@ -1027,6 +1098,7 @@ impl TypeChecker {
             is_mutable: false,
             position: decl.position,
             function_info: None,
+            module_exports: None,
         };
 
         self.add_symbol(interface_symbol)?;
@@ -1048,6 +1120,7 @@ impl TypeChecker {
             is_mutable: false,
             position: decl.position,
             function_info: None,
+            module_exports: None,
         };
 
         self.add_symbol(struct_symbol)?;
@@ -1116,6 +1189,7 @@ impl TypeChecker {
             is_mutable: true,        // 'this' is mutable by default
             position: decl.position,
             function_info: None,
+            module_exports: None,
         };
         self.add_symbol(this_symbol)?;
 
@@ -1128,6 +1202,7 @@ impl TypeChecker {
                 is_mutable: true, // Parameters are mutable by default
                 position: param.position,
                 function_info: None,
+                module_exports: None,
             };
             self.add_symbol(symbol)?;
         }
@@ -1204,6 +1279,7 @@ impl TypeChecker {
         let element_type = match iterable_type {
             TypeId::String => TypeId::Char,
             TypeId::Array(_) | TypeId::Slice(_) => TypeId::Any, // Placeholder
+            TypeId::Channel(_) => TypeId::Any, // Channel elements can be any type
             TypeId::Any => {
                 // This could be a range (0..5) which returns Any for now
                 // For ranges, the element type is the same as the range bounds
@@ -1231,6 +1307,7 @@ impl TypeChecker {
                 is_mutable: false,      // Loop variables are immutable
                 position: stmt.position,
                 function_info: None,
+                module_exports: None,
             };
             self.add_symbol(index_symbol)?;
         }
@@ -1242,6 +1319,7 @@ impl TypeChecker {
             is_mutable: false, // Loop variables are immutable
             position: stmt.position,
             function_info: None,
+            module_exports: None,
         };
         self.add_symbol(symbol)?;
 
@@ -1824,6 +1902,28 @@ impl TypeChecker {
                 }
             }
             Expression::MemberAccess(member_access) => {
+                // Check if this is a module function call (e.g., os.args())
+                if let Expression::Identifier(module_ident) = &*member_access.object {
+                    let module_exports_opt = self.lookup_symbol(&module_ident.name)
+                        .and_then(|s| s.module_exports.clone());
+                    
+                    if let Some(exports) = module_exports_opt {
+                        // This is a module, look up the function in its exports
+                        if let Some(export_symbol) = exports.get(&member_access.member) {
+                            // Check arguments
+                            for arg in &call.args {
+                                self.check_expression(arg)?;
+                            }
+                            
+                            // Return the function's return type
+                            if let Some(ref func_info) = export_symbol.function_info {
+                                return Ok(func_info.return_type.unwrap_or(TypeId::Any));
+                            }
+                            return Ok(TypeId::Any);
+                        }
+                    }
+                }
+                
                 // Check if this is a static method call (e.g., NetAddr.localhost_ipv4())
                 if let Expression::Identifier(type_ident) = &*member_access.object {
                     let static_method_name =
@@ -2034,6 +2134,28 @@ impl TypeChecker {
 
     /// Type check a member access expression
     fn check_member_access_expression(&mut self, access: &MemberAccessExpr) -> Result<TypeId> {
+        // Check if this is a module access (e.g., os.args())
+        if let Expression::Identifier(ident) = &*access.object {
+            if let Some(symbol) = self.lookup_symbol(&ident.name) {
+                if let Some(ref exports) = symbol.module_exports {
+                    // This is a module, look up the member in its exports
+                    if let Some(export_symbol) = exports.get(&access.member) {
+                        return Ok(export_symbol.type_id);
+                    } else {
+                        return Err(BuluError::TypeError {
+                            file: None,
+                            message: format!(
+                                "Module '{}' does not export '{}'",
+                                ident.name, access.member
+                            ),
+                            line: access.position.line,
+                            column: access.position.column,
+                        });
+                    }
+                }
+            }
+        }
+        
         let object_type = self.check_expression(&access.object)?;
 
         // Get the type name from the object
@@ -2750,6 +2872,82 @@ impl TypeChecker {
                                 param_types,
                                 return_type,
                             })
+                        } else if imported_symbol.module_path == "std/flag" || imported_symbol.module_path == "std.flag" {
+                            // Special handling for std/flag functions - use original_name for aliases
+                            match imported_symbol.original_name.as_str() {
+                                "String" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::String, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "Int8" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::Int8, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "Int16" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::Int16, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "Int32" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::Int32, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "Int64" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::Int64, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "UInt8" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::UInt8, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "UInt16" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::UInt16, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "UInt32" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::UInt32, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "UInt64" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::UInt64, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "Byte" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::UInt8, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "Bool" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::Bool, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "Float32" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::Float32, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "Float64" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String, TypeId::Float64, TypeId::String, TypeId::String],
+                                    return_type: None,
+                                }),
+                                "Parse" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::Array(0)],
+                                    return_type: None,
+                                }),
+                                "Get" => Some(FunctionInfo {
+                                    param_types: vec![TypeId::String],
+                                    return_type: Some(TypeId::Any),
+                                }),
+                                "Args" => Some(FunctionInfo {
+                                    param_types: vec![],
+                                    return_type: Some(TypeId::Array(0)),
+                                }),
+                                "Usage" => Some(FunctionInfo {
+                                    param_types: vec![],
+                                    return_type: Some(TypeId::String),
+                                }),
+                                _ => Some(FunctionInfo {
+                                    param_types: Vec::new(),
+                                    return_type: Some(TypeId::Any),
+                                }),
+                            }
                         } else {
                             // Fallback for functions without signature info
                             Some(FunctionInfo {
@@ -2764,6 +2962,7 @@ impl TypeChecker {
                         is_mutable: false,
                         position: imported_symbol.position,
                         function_info,
+                        module_exports: None,
                     }
                 }
                 crate::compiler::symbol_resolver::SymbolType::Variable => {
@@ -2779,6 +2978,7 @@ impl TypeChecker {
                         is_mutable: imported_symbol.is_mutable,
                         position: imported_symbol.position,
                         function_info: None,
+                        module_exports: None,
                     }
                 }
                 crate::compiler::symbol_resolver::SymbolType::Constant => {
@@ -2796,6 +2996,7 @@ impl TypeChecker {
                         is_mutable: false,
                         position: imported_symbol.position,
                         function_info: None,
+                        module_exports: None,
                     }
                 }
                 crate::compiler::symbol_resolver::SymbolType::Struct => {
@@ -2807,6 +3008,7 @@ impl TypeChecker {
                         is_mutable: false,
                         position: imported_symbol.position,
                         function_info: None,
+                        module_exports: None,
                     }
                 }
                 crate::compiler::symbol_resolver::SymbolType::Interface => {
@@ -2816,6 +3018,7 @@ impl TypeChecker {
                         is_mutable: false,
                         position: imported_symbol.position,
                         function_info: None,
+                        module_exports: None,
                     }
                 }
                 crate::compiler::symbol_resolver::SymbolType::TypeAlias => {
@@ -2831,14 +3034,264 @@ impl TypeChecker {
                         is_mutable: false,
                         position: imported_symbol.position,
                         function_info: None,
+                        module_exports: None,
                     }
                 }
-                crate::compiler::symbol_resolver::SymbolType::Module => Symbol {
-                    name: name.clone(),
-                    type_id: TypeId::Any,
-                    is_mutable: false,
-                    position: imported_symbol.position,
-                    function_info: None,
+                crate::compiler::symbol_resolver::SymbolType::Module => {
+                    // Create exports for known std modules
+                    let mut exports_map = HashMap::new();
+                    
+                    // Handle std modules
+                    if imported_symbol.module_path.starts_with("std/") || imported_symbol.module_path.starts_with("std.") {
+                        let module_name = imported_symbol.module_path
+                            .strip_prefix("std/")
+                            .or_else(|| imported_symbol.module_path.strip_prefix("std."))
+                            .unwrap_or(&imported_symbol.module_path);
+                        
+                        match module_name {
+                            "os" => {
+                                // Add os module exports with proper signatures
+                                let args_symbol = Symbol {
+                                    name: "args".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![],
+                                        return_type: Some(TypeId::Array(0)),
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("args".to_string(), args_symbol);
+                                
+                                let getenv_symbol = Symbol {
+                                    name: "getEnv".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![TypeId::String],
+                                        return_type: Some(TypeId::String),
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("getEnv".to_string(), getenv_symbol);
+                                
+                                let cwd_symbol = Symbol {
+                                    name: "cwd".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![],
+                                        return_type: Some(TypeId::String),
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("cwd".to_string(), cwd_symbol);
+                                
+                                let exit_symbol = Symbol {
+                                    name: "exit".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![TypeId::Int32],
+                                        return_type: None,
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("exit".to_string(), exit_symbol);
+                            }
+                            "net" => {
+                                // Add net module exports
+                                for export_name in &["TcpServer", "TcpConnection", "UdpConnection", "NetAddr"] {
+                                    let export_symbol = Symbol {
+                                        name: export_name.to_string(),
+                                        type_id: TypeId::Struct(0),
+                                        is_mutable: false,
+                                        position: imported_symbol.position,
+                                        function_info: None,
+                                        module_exports: None,
+                                    };
+                                    exports_map.insert(export_name.to_string(), export_symbol);
+                                }
+                            }
+                            "time" => {
+                                // Add time module exports
+                                let export_symbol = Symbol {
+                                    name: "sleep".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![TypeId::Int32],
+                                        return_type: None,
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("sleep".to_string(), export_symbol);
+                            }
+                            "flag" => {
+                                // Add flag module exports
+                                // String(name, defaultValue, description, shortName)
+                                let string_symbol = Symbol {
+                                    name: "String".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![TypeId::String, TypeId::String, TypeId::String, TypeId::String],
+                                        return_type: None,
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("String".to_string(), string_symbol);
+                                
+                                // Int8, Int16, Int32, Int64
+                                for (name, type_id) in [("Int8", TypeId::Int8), ("Int16", TypeId::Int16), ("Int32", TypeId::Int32), ("Int64", TypeId::Int64)] {
+                                    let symbol = Symbol {
+                                        name: name.to_string(),
+                                        type_id: TypeId::Function(0),
+                                        is_mutable: false,
+                                        position: imported_symbol.position,
+                                        function_info: Some(FunctionInfo {
+                                            param_types: vec![TypeId::String, type_id, TypeId::String, TypeId::String],
+                                            return_type: None,
+                                        }),
+                                        module_exports: None,
+                                    };
+                                    exports_map.insert(name.to_string(), symbol);
+                                }
+                                
+                                // UInt8, UInt16, UInt32, UInt64
+                                for (name, type_id) in [("UInt8", TypeId::UInt8), ("UInt16", TypeId::UInt16), ("UInt32", TypeId::UInt32), ("UInt64", TypeId::UInt64)] {
+                                    let symbol = Symbol {
+                                        name: name.to_string(),
+                                        type_id: TypeId::Function(0),
+                                        is_mutable: false,
+                                        position: imported_symbol.position,
+                                        function_info: Some(FunctionInfo {
+                                            param_types: vec![TypeId::String, type_id, TypeId::String, TypeId::String],
+                                            return_type: None,
+                                        }),
+                                        module_exports: None,
+                                    };
+                                    exports_map.insert(name.to_string(), symbol);
+                                }
+                                
+                                // Byte (alias for UInt8)
+                                let byte_symbol = Symbol {
+                                    name: "Byte".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![TypeId::String, TypeId::UInt8, TypeId::String, TypeId::String],
+                                        return_type: None,
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("Byte".to_string(), byte_symbol);
+                                
+                                // Bool(name, defaultValue, description, shortName)
+                                let bool_symbol = Symbol {
+                                    name: "Bool".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![TypeId::String, TypeId::Bool, TypeId::String, TypeId::String],
+                                        return_type: None,
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("Bool".to_string(), bool_symbol);
+                                
+                                // Float32, Float64
+                                for (name, type_id) in [("Float32", TypeId::Float32), ("Float64", TypeId::Float64)] {
+                                    let symbol = Symbol {
+                                        name: name.to_string(),
+                                        type_id: TypeId::Function(0),
+                                        is_mutable: false,
+                                        position: imported_symbol.position,
+                                        function_info: Some(FunctionInfo {
+                                            param_types: vec![TypeId::String, type_id, TypeId::String, TypeId::String],
+                                            return_type: None,
+                                        }),
+                                        module_exports: None,
+                                    };
+                                    exports_map.insert(name.to_string(), symbol);
+                                }
+                                
+                                // Parse(args)
+                                let parse_symbol = Symbol {
+                                    name: "Parse".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![TypeId::Array(0)],
+                                        return_type: None,
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("Parse".to_string(), parse_symbol);
+                                
+                                // Get(name) -> Any
+                                let get_symbol = Symbol {
+                                    name: "Get".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![TypeId::String],
+                                        return_type: Some(TypeId::Any),
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("Get".to_string(), get_symbol);
+                                
+                                // Args() -> Array
+                                let args_symbol = Symbol {
+                                    name: "Args".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![],
+                                        return_type: Some(TypeId::Array(0)),
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("Args".to_string(), args_symbol);
+                                
+                                // Usage() -> String
+                                let usage_symbol = Symbol {
+                                    name: "Usage".to_string(),
+                                    type_id: TypeId::Function(0),
+                                    is_mutable: false,
+                                    position: imported_symbol.position,
+                                    function_info: Some(FunctionInfo {
+                                        param_types: vec![],
+                                        return_type: Some(TypeId::String),
+                                    }),
+                                    module_exports: None,
+                                };
+                                exports_map.insert("Usage".to_string(), usage_symbol);
+                            }
+                            _ => {}
+                        }
+                    }
+                    
+                    Symbol {
+                        name: name.clone(),
+                        type_id: TypeId::Map(0), // Module is like a map
+                        is_mutable: false,
+                        position: imported_symbol.position,
+                        function_info: None,
+                        module_exports: Some(exports_map),
+                    }
                 },
             };
 
@@ -2893,7 +3346,7 @@ impl TypeChecker {
     }
 
     /// Convert AST Type to TypeId
-    fn convert_ast_type_to_type_id(&self, ast_type: &Type) -> TypeId {
+    fn convert_ast_type_to_type_id(&mut self, ast_type: &Type) -> TypeId {
         match ast_type {
             Type::Int8 => TypeId::Int8,
             Type::Int16 => TypeId::Int16,
@@ -2910,13 +3363,55 @@ impl TypeChecker {
             Type::String => TypeId::String,
             Type::Any => TypeId::Any,
             Type::Void => TypeId::Void,
-            Type::Array(_) => TypeId::Array(0), // Use placeholder ID for now
-            Type::Slice(_) => TypeId::Slice(0), // Use placeholder ID for now
-            Type::Map(_) => TypeId::Map(0),     // Use placeholder ID for now
-            Type::Function(_) => TypeId::Function(0), // Use placeholder ID for now
-            Type::Named(_) => TypeId::Any,      // Custom types - simplified for now
-            Type::Generic(_) => TypeId::Any,    // Generic types - simplified for now
-            _ => TypeId::Any,                   // Fallback for other types
+            Type::Array(array_type) => {
+                let element_type = self.convert_ast_type_to_type_id(&array_type.element_type);
+                let array_id = self.type_registry.register_array_type(element_type);
+                TypeId::Array(array_id)
+            }
+            Type::Slice(slice_type) => {
+                let element_type = self.convert_ast_type_to_type_id(&slice_type.element_type);
+                let slice_id = self.type_registry.register_slice_type(element_type);
+                TypeId::Slice(slice_id)
+            }
+            Type::Map(map_type) => {
+                let key_type = self.convert_ast_type_to_type_id(&map_type.key_type);
+                let value_type = self.convert_ast_type_to_type_id(&map_type.value_type);
+                let map_id = self.type_registry.register_map_type(key_type, value_type);
+                TypeId::Map(map_id)
+            }
+            Type::Channel(channel_type) => {
+                let element_type = self.convert_ast_type_to_type_id(&channel_type.element_type);
+                let direction = match channel_type.direction {
+                    crate::ast::ChannelDirection::Bidirectional => crate::types::composite::ChannelDirection::Bidirectional,
+                    crate::ast::ChannelDirection::Send => crate::types::composite::ChannelDirection::SendOnly,
+                    crate::ast::ChannelDirection::Receive => crate::types::composite::ChannelDirection::ReceiveOnly,
+                };
+                let channel_info = ChannelTypeInfo {
+                    element_type,
+                    direction,
+                    buffered: false,
+                    capacity: None,
+                };
+                let channel_id = self.type_registry.register_channel_type(channel_info);
+                TypeId::Channel(channel_id)
+            }
+            Type::Promise(promise_type) => {
+                let result_type = self.convert_ast_type_to_type_id(&promise_type.result_type);
+                let promise_id = self.type_registry.register_promise_type(result_type);
+                TypeId::Promise(promise_id)
+            }
+            Type::Function(_) => TypeId::Function(0), // Placeholder for function types
+            Type::Named(name) => {
+                if self.interfaces.contains_key(name) {
+                    self.get_or_create_named_type_id(name, true)
+                } else if self.structs.contains_key(name) {
+                    self.get_or_create_named_type_id(name, false)
+                } else {
+                    TypeId::Unknown
+                }
+            }
+            Type::Generic(_) => TypeId::Any,
+            _ => TypeId::Any,
         }
     }
 
@@ -3125,6 +3620,7 @@ impl TypeChecker {
                     is_mutable: true, // TODO: get from declaration
                     position: *position,
                     function_info: None,
+                    module_exports: None,
                 };
                 self.add_symbol(symbol)?;
             }

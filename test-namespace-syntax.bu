@@ -1,0 +1,6 @@
+import os from "std/os"
+
+func main() {
+    let myArgs = os.args()
+    println("Args: " + len(myArgs).toString())
+}

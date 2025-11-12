@@ -1,0 +1,38 @@
+import { args } from "std/os"
+
+func main() {
+    println("=== Test std/flag - Parsing d'arguments ===")
+    
+    // Définir les flags
+    flag_string("name", "John", "Nom de l'utilisateur", "n")
+    flag_int("age", 25, "Âge de l'utilisateur", "a")
+    flag_bool("verbose", false, "Mode verbeux", "v")
+    flag_float("score", 0.0, "Score", "s")
+    
+    // Parser les arguments
+    let myArgs = args()
+    flag_parse(myArgs)
+    
+    // Récupérer les valeurs
+    let name = flag_get("name")
+    let age = flag_get("age")
+    let verbose = flag_get("verbose")
+    let score = flag_get("score")
+    
+    println("Configuration:")
+    println("  Name: " + name)
+    println("  Age: " + age.toString())
+    println("  Verbose: " + verbose.toString())
+    println("  Score: " + score.toString())
+    
+    // Récupérer les arguments positionnels
+    let positional = flag_args()
+    println("")
+    println("Arguments positionnels: " + len(positional).toString())
+    for i in 0..len(positional) {
+        println("  [" + i.toString() + "] = " + positional[i])
+    }
+    
+    println("")
+    println("✅ Test réussi!")
+}

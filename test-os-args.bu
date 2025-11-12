@@ -1,0 +1,24 @@
+// Test du module OS - arguments de ligne de commande
+
+func main() {
+    println("=== Test osGetArgs() ===")
+    
+    // Récupérer tous les arguments
+    let args = osGetArgs()
+    
+    println("Nombre d'arguments: " + len(args).toString())
+    println("")
+    
+    // Afficher chaque argument
+    for i in 0..len(args) {
+        println("  args[" + i.toString() + "] = " + args[i])
+    }
+    
+    println("")
+    println("=== Test osGetCwd() ===")
+    let cwd = osGetCwd()
+    println("Répertoire courant: " + cwd)
+    
+    println("")
+    println("✅ Tests terminés!")
+}

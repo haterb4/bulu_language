@@ -1,0 +1,12 @@
+func main() {
+    // Test si les builtins de base fonctionnent
+    println("println works")
+    
+    // Test len
+    let x = len("test")
+    println("len works")
+    
+    // Test getArgs
+    let args = getArgs()
+    println("getArgs works")
+}

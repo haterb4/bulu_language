@@ -1,0 +1,22 @@
+import { args, getEnv, cwd } from "std/os"
+
+func main() {
+    println("=== Test std/os avec import ===")
+    
+    // Récupérer les arguments
+    let myArgs = args()
+    println("Nombre d'arguments: " + len(myArgs).toString())
+    
+    for i in 0..len(myArgs) {
+        println("  args[" + i.toString() + "] = " + myArgs[i])
+    }
+    
+    println("")
+    
+    // Récupérer le répertoire courant
+    let currentDir = cwd()
+    println("Répertoire courant: " + currentDir)
+    
+    println("")
+    println("✅ Test réussi!")
+}

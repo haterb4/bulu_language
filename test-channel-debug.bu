@@ -1,0 +1,36 @@
+// Test channel iteration debug
+
+func producer(ch: chan<- int32, count: int32) {
+    println("Producer starting")
+    for i in 0..<count {
+        println("Producing: " + string(i))
+        ch <- i
+        println("Produced: " + string(i))
+    }
+    println("Producer closing channel")
+    close(ch)
+    println("Producer done")
+}
+
+func consumer(ch: <-chan int32) {
+    println("Consumer starting")
+    let count = 0
+    for value in ch {
+        println("Consumed: " + string(value))
+        count = count + 1
+    }
+    println("Consumer done, consumed " + string(count) + " values")
+}
+
+func main() {
+    println("Creating channel")
+    let ch = make(chan int32, 5)
+    
+    println("Starting producer")
+    run producer(ch, 5)
+    
+    println("Starting consumer")
+    consumer(ch)
+    
+    println("✅ Test passed")
+}

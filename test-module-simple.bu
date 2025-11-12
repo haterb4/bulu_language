@@ -1,0 +1,5 @@
+import "std/os" as os
+
+func main() {
+    println("Test module import")
+}

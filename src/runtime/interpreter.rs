@@ -1940,8 +1940,20 @@ impl Interpreter {
             .ok_or_else(|| BuluError::Other("No main function found".to_string()))?
             .clone();
 
+        // Prepare arguments for main function
+        // If main accepts arguments, pass them from the program args
+        let main_args = if !main_function.params.is_empty() {
+            // Get program arguments from std::io
+            match crate::std::io::get_args() {
+                Ok(args_value) => vec![args_value],
+                Err(_) => vec![RuntimeValue::Array(vec![])], // Empty array if no args
+            }
+        } else {
+            Vec::new()
+        };
+
         // Execute main function
-        self.call_function(&main_function, Vec::new())
+        self.call_function(&main_function, main_args)
     }
 
     /// Execute source code directly
@@ -2229,6 +2241,50 @@ impl Interpreter {
         function: &IrFunction,
         args: Vec<RuntimeValue>,
     ) -> Result<(RuntimeValue, Option<RuntimeValue>)> {
+        // If function is async, create a promise and execute asynchronously
+        if function.is_async {
+            // Clone function and args for async execution
+            let function_clone = function.clone();
+            let args_clone = args.clone();
+
+            // Create a pending promise
+            let promise_id = {
+                let mut registry = self.promise_registry.lock().unwrap();
+                registry.create_promise()
+            };
+
+            // Execute the function synchronously for now (simplified async)
+            // In a real implementation, this would be scheduled on a thread pool
+            let mut frame = ExecutionFrame::new(function_clone.name.clone());
+
+            // Set up parameters
+            for (i, arg) in args_clone.into_iter().enumerate() {
+                if i < function_clone.params.len() {
+                    let param = &function_clone.params[i];
+                    frame.locals.insert(param.name.clone(), arg.clone());
+                    frame.registers.insert(param.register.id, arg);
+                }
+            }
+
+            self.call_stack.push(frame);
+            let result = self.execute_function(&function_clone);
+            self.call_stack.pop();
+
+            // Update promise with result
+            let mut registry = self.promise_registry.lock().unwrap();
+            match result {
+                Ok(value) => {
+                    let _ = registry.resolve_promise(promise_id, value);
+                }
+                Err(e) => {
+                    let _ = registry.reject_promise(promise_id, e.to_string());
+                }
+            }
+
+            return Ok((RuntimeValue::Promise(promise_id as u32), None));
+        }
+
+        // Regular synchronous function call
         let mut frame = ExecutionFrame::new(function.name.clone());
 
         // Set up parameters in both locals and registers
@@ -2365,7 +2421,10 @@ impl Interpreter {
                 if let Some(value) = self.globals.get(name) {
                     Ok(value.clone())
                 } else {
-                    Err(BuluError::Other(format!("Global variable '{}' not found", name)))
+                    Err(BuluError::Other(format!(
+                        "Global variable '{}' not found",
+                        name
+                    )))
                 }
             }
             IrValue::Function(name) => {
@@ -2396,6 +2455,33 @@ impl Interpreter {
                         // Call function
                         if let Some(builtin) = self.builtin_registry.get(function_name) {
                             builtin(&args)?
+                        } else if let Some(global_value) = self.globals.get(function_name) {
+                            // Check if it's a function reference (e.g., imported with alias)
+                            if let RuntimeValue::String(s) = global_value {
+                                if s.starts_with("function:") {
+                                    let actual_function_name = s.strip_prefix("function:").unwrap();
+                                    if let Some(builtin) =
+                                        self.builtin_registry.get(actual_function_name)
+                                    {
+                                        builtin(&args)?
+                                    } else {
+                                        return Err(BuluError::Other(format!(
+                                            "Unknown function: {}",
+                                            actual_function_name
+                                        )));
+                                    }
+                                } else {
+                                    return Err(BuluError::Other(format!(
+                                        "Cannot call non-function value: {}",
+                                        function_name
+                                    )));
+                                }
+                            } else {
+                                return Err(BuluError::Other(format!(
+                                    "Cannot call non-function value: {}",
+                                    function_name
+                                )));
+                            }
                         } else {
                             // Look for user-defined function
                             let user_function = if let Some(program) = &self.program {
@@ -3089,6 +3175,22 @@ impl Interpreter {
                     }
                 }
             }
+            IrOpcode::IsNull => {
+                if instruction.operands.len() != 1 {
+                    return Err(BuluError::Other(
+                        "IsNull instruction requires exactly one operand".to_string(),
+                    ));
+                }
+
+                let value = self.evaluate_value(&instruction.operands[0])?;
+                let is_null = matches!(value, RuntimeValue::Null);
+
+                if let Some(result_reg) = &instruction.result {
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.registers.insert(result_reg.id, RuntimeValue::Bool(is_null));
+                    }
+                }
+            }
             IrOpcode::Lt => {
                 if instruction.operands.len() != 2 {
                     return Err(BuluError::Other(
@@ -3631,6 +3733,17 @@ impl Interpreter {
                             }
                         }
                     }
+                    RuntimeValue::Map(map) => {
+                        // Handle module access (e.g., os.args)
+                        if let Some(value) = map.get(member_name) {
+                            value.clone()
+                        } else {
+                            return Err(BuluError::Other(format!(
+                                "Module does not export '{}'",
+                                member_name
+                            )));
+                        }
+                    }
                     _ => {
                         // Handle built-in methods for other types
                         match member_name.as_str() {
@@ -3738,6 +3851,12 @@ impl Interpreter {
                                 0
                             }
                         }
+                    }
+                    RuntimeValue::Channel(_) => {
+                        // For channels, return a very large value to indicate infinite iteration
+                        // The loop will use ChannelReceive and check for closed channel
+                        // When the channel is closed, ArrayAccess will return null which should break the loop
+                        i64::MAX
                     }
                     _ => {
                         return Err(BuluError::Other(format!(
@@ -3912,6 +4031,48 @@ impl Interpreter {
 
                 let array = self.evaluate_value(&instruction.operands[0])?;
                 let index = self.evaluate_value(&instruction.operands[1])?;
+
+                // Special case: if array is a channel, receive from it instead of indexing
+                if let RuntimeValue::Channel(channel_id) = array {
+                    // Use a loop to poll the channel without holding the lock
+                    loop {
+                        let result = {
+                            let mut registry = get_global_channel_registry().lock().unwrap();
+                            if let Some(channel) = registry.get_mut(channel_id) {
+                                channel.try_receive()?
+                            } else {
+                                return Err(BuluError::Other("Channel not found".to_string()));
+                            }
+                        }; // Lock is released here
+                        
+                        match result {
+                            crate::runtime::channels::ChannelResult::Ok(value) => {
+                                // Store result in register
+                                if let Some(result_reg) = &instruction.result {
+                                    if let Some(frame) = self.call_stack.last_mut() {
+                                        frame.registers.insert(result_reg.id, value);
+                                    }
+                                }
+                                break;
+                            }
+                            crate::runtime::channels::ChannelResult::Closed => {
+                                // Channel closed, store null to signal end of iteration
+                                if let Some(result_reg) = &instruction.result {
+                                    if let Some(frame) = self.call_stack.last_mut() {
+                                        frame.registers.insert(result_reg.id, RuntimeValue::Null);
+                                    }
+                                }
+                                break;
+                            }
+                            crate::runtime::channels::ChannelResult::WouldBlock => {
+                                // Release lock and sleep before retrying
+                                std::thread::sleep(std::time::Duration::from_millis(1));
+                                continue;
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
 
                 // Handle both single indexing and slicing
                 let result = match index {
@@ -4279,6 +4440,64 @@ impl Interpreter {
                     }
                 }
             }
+            IrOpcode::Await => {
+                // await promise_expr
+                if instruction.operands.len() != 1 {
+                    return Err(BuluError::Other(
+                        "Await requires exactly 1 operand (promise)".to_string(),
+                    ));
+                }
+
+                let promise_value = self.evaluate_value(&instruction.operands[0])?;
+
+                match promise_value {
+                    RuntimeValue::Promise(promise_id) => {
+                        // Poll the promise until it's resolved or rejected
+                        loop {
+                            let registry = self.promise_registry.lock().unwrap();
+                            if let Some(promise) = registry.get_promise(promise_id as usize) {
+                                use crate::runtime::promises::PromiseState;
+                                match &promise.state {
+                                    PromiseState::Resolved(value) => {
+                                        // Promise resolved, store result
+                                        if let Some(result_reg) = &instruction.result {
+                                            if let Some(frame) = self.call_stack.last_mut() {
+                                                frame
+                                                    .registers
+                                                    .insert(result_reg.id, value.clone());
+                                            }
+                                        }
+                                        break;
+                                    }
+                                    PromiseState::Rejected(error) => {
+                                        // Promise rejected, return error
+                                        return Err(BuluError::RuntimeError {
+                                            message: format!("Promise rejected: {}", error),
+                                            file: None,
+                                        });
+                                    }
+                                    PromiseState::Pending => {
+                                        // Still pending, continue polling
+                                        drop(registry); // Release lock before sleeping
+                                        std::thread::sleep(std::time::Duration::from_millis(1));
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                return Err(BuluError::RuntimeError {
+                                    message: format!("Promise {} not found", promise_id),
+                                    file: None,
+                                });
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(BuluError::Other(
+                            "Cannot await non-promise value".to_string(),
+                        ));
+                    }
+                }
+            }
             IrOpcode::Spawn => {
                 // println!("🚀 MAIN THREAD: Processing IrOpcode::Spawn instruction with {} operands", instruction.operands.len());
 
@@ -4294,7 +4513,7 @@ impl Interpreter {
                     // Multiple operands: function name + arguments
                     let function_operand = &instruction.operands[0];
                     // println!("🚀 MAIN THREAD: Spawn function operand: {:?}", function_operand);
-                    
+
                     let function_name = match function_operand {
                         IrValue::Global(name) => name.clone(),
                         _ => {
@@ -4303,16 +4522,16 @@ impl Interpreter {
                             ));
                         }
                     };
-                    
+
                     // Collect arguments
                     let mut args = Vec::new();
                     for arg_operand in &instruction.operands[1..] {
                         let arg_value = self.evaluate_ir_value(arg_operand)?;
                         args.push(arg_value);
                     }
-                    
+
                     // println!("🚀 MAIN THREAD: Spawning goroutine for function '{}' with {} args", function_name, args.len());
-                    
+
                     // Look up the function in the program
                     if let Some(program) = &self.program {
                         if program.functions.iter().any(|f| f.name == function_name) {
@@ -4330,7 +4549,7 @@ impl Interpreter {
 
                             // Spawn the goroutine
                             let goroutine_id = crate::runtime::goroutine::spawn(task);
-                            
+
                             // println!("🚀 MAIN THREAD: Goroutine {} spawned for function '{}', continuing main thread execution", goroutine_id, function_name);
 
                             // Store the goroutine ID in the result register
@@ -4342,7 +4561,7 @@ impl Interpreter {
                                     );
                                 }
                             }
-                            
+
                             // println!("🚀 MAIN THREAD: Goroutine spawn completed, main thread continues");
                             return Ok(());
                         } else {
@@ -4355,7 +4574,7 @@ impl Interpreter {
                         return Err(BuluError::Other("No program loaded".to_string()));
                     }
                 }
-                
+
                 // Single operand: legacy handling
                 let operand = &instruction.operands[0];
                 // println!("🚀 MAIN THREAD: Spawn single operand: {:?}", operand);
@@ -4623,6 +4842,7 @@ impl MockChannelRegistry {
 pub struct MockChannel {
     buffer_size: usize,
     messages: Vec<RuntimeValue>,
+    closed: bool,
 }
 
 impl MockChannel {
@@ -4630,6 +4850,7 @@ impl MockChannel {
         Self {
             buffer_size,
             messages: Vec::new(),
+            closed: false,
         }
     }
 
@@ -4650,6 +4871,8 @@ impl MockChannel {
             // Use FIFO behavior - remove first element
             let value = self.messages.remove(0);
             Ok(crate::runtime::channels::ChannelResult::Ok(value))
+        } else if self.closed {
+            Ok(crate::runtime::channels::ChannelResult::Closed)
         } else {
             Ok(crate::runtime::channels::ChannelResult::WouldBlock)
         }
@@ -4672,8 +4895,8 @@ impl MockChannel {
     }
 
     pub fn close(&mut self) -> Result<()> {
-        // For mock implementation, just clear the messages
-        self.messages.clear();
+        // Mark channel as closed
+        self.closed = true;
         Ok(())
     }
 
@@ -4694,13 +4917,19 @@ impl MockChannel {
         }
     }
 
-    /// Blocking receive - wait until a message is available
+    /// Blocking receive - wait until a message is available or channel is closed
     pub fn receive(&mut self) -> Result<crate::runtime::channels::ChannelResult> {
-        // Block until a message is available
-        while self.messages.is_empty() {
+        // Block until a message is available or channel is closed
+        while self.messages.is_empty() && !self.closed {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        let value = self.messages.remove(0);
-        Ok(crate::runtime::channels::ChannelResult::Ok(value))
+
+        if !self.messages.is_empty() {
+            let value = self.messages.remove(0);
+            Ok(crate::runtime::channels::ChannelResult::Ok(value))
+        } else {
+            // Channel is closed and empty
+            Ok(crate::runtime::channels::ChannelResult::Closed)
+        }
     }
 }

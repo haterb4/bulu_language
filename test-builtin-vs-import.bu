@@ -1,0 +1,7 @@
+// Test sans import - println est builtin
+func main() {
+    println("println fonctionne sans import")
+    
+    // args() nécessite un import
+    // let myArgs = args()  // Ceci causerait une erreur
+}

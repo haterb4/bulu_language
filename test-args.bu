@@ -1,0 +1,18 @@
+// Test des arguments de ligne de commande
+
+func main(args: []string) {
+    println("=== Test des arguments ===")
+    println("Nombre d'arguments: " + len(args).toString())
+    println("")
+    
+    if len(args) == 0 {
+        println("Aucun argument passé")
+    } else {
+        for i in 0..len(args) {
+            println("  args[" + i.toString() + "] = " + args[i])
+        }
+    }
+    
+    println("")
+    println("✅ Test terminé!")
+}

@@ -1,0 +1,7 @@
+import "std/time" as time
+
+func main() {
+    println("Avant sleep")
+    time.sleep(100)
+    println("Après sleep")
+}

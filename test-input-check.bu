@@ -1,0 +1,9 @@
+func main() {
+    println("Test input builtin")
+    // Commenté car interactif
+    // let name = input("Name: ")
+    // println("Hello " + name)
+    
+    // Test readLine aussi
+    println("readLine exists")
+}
