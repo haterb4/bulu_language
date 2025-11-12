@@ -1148,7 +1148,7 @@ fn add_dependency(package: &str, version: Option<&str>, verbose: bool) -> Result
         
         // Get registry URL from config or use default
         let registry_url = std::env::var("BULU_REGISTRY")
-            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+            .unwrap_or_else(|_| "https://bulu-language.onrender.com".to_string());
 
         // Create HTTP client
         let client = RegistryHttpClient::new(registry_url);
@@ -1272,7 +1272,7 @@ fn update_dependencies(verbose: bool) -> Result<()> {
         }
 
         let registry_url = std::env::var("BULU_REGISTRY")
-            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+            .unwrap_or_else(|_| "https://bulu-language.onrender.com".to_string());
 
         let client = RegistryHttpClient::new(registry_url);
 
@@ -1346,7 +1346,7 @@ fn install_dependencies(verbose: bool) -> Result<()> {
         }
 
         let registry_url = std::env::var("BULU_REGISTRY")
-            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+            .unwrap_or_else(|_| "https://bulu-language.onrender.com".to_string());
 
         let client = RegistryHttpClient::new(registry_url);
 
@@ -1457,7 +1457,7 @@ fn search_packages(query: &str, limit: Option<usize>) -> Result<()> {
         println!("{} Searching for: {}", "Searching".blue().bold(), query);
 
         let registry_url = std::env::var("BULU_REGISTRY")
-            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+            .unwrap_or_else(|_| "https://bulu-language.onrender.com".to_string());
 
         let client = RegistryHttpClient::new(registry_url);
         let results = client.search(query, limit).await?;
@@ -1594,7 +1594,7 @@ fn publish_package(verbose: bool, dry_run: bool) -> Result<()> {
         }
 
         let registry_url = std::env::var("BULU_REGISTRY")
-            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+            .unwrap_or_else(|_| "https://bulu-language.onrender.com".to_string());
 
         let client = RegistryHttpClient::new(registry_url);
         client.publish(request).await?;

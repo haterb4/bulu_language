@@ -71,5 +71,4 @@ node_modules/
 /registry-server/.env
 /registry-server/.env.test
 /registry-server/.env.example
-/registry-server/migrations/
 registry-server/target/

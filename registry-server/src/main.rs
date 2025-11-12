@@ -52,6 +52,12 @@ struct PackageInfo {
 }
 
 #[derive(Debug, Serialize)]
+struct SearchResponse {
+    packages: Vec<PackageInfo>,
+    total: usize,
+}
+
+#[derive(Debug, Serialize)]
 struct VersionInfo {
     version: String,
     description: Option<String>,
@@ -370,7 +376,7 @@ async fn delete_package(
 async fn search_packages(
     State(state): State<Arc<AppState>>,
     Query(query): Query<SearchQuery>,
-) -> Result<Json<Vec<PackageInfo>>, (StatusCode, String)> {
+) -> Result<Json<SearchResponse>, (StatusCode, String)> {
     info!("🔍 Search query: {}", query.q);
     
     let packages = state.db.search_packages(&query.q, query.limit as u64).await
@@ -416,5 +422,9 @@ async fn search_packages(
         });
     }
     
-    Ok(Json(result))
+    let total = result.len();
+    Ok(Json(SearchResponse {
+        packages: result,
+        total,
+    }))
 }
