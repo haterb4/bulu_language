@@ -1,0 +1,26 @@
+import { add, multiply, square, power, abs, max, min } from "./lib.bu"
+
+func main() {
+    println("=== Math Utils Demo ===")
+    
+    let result1 = add(2, 3)
+    println("add(2, 3) = " + result1)
+    
+    let result2 = multiply(4, 5)
+    println("multiply(4, 5) = " + result2)
+    
+    let result3 = square(7)
+    println("square(7) = " + result3)
+    
+    let result4 = power(2, 8)
+    println("power(2, 8) = " + result4)
+    
+    let result5 = abs(0 - 42)
+    println("abs(-42) = " + result5)
+    
+    let result6 = max(10, 20)
+    println("max(10, 20) = " + result6)
+    
+    let result7 = min(10, 20)
+    println("min(10, 20) = " + result7)
+}

@@ -68,8 +68,8 @@ impl Environment {
 
     /// Check if a variable exists in any scope
     pub fn contains(&self, name: &str) -> bool {
-        self.variables.contains_key(name) || 
-        self.parent.as_ref().map_or(false, |p| p.contains(name))
+        self.variables.contains_key(name)
+            || self.parent.as_ref().map_or(false, |p| p.contains(name))
     }
 }
 
@@ -90,7 +90,8 @@ pub struct AstInterpreter {
     /// Channel registry for managing channels
     channel_registry: HashMap<u32, std::sync::Arc<crate::runtime::channels::Channel>>,
     /// Promise registry for managing promises
-    promise_registry: HashMap<u32, std::sync::Arc<std::sync::Mutex<crate::runtime::promises::RuntimePromise>>>,
+    promise_registry:
+        HashMap<u32, std::sync::Arc<std::sync::Mutex<crate::runtime::promises::RuntimePromise>>>,
     /// Next channel ID
     next_channel_id: u32,
     /// Next promise ID
@@ -112,34 +113,51 @@ impl AstInterpreter {
             next_channel_id: 1,
             next_promise_id: 1,
         };
-        
+
         // Add built-in identifiers
-        interpreter.environment.define("chan".to_string(), RuntimeValue::String("chan".to_string()));
-        
+        interpreter
+            .environment
+            .define("chan".to_string(), RuntimeValue::String("chan".to_string()));
+
         // Add primitive type identifiers for make() calls
         let primitive_types = vec![
-            "int8", "int16", "int32", "int64",
-            "uint8", "uint16", "uint32", "uint64", 
-            "float32", "float64", "bool", "string",
-            "char", "byte", "rune", "any"
+            "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float32",
+            "float64", "bool", "string", "char", "byte", "rune", "any",
         ];
-        
+
         for prim_type in primitive_types {
-            interpreter.environment.define(prim_type.to_string(), RuntimeValue::String(prim_type.to_string()));
+            interpreter.environment.define(
+                prim_type.to_string(),
+                RuntimeValue::String(prim_type.to_string()),
+            );
         }
-        
+
         // Add channel type identifiers
         let channel_types = vec![
-            "chan_int8", "chan_int16", "chan_int32", "chan_int64",
-            "chan_uint8", "chan_uint16", "chan_uint32", "chan_uint64",
-            "chan_float32", "chan_float64", "chan_bool", "chan_char",
-            "chan_string", "chan_any", "chan_unknown"
+            "chan_int8",
+            "chan_int16",
+            "chan_int32",
+            "chan_int64",
+            "chan_uint8",
+            "chan_uint16",
+            "chan_uint32",
+            "chan_uint64",
+            "chan_float32",
+            "chan_float64",
+            "chan_bool",
+            "chan_char",
+            "chan_string",
+            "chan_any",
+            "chan_unknown",
         ];
-        
+
         for chan_type in channel_types {
-            interpreter.environment.define(chan_type.to_string(), RuntimeValue::String(chan_type.to_string()));
+            interpreter.environment.define(
+                chan_type.to_string(),
+                RuntimeValue::String(chan_type.to_string()),
+            );
         }
-        
+
         interpreter
     }
 
@@ -148,6 +166,21 @@ impl AstInterpreter {
         let mut interpreter = Self::new();
         interpreter.current_file = Some(file_path);
         interpreter
+    }
+
+    /// Set the current file context
+    pub fn set_current_file(&mut self, file_path: String) {
+        self.current_file = Some(file_path);
+    }
+
+    /// Get a variable from the environment
+    pub fn get_variable(&self, name: &str) -> Option<RuntimeValue> {
+        self.environment.get(name).cloned()
+    }
+
+    /// Get a function definition
+    pub fn get_function_definition(&self, name: &str) -> Option<FunctionDecl> {
+        self.function_definitions.get(name).cloned()
     }
 
     /// Execute a program
@@ -216,7 +249,10 @@ impl AstInterpreter {
     }
 
     /// Execute multiple variable declaration
-    fn execute_multiple_variable_decl(&mut self, decl: &MultipleVariableDecl) -> Result<RuntimeValue> {
+    fn execute_multiple_variable_decl(
+        &mut self,
+        decl: &MultipleVariableDecl,
+    ) -> Result<RuntimeValue> {
         for var_decl in &decl.declarations {
             let value = if let Some(initializer) = &var_decl.initializer {
                 self.execute_expression(initializer)?
@@ -229,7 +265,8 @@ impl AstInterpreter {
                 }
             };
 
-            self.environment.define(var_decl.name.clone(), value.clone());
+            self.environment
+                .define(var_decl.name.clone(), value.clone());
 
             // If exported, also add to globals
             if decl.is_exported {
@@ -241,13 +278,16 @@ impl AstInterpreter {
     }
 
     /// Execute multiple assignment statement
-    fn execute_multiple_assignment_stmt(&mut self, stmt: &MultipleAssignmentStmt) -> Result<RuntimeValue> {
+    fn execute_multiple_assignment_stmt(
+        &mut self,
+        stmt: &MultipleAssignmentStmt,
+    ) -> Result<RuntimeValue> {
         // First, evaluate all the values
         let mut values = Vec::new();
         for value_expr in &stmt.values {
             values.push(self.execute_expression(value_expr)?);
         }
-        
+
         // Then assign them to the targets
         for (i, target_expr) in stmt.targets.iter().enumerate() {
             let value = if i < values.len() {
@@ -255,7 +295,7 @@ impl AstInterpreter {
             } else {
                 RuntimeValue::Null
             };
-            
+
             // For now, only support identifier targets
             if let Expression::Identifier(ident) = target_expr {
                 self.environment.set(&ident.name, value)?;
@@ -266,39 +306,53 @@ impl AstInterpreter {
                 });
             }
         }
-        
+
         Ok(RuntimeValue::Null)
     }
 
     /// Execute pattern assignment for destructuring
-    fn execute_pattern_assignment(&mut self, pattern: &Pattern, value: RuntimeValue, is_exported: bool) -> Result<()> {
+    fn execute_pattern_assignment(
+        &mut self,
+        pattern: &Pattern,
+        value: RuntimeValue,
+        is_exported: bool,
+    ) -> Result<()> {
         match pattern {
             Pattern::Identifier(name, _) => {
                 self.environment.define(name.clone(), value.clone());
-                
+
                 if is_exported {
                     self.globals.define(name.clone(), value.clone());
                 }
                 Ok(())
             }
-            Pattern::Struct(struct_pattern) => {
-                match value {
-                    RuntimeValue::Struct { fields: struct_fields, .. } => {
-                        for field_pattern in &struct_pattern.fields {
-                            if let Some(field_value) = struct_fields.get(&field_pattern.name) {
-                                self.execute_pattern_assignment(&field_pattern.pattern, field_value.clone(), is_exported)?;
-                            } else {
-                                self.execute_pattern_assignment(&field_pattern.pattern, RuntimeValue::Null, is_exported)?;
-                            }
+            Pattern::Struct(struct_pattern) => match value {
+                RuntimeValue::Struct {
+                    fields: struct_fields,
+                    ..
+                } => {
+                    for field_pattern in &struct_pattern.fields {
+                        if let Some(field_value) = struct_fields.get(&field_pattern.name) {
+                            self.execute_pattern_assignment(
+                                &field_pattern.pattern,
+                                field_value.clone(),
+                                is_exported,
+                            )?;
+                        } else {
+                            self.execute_pattern_assignment(
+                                &field_pattern.pattern,
+                                RuntimeValue::Null,
+                                is_exported,
+                            )?;
                         }
-                        Ok(())
                     }
-                    _ => Err(BuluError::RuntimeError {
-                        message: "Cannot destructure non-object value".to_string(),
-                        file: self.current_file.clone(),
-                    })
+                    Ok(())
                 }
-            }
+                _ => Err(BuluError::RuntimeError {
+                    message: "Cannot destructure non-object value".to_string(),
+                    file: self.current_file.clone(),
+                }),
+            },
             Pattern::Array(array_pattern) => {
                 match value {
                     RuntimeValue::Array(ref arr) => {
@@ -308,7 +362,11 @@ impl AstInterpreter {
                             } else {
                                 RuntimeValue::Null
                             };
-                            self.execute_pattern_assignment(element_pattern, element_value, is_exported)?;
+                            self.execute_pattern_assignment(
+                                element_pattern,
+                                element_value,
+                                is_exported,
+                            )?;
                         }
                         Ok(())
                     }
@@ -319,7 +377,11 @@ impl AstInterpreter {
                             } else {
                                 RuntimeValue::Null
                             };
-                            self.execute_pattern_assignment(element_pattern, element_value, is_exported)?;
+                            self.execute_pattern_assignment(
+                                element_pattern,
+                                element_value,
+                                is_exported,
+                            )?;
                         }
                         Ok(())
                     }
@@ -327,36 +389,46 @@ impl AstInterpreter {
                     _ => {
                         // For now, treat other values as single-element tuples
                         if array_pattern.elements.len() == 1 {
-                            self.execute_pattern_assignment(&array_pattern.elements[0], value, is_exported)?;
+                            self.execute_pattern_assignment(
+                                &array_pattern.elements[0],
+                                value,
+                                is_exported,
+                            )?;
                         } else {
                             // Fill remaining with null
                             for element_pattern in &array_pattern.elements {
-                                self.execute_pattern_assignment(element_pattern, RuntimeValue::Null, is_exported)?;
+                                self.execute_pattern_assignment(
+                                    element_pattern,
+                                    RuntimeValue::Null,
+                                    is_exported,
+                                )?;
                             }
                         }
                         Ok(())
                     }
                 }
             }
-            Pattern::Tuple(tuple_pattern) => {
-                match value {
-                    RuntimeValue::Tuple(ref tuple_values) => {
-                        for (i, element_pattern) in tuple_pattern.elements.iter().enumerate() {
-                            let element_value = if i < tuple_values.len() {
-                                tuple_values[i].clone()
-                            } else {
-                                RuntimeValue::Null
-                            };
-                            self.execute_pattern_assignment(element_pattern, element_value, is_exported)?;
-                        }
-                        Ok(())
+            Pattern::Tuple(tuple_pattern) => match value {
+                RuntimeValue::Tuple(ref tuple_values) => {
+                    for (i, element_pattern) in tuple_pattern.elements.iter().enumerate() {
+                        let element_value = if i < tuple_values.len() {
+                            tuple_values[i].clone()
+                        } else {
+                            RuntimeValue::Null
+                        };
+                        self.execute_pattern_assignment(
+                            element_pattern,
+                            element_value,
+                            is_exported,
+                        )?;
                     }
-                    _ => Err(BuluError::RuntimeError {
-                        message: "Cannot destructure non-tuple value".to_string(),
-                        file: self.current_file.clone(),
-                    })
+                    Ok(())
                 }
-            }
+                _ => Err(BuluError::RuntimeError {
+                    message: "Cannot destructure non-tuple value".to_string(),
+                    file: self.current_file.clone(),
+                }),
+            },
             // Handle other pattern types that we don't need for destructuring
             Pattern::Wildcard(_) => Ok(()),
             Pattern::Literal(_, _) => Ok(()),
@@ -368,11 +440,13 @@ impl AstInterpreter {
     /// Execute function declaration
     fn execute_function_decl(&mut self, decl: &FunctionDecl) -> Result<RuntimeValue> {
         // Store the function declaration for later execution
-        self.function_definitions.insert(decl.name.clone(), decl.clone());
-        
+        self.function_definitions
+            .insert(decl.name.clone(), decl.clone());
+
         // Store function reference in environment
         let function_value = RuntimeValue::String(format!("function:{}", decl.name));
-        self.environment.define(decl.name.clone(), function_value.clone());
+        self.environment
+            .define(decl.name.clone(), function_value.clone());
 
         // If exported, also add to globals
         if decl.is_exported {
@@ -385,11 +459,13 @@ impl AstInterpreter {
     /// Execute struct declaration
     fn execute_struct_decl(&mut self, decl: &StructDecl) -> Result<RuntimeValue> {
         // Store the complete struct definition for later use
-        self.struct_definitions.insert(decl.name.clone(), decl.clone());
-        
+        self.struct_definitions
+            .insert(decl.name.clone(), decl.clone());
+
         // Store struct as a type identifier in the environment
         let struct_value = RuntimeValue::String(format!("struct:{}", decl.name));
-        self.environment.define(decl.name.clone(), struct_value.clone());
+        self.environment
+            .define(decl.name.clone(), struct_value.clone());
 
         // If exported, also add to globals
         if decl.is_exported {
@@ -403,8 +479,9 @@ impl AstInterpreter {
     fn execute_interface_decl(&mut self, decl: &InterfaceDecl) -> Result<RuntimeValue> {
         // For now, just store interface as a placeholder
         let interface_value = RuntimeValue::String(format!("interface:{}", decl.name));
-        
-        self.environment.define(decl.name.clone(), interface_value.clone());
+
+        self.environment
+            .define(decl.name.clone(), interface_value.clone());
 
         // If exported, also add to globals
         if decl.is_exported {
@@ -418,7 +495,7 @@ impl AstInterpreter {
     fn execute_type_alias_decl(&mut self, decl: &TypeAliasDecl) -> Result<RuntimeValue> {
         // For now, just store type alias as a placeholder
         let type_value = RuntimeValue::String(format!("type:{}", decl.name));
-        
+
         self.environment.define(decl.name.clone(), type_value);
 
         Ok(RuntimeValue::Null)
@@ -433,11 +510,17 @@ impl AstInterpreter {
             }
         }
 
-        let imported_symbols = self.module_resolver.resolve_import(stmt)?;
+        let (imported_symbols, imported_functions) =
+            self.module_resolver.resolve_import_with_functions(stmt)?;
 
         // Add imported symbols to current environment
         for (name, value) in imported_symbols {
             self.environment.define(name, value);
+        }
+
+        // Add imported function definitions to function_definitions
+        for (name, func_def) in imported_functions {
+            self.function_definitions.insert(name, func_def);
         }
 
         Ok(RuntimeValue::Null)
@@ -451,11 +534,16 @@ impl AstInterpreter {
         // Handle re-exports
         if let Statement::Import(import_stmt) = stmt.item.as_ref() {
             // This is a re-export: export { items } from "path"
-            let imported_symbols = self.module_resolver.resolve_import(import_stmt)?;
-            
+            let (imported_symbols, imported_functions) = self.module_resolver.resolve_import_with_functions(import_stmt)?;
+
             // Add re-exported symbols to globals
             for (name, value) in imported_symbols {
                 self.globals.define(name, value);
+            }
+            
+            // Add re-exported function definitions
+            for (name, func_def) in imported_functions {
+                self.function_definitions.insert(name, func_def);
             }
         }
 
@@ -472,7 +560,7 @@ impl AstInterpreter {
         // Create new scope
         let parent_env = self.environment.clone();
         self.environment = Environment::with_parent(parent_env.clone());
-        
+
         let mut last_value = RuntimeValue::Null;
         for statement in &stmt.statements {
             last_value = self.execute_statement(statement)?;
@@ -480,7 +568,7 @@ impl AstInterpreter {
 
         // Restore previous scope
         self.environment = parent_env;
-        
+
         Ok(last_value)
     }
 
@@ -533,10 +621,17 @@ impl AstInterpreter {
         if let Some(value) = self.environment.get(&expr.name) {
             Ok(value.clone())
         } else {
-            Err(BuluError::RuntimeError {
-                message: format!("Undefined variable '{}'", expr.name),
-                file: self.current_file.clone(),
-            })
+            // Check if it's a built-in function name
+            if matches!(expr.name.as_str(), "ord" | "chr" | "len" | "println" | "print" | "make" | "append" | "close") {
+                // Return a placeholder for built-in functions
+                // They will be handled in execute_call_expr
+                Ok(RuntimeValue::Null)
+            } else {
+                Err(BuluError::RuntimeError {
+                    message: format!("Undefined variable '{}'", expr.name),
+                    file: self.current_file.clone(),
+                })
+            }
         }
     }
 
@@ -544,57 +639,67 @@ impl AstInterpreter {
     fn execute_binary_expr(&mut self, expr: &BinaryExpr) -> Result<RuntimeValue> {
         let left = self.execute_expression(&expr.left)?;
         let right = self.execute_expression(&expr.right)?;
-        
+
         match expr.operator {
-            BinaryOperator::Add => {
-                match (left, right) {
-                    (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => Ok(RuntimeValue::Integer(a + b)),
-                    (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => Ok(RuntimeValue::Float64(a + b)),
-                    (RuntimeValue::String(a), RuntimeValue::String(b)) => Ok(RuntimeValue::String(a + &b)),
-                    (RuntimeValue::String(a), RuntimeValue::Integer(b)) => Ok(RuntimeValue::String(a + &b.to_string())),
-                    (RuntimeValue::Integer(a), RuntimeValue::String(b)) => Ok(RuntimeValue::String(a.to_string() + &b)),
-                    _ => Ok(RuntimeValue::Null),
+            BinaryOperator::Add => match (left, right) {
+                (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => {
+                    Ok(RuntimeValue::Integer(a + b))
                 }
-            }
-            BinaryOperator::Subtract => {
-                match (left, right) {
-                    (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => Ok(RuntimeValue::Integer(a - b)),
-                    (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => Ok(RuntimeValue::Float64(a - b)),
-                    _ => Ok(RuntimeValue::Null),
+                (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => {
+                    Ok(RuntimeValue::Float64(a + b))
                 }
-            }
-            BinaryOperator::Multiply => {
-                match (left, right) {
-                    (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => Ok(RuntimeValue::Integer(a * b)),
-                    (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => Ok(RuntimeValue::Float64(a * b)),
-                    _ => Ok(RuntimeValue::Null),
+                (RuntimeValue::String(a), RuntimeValue::String(b)) => {
+                    Ok(RuntimeValue::String(a + &b))
                 }
-            }
-            BinaryOperator::Divide => {
-                match (left, right) {
-                    (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => {
-                        if b != 0 {
-                            Ok(RuntimeValue::Integer(a / b))
-                        } else {
-                            Err(BuluError::RuntimeError {
-                                message: "Division by zero".to_string(),
-                                file: self.current_file.clone(),
-                            })
-                        }
+                (RuntimeValue::String(a), RuntimeValue::Integer(b)) => {
+                    Ok(RuntimeValue::String(a + &b.to_string()))
+                }
+                (RuntimeValue::Integer(a), RuntimeValue::String(b)) => {
+                    Ok(RuntimeValue::String(a.to_string() + &b))
+                }
+                _ => Ok(RuntimeValue::Null),
+            },
+            BinaryOperator::Subtract => match (left, right) {
+                (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => {
+                    Ok(RuntimeValue::Integer(a - b))
+                }
+                (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => {
+                    Ok(RuntimeValue::Float64(a - b))
+                }
+                _ => Ok(RuntimeValue::Null),
+            },
+            BinaryOperator::Multiply => match (left, right) {
+                (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => {
+                    Ok(RuntimeValue::Integer(a * b))
+                }
+                (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => {
+                    Ok(RuntimeValue::Float64(a * b))
+                }
+                _ => Ok(RuntimeValue::Null),
+            },
+            BinaryOperator::Divide => match (left, right) {
+                (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => {
+                    if b != 0 {
+                        Ok(RuntimeValue::Integer(a / b))
+                    } else {
+                        Err(BuluError::RuntimeError {
+                            message: "Division by zero".to_string(),
+                            file: self.current_file.clone(),
+                        })
                     }
-                    (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => {
-                        if b != 0.0 {
-                            Ok(RuntimeValue::Float64(a / b))
-                        } else {
-                            Err(BuluError::RuntimeError {
-                                message: "Division by zero".to_string(),
-                                file: self.current_file.clone(),
-                            })
-                        }
-                    }
-                    _ => Ok(RuntimeValue::Null),
                 }
-            }
+                (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => {
+                    if b != 0.0 {
+                        Ok(RuntimeValue::Float64(a / b))
+                    } else {
+                        Err(BuluError::RuntimeError {
+                            message: "Division by zero".to_string(),
+                            file: self.current_file.clone(),
+                        })
+                    }
+                }
+                _ => Ok(RuntimeValue::Null),
+            },
             BinaryOperator::Equal => {
                 let result = match (left, right) {
                     (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => a == b,
@@ -614,6 +719,50 @@ impl AstInterpreter {
                     (RuntimeValue::Bool(a), RuntimeValue::Bool(b)) => a != b,
                     (RuntimeValue::Null, RuntimeValue::Null) => false,
                     _ => true,
+                };
+                Ok(RuntimeValue::Bool(result))
+            }
+            BinaryOperator::Less => {
+                let result = match (left, right) {
+                    (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => a < b,
+                    (RuntimeValue::Int32(a), RuntimeValue::Int32(b)) => a < b,
+                    (RuntimeValue::Int64(a), RuntimeValue::Int64(b)) => a < b,
+                    (RuntimeValue::Float32(a), RuntimeValue::Float32(b)) => a < b,
+                    (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => a < b,
+                    _ => false,
+                };
+                Ok(RuntimeValue::Bool(result))
+            }
+            BinaryOperator::LessEqual => {
+                let result = match (left, right) {
+                    (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => a <= b,
+                    (RuntimeValue::Int32(a), RuntimeValue::Int32(b)) => a <= b,
+                    (RuntimeValue::Int64(a), RuntimeValue::Int64(b)) => a <= b,
+                    (RuntimeValue::Float32(a), RuntimeValue::Float32(b)) => a <= b,
+                    (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => a <= b,
+                    _ => false,
+                };
+                Ok(RuntimeValue::Bool(result))
+            }
+            BinaryOperator::Greater => {
+                let result = match (left, right) {
+                    (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => a > b,
+                    (RuntimeValue::Int32(a), RuntimeValue::Int32(b)) => a > b,
+                    (RuntimeValue::Int64(a), RuntimeValue::Int64(b)) => a > b,
+                    (RuntimeValue::Float32(a), RuntimeValue::Float32(b)) => a > b,
+                    (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => a > b,
+                    _ => false,
+                };
+                Ok(RuntimeValue::Bool(result))
+            }
+            BinaryOperator::GreaterEqual => {
+                let result = match (left, right) {
+                    (RuntimeValue::Integer(a), RuntimeValue::Integer(b)) => a >= b,
+                    (RuntimeValue::Int32(a), RuntimeValue::Int32(b)) => a >= b,
+                    (RuntimeValue::Int64(a), RuntimeValue::Int64(b)) => a >= b,
+                    (RuntimeValue::Float32(a), RuntimeValue::Float32(b)) => a >= b,
+                    (RuntimeValue::Float64(a), RuntimeValue::Float64(b)) => a >= b,
+                    _ => false,
                 };
                 Ok(RuntimeValue::Bool(result))
             }
@@ -638,45 +787,59 @@ impl AstInterpreter {
                 "len" => return self.execute_len_call(expr),
                 "append" => return self.execute_append_call(expr),
                 "close" => return self.execute_close_call(expr),
+                "ord" => return self.execute_ord_call(expr),
+                "chr" => return self.execute_chr_call(expr),
                 _ => {}
             }
+
+            // Check if this is a user-defined or imported function
+            if let Some(func_decl) = self.function_definitions.get(&ident.name).cloned() {
+                // Evaluate arguments
+                let mut args = Vec::new();
+                for arg in &expr.args {
+                    args.push(self.execute_expression(arg)?);
+                }
+                return self.call_user_function(&func_decl, &args);
+            }
         }
-        
+
         // Check for method calls
         if let Expression::MemberAccess(member_access) = expr.callee.as_ref() {
             return self.execute_method_call(member_access, &expr.args);
         }
-        
+
         // Get the function to call
         let function = self.execute_expression(&expr.callee)?;
-        
+
         // Evaluate arguments
         let mut args = Vec::new();
         for arg in &expr.args {
             args.push(self.execute_expression(arg)?);
         }
-        
+
         // Handle different types of function calls
         match function {
             RuntimeValue::String(func_name) => {
                 if func_name.starts_with("function:") {
                     let name = func_name.strip_prefix("function:").unwrap();
-                    
+
                     // Check if this is a user-defined function
                     if let Some(func_decl) = self.function_definitions.get(name).cloned() {
                         return self.call_user_function(&func_decl, &args);
                     }
-                    
+
                     // Handle specific built-in function calls
                     match name {
                         "UdpConnection_bind" => {
                             // Return a mock UdpConnection wrapped in a Result
-                            let udp_conn = RuntimeValue::String("udp_connection_instance".to_string());
+                            let udp_conn =
+                                RuntimeValue::String("udp_connection_instance".to_string());
                             Ok(RuntimeValue::Struct {
                                 name: "Result".to_string(),
                                 fields: {
                                     let mut fields = std::collections::HashMap::new();
-                                    fields.insert("isSuccess".to_string(), RuntimeValue::Bool(true));
+                                    fields
+                                        .insert("isSuccess".to_string(), RuntimeValue::Bool(true));
                                     fields.insert("value".to_string(), udp_conn);
                                     fields.insert("error".to_string(), RuntimeValue::Null);
                                     fields
@@ -696,7 +859,9 @@ impl AstInterpreter {
                             }
                         }
                         // Handle flag functions - check specific names first
-                        "String" | "Int8" | "Int16" | "Int32" | "Int64" | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "Byte" | "Bool" | "Float32" | "Float64" | "Parse" | "Get" | "Args" | "Usage" => {
+                        "String" | "Int8" | "Int16" | "Int32" | "Int64" | "UInt8" | "UInt16"
+                        | "UInt32" | "UInt64" | "Byte" | "Bool" | "Float32" | "Float64"
+                        | "Parse" | "Get" | "Args" | "Usage" => {
                             // Map the function name to the builtin function
                             let builtin_name = match name {
                                 "String" => "flag_string",
@@ -718,11 +883,11 @@ impl AstInterpreter {
                                 "Usage" => "flag_usage",
                                 _ => name,
                             };
-                            
+
                             // Call the builtin function
                             self.call_builtin_function(builtin_name, &args)
                         }
-                        _ => Ok(RuntimeValue::String(format!("result_of_{}", name)))
+                        _ => Ok(RuntimeValue::String(format!("result_of_{}", name))),
                     }
                 } else if func_name.starts_with("struct:") {
                     let name = func_name.strip_prefix("struct:").unwrap();
@@ -733,6 +898,41 @@ impl AstInterpreter {
                     Ok(RuntimeValue::String(format!("called_{}", func_name)))
                 }
             }
+            RuntimeValue::ModuleFunction {
+                module_path,
+                function_name,
+            } => {
+                // Call a function from an imported module
+                // Get the module from the module resolver
+                let module = self.module_resolver.get_loaded_module(&module_path)?;
+
+                // Get the module's interpreter context
+                if let Some(interpreter_wrapper) = &module.interpreter {
+                    // Lock the module's interpreter
+                    let mut module_interpreter = interpreter_wrapper.0.lock().unwrap();
+
+                    // Get the function definition from the module
+                    if let Some(func_decl) =
+                        module_interpreter.get_function_definition(&function_name)
+                    {
+                        // Call the function in the module's context
+                        return module_interpreter.call_user_function(&func_decl, &args);
+                    } else {
+                        return Err(BuluError::RuntimeError {
+                            message: format!(
+                                "Function '{}' not found in module '{}'",
+                                function_name, module_path
+                            ),
+                            file: self.current_file.clone(),
+                        });
+                    }
+                } else {
+                    return Err(BuluError::RuntimeError {
+                        message: format!("Module '{}' has no execution context", module_path),
+                        file: self.current_file.clone(),
+                    });
+                }
+            }
             _ => {
                 // Unknown function type
                 Ok(RuntimeValue::Null)
@@ -740,21 +940,27 @@ impl AstInterpreter {
         }
     }
 
-    fn execute_method_call(&mut self, member_access: &MemberAccessExpr, args: &[Expression]) -> Result<RuntimeValue> {
+    fn execute_method_call(
+        &mut self,
+        member_access: &MemberAccessExpr,
+        args: &[Expression],
+    ) -> Result<RuntimeValue> {
         let object = self.execute_expression(&member_access.object)?;
-        
+
         // Evaluate arguments
         let mut arg_values = Vec::new();
         for arg in args {
             arg_values.push(self.execute_expression(arg)?);
         }
-        
+
         match (&object, member_access.member.as_str()) {
-            (RuntimeValue::String(obj_name), "recv_from") if obj_name == "udp_connection_instance" => {
+            (RuntimeValue::String(obj_name), "recv_from")
+                if obj_name == "udp_connection_instance" =>
+            {
                 // Mock recv_from method - return Result<(int64, NetAddr)>
                 let tuple = RuntimeValue::Tuple(vec![
-                    RuntimeValue::Int64(42), // bytes read
-                    RuntimeValue::String("127.0.0.1:8080".to_string()) // from address
+                    RuntimeValue::Int64(42),                            // bytes read
+                    RuntimeValue::String("127.0.0.1:8080".to_string()), // from address
                 ]);
                 Ok(RuntimeValue::Struct {
                     name: "Result".to_string(),
@@ -767,7 +973,9 @@ impl AstInterpreter {
                     },
                 })
             }
-            (RuntimeValue::String(obj_name), "send_to") if obj_name == "udp_connection_instance" => {
+            (RuntimeValue::String(obj_name), "send_to")
+                if obj_name == "udp_connection_instance" =>
+            {
                 // Mock send_to method - return Result<int64>
                 Ok(RuntimeValue::Struct {
                     name: "Result".to_string(),
@@ -817,7 +1025,9 @@ impl AstInterpreter {
             }
             (RuntimeValue::String(s), "bytes") => {
                 // Handle String.bytes() method - return a mock byte array
-                Ok(RuntimeValue::Array(s.bytes().map(|b| RuntimeValue::UInt8(b)).collect()))
+                Ok(RuntimeValue::Array(
+                    s.bytes().map(|b| RuntimeValue::UInt8(b)).collect(),
+                ))
             }
             (RuntimeValue::Int64(n), "toString") => {
                 // Handle Int64.toString() method
@@ -832,19 +1042,28 @@ impl AstInterpreter {
 
     fn execute_member_access_expr(&mut self, expr: &MemberAccessExpr) -> Result<RuntimeValue> {
         let object = self.execute_expression(&expr.object)?;
-        
+
         match object {
             RuntimeValue::String(obj_name) => {
                 if obj_name.starts_with("instance_of_") {
                     // Method call on an instance
-                    Ok(RuntimeValue::String(format!("method_{}_{}", obj_name, expr.member)))
+                    Ok(RuntimeValue::String(format!(
+                        "method_{}_{}",
+                        obj_name, expr.member
+                    )))
                 } else if obj_name.starts_with("struct:") {
                     // Static method call on a struct
                     let struct_name = obj_name.strip_prefix("struct:").unwrap();
-                    Ok(RuntimeValue::String(format!("function:{}_{}", struct_name, expr.member)))
+                    Ok(RuntimeValue::String(format!(
+                        "function:{}_{}",
+                        struct_name, expr.member
+                    )))
                 } else {
                     // Regular member access
-                    Ok(RuntimeValue::String(format!("{}_{}", obj_name, expr.member)))
+                    Ok(RuntimeValue::String(format!(
+                        "{}_{}",
+                        obj_name, expr.member
+                    )))
                 }
             }
             RuntimeValue::Map(map) => {
@@ -868,57 +1087,57 @@ impl AstInterpreter {
     fn execute_index_expr(&mut self, expr: &IndexExpr) -> Result<RuntimeValue> {
         let object = self.execute_expression(&expr.object)?;
         let index = self.execute_expression(&expr.index)?;
-        
+
         match object {
             RuntimeValue::Array(ref arr) => {
                 match index {
                     // Normal indexing with integer
                     RuntimeValue::Integer(i) => {
-                        let idx = if i < 0 {
-                            arr.len() as i64 + i
-                        } else {
-                            i
-                        } as usize;
-                        
+                        let idx = if i < 0 { arr.len() as i64 + i } else { i } as usize;
+
                         if idx >= arr.len() {
                             return Err(BuluError::RuntimeError {
-                                message: format!("Array index {} out of bounds for array of length {}", idx, arr.len()),
+                                message: format!(
+                                    "Array index {} out of bounds for array of length {}",
+                                    idx,
+                                    arr.len()
+                                ),
                                 file: self.current_file.clone(),
                             });
                         }
-                        
+
                         Ok(arr[idx].clone())
                     }
                     RuntimeValue::Int32(i) => {
-                        let idx = if i < 0 {
-                            arr.len() as i32 + i
-                        } else {
-                            i
-                        } as usize;
-                        
+                        let idx = if i < 0 { arr.len() as i32 + i } else { i } as usize;
+
                         if idx >= arr.len() {
                             return Err(BuluError::RuntimeError {
-                                message: format!("Array index {} out of bounds for array of length {}", idx, arr.len()),
+                                message: format!(
+                                    "Array index {} out of bounds for array of length {}",
+                                    idx,
+                                    arr.len()
+                                ),
                                 file: self.current_file.clone(),
                             });
                         }
-                        
+
                         Ok(arr[idx].clone())
                     }
                     RuntimeValue::Int64(i) => {
-                        let idx = if i < 0 {
-                            arr.len() as i64 + i
-                        } else {
-                            i
-                        } as usize;
-                        
+                        let idx = if i < 0 { arr.len() as i64 + i } else { i } as usize;
+
                         if idx >= arr.len() {
                             return Err(BuluError::RuntimeError {
-                                message: format!("Array index {} out of bounds for array of length {}", idx, arr.len()),
+                                message: format!(
+                                    "Array index {} out of bounds for array of length {}",
+                                    idx,
+                                    arr.len()
+                                ),
                                 file: self.current_file.clone(),
                             });
                         }
-                        
+
                         Ok(arr[idx].clone())
                     }
                     // Range indexing for slicing
@@ -928,75 +1147,75 @@ impl AstInterpreter {
                         } else {
                             (start as usize).min(arr.len())
                         };
-                        
+
                         let end_idx = if end < 0 {
                             arr.len()
                         } else {
                             (end as usize).min(arr.len())
                         };
-                        
+
                         if start_idx > end_idx {
                             return Ok(RuntimeValue::Slice(Vec::new()));
                         }
-                        
+
                         let sliced = arr[start_idx..end_idx].to_vec();
                         Ok(RuntimeValue::Slice(sliced))
                     }
                     _ => Err(BuluError::RuntimeError {
                         message: "Array index must be an integer or range".to_string(),
                         file: self.current_file.clone(),
-                    })
+                    }),
                 }
             }
             RuntimeValue::Slice(ref slice_vec) => {
                 match index {
                     // Normal indexing with integer
                     RuntimeValue::Integer(i) => {
-                        let idx = if i < 0 {
-                            slice_vec.len() as i64 + i
-                        } else {
-                            i
-                        } as usize;
-                        
+                        let idx = if i < 0 { slice_vec.len() as i64 + i } else { i } as usize;
+
                         if idx >= slice_vec.len() {
                             return Err(BuluError::RuntimeError {
-                                message: format!("Slice index {} out of bounds for slice of length {}", idx, slice_vec.len()),
+                                message: format!(
+                                    "Slice index {} out of bounds for slice of length {}",
+                                    idx,
+                                    slice_vec.len()
+                                ),
                                 file: self.current_file.clone(),
                             });
                         }
-                        
+
                         Ok(slice_vec[idx].clone())
                     }
                     RuntimeValue::Int32(i) => {
-                        let idx = if i < 0 {
-                            slice_vec.len() as i32 + i
-                        } else {
-                            i
-                        } as usize;
-                        
+                        let idx = if i < 0 { slice_vec.len() as i32 + i } else { i } as usize;
+
                         if idx >= slice_vec.len() {
                             return Err(BuluError::RuntimeError {
-                                message: format!("Slice index {} out of bounds for slice of length {}", idx, slice_vec.len()),
+                                message: format!(
+                                    "Slice index {} out of bounds for slice of length {}",
+                                    idx,
+                                    slice_vec.len()
+                                ),
                                 file: self.current_file.clone(),
                             });
                         }
-                        
+
                         Ok(slice_vec[idx].clone())
                     }
                     RuntimeValue::Int64(i) => {
-                        let idx = if i < 0 {
-                            slice_vec.len() as i64 + i
-                        } else {
-                            i
-                        } as usize;
-                        
+                        let idx = if i < 0 { slice_vec.len() as i64 + i } else { i } as usize;
+
                         if idx >= slice_vec.len() {
                             return Err(BuluError::RuntimeError {
-                                message: format!("Slice index {} out of bounds for slice of length {}", idx, slice_vec.len()),
+                                message: format!(
+                                    "Slice index {} out of bounds for slice of length {}",
+                                    idx,
+                                    slice_vec.len()
+                                ),
                                 file: self.current_file.clone(),
                             });
                         }
-                        
+
                         Ok(slice_vec[idx].clone())
                     }
                     // Range indexing for slicing
@@ -1006,81 +1225,109 @@ impl AstInterpreter {
                         } else {
                             (start as usize).min(slice_vec.len())
                         };
-                        
+
                         let end_idx = if end < 0 {
                             slice_vec.len()
                         } else {
                             (end as usize).min(slice_vec.len())
                         };
-                        
+
                         if start_idx > end_idx {
                             return Ok(RuntimeValue::Slice(Vec::new()));
                         }
-                        
+
                         let sliced = slice_vec[start_idx..end_idx].to_vec();
                         Ok(RuntimeValue::Slice(sliced))
                     }
                     _ => Err(BuluError::RuntimeError {
                         message: "Slice index must be an integer or range".to_string(),
                         file: self.current_file.clone(),
-                    })
+                    }),
                 }
             }
-            RuntimeValue::String(ref s) => {
-                match index {
-                    RuntimeValue::Integer(i) => {
-                        let chars: Vec<char> = s.chars().collect();
-                        let idx = if i < 0 {
-                            chars.len() as i64 + i
-                        } else {
-                            i
-                        } as usize;
-                        
-                        if idx >= chars.len() {
-                            return Err(BuluError::RuntimeError {
-                                message: format!("String index {} out of bounds for string of length {}", idx, chars.len()),
-                                file: self.current_file.clone(),
-                            });
-                        }
-                        
-                        Ok(RuntimeValue::String(chars[idx].to_string()))
+            RuntimeValue::String(ref s) => match index {
+                RuntimeValue::Integer(i) => {
+                    let chars: Vec<char> = s.chars().collect();
+                    let idx = if i < 0 { chars.len() as i64 + i } else { i } as usize;
+
+                    if idx >= chars.len() {
+                        return Err(BuluError::RuntimeError {
+                            message: format!(
+                                "String index {} out of bounds for string of length {}",
+                                idx,
+                                chars.len()
+                            ),
+                            file: self.current_file.clone(),
+                        });
                     }
-                    RuntimeValue::Range(start, end, _step) => {
-                        let chars: Vec<char> = s.chars().collect();
-                        let start_idx = if start < 0 {
-                            (chars.len() as i64 + start).max(0) as usize
-                        } else {
-                            (start as usize).min(chars.len())
-                        };
-                        
-                        let end_idx = if end < 0 {
-                            chars.len()
-                        } else {
-                            (end as usize).min(chars.len())
-                        };
-                        
-                        if start_idx > end_idx {
-                            return Ok(RuntimeValue::String(String::new()));
-                        }
-                        
-                        let sliced: String = chars[start_idx..end_idx].iter().collect();
-                        Ok(RuntimeValue::String(sliced))
-                    }
-                    _ => Err(BuluError::RuntimeError {
-                        message: "String index must be an integer or range".to_string(),
-                        file: self.current_file.clone(),
-                    })
+
+                    Ok(RuntimeValue::String(chars[idx].to_string()))
                 }
-            }
+                RuntimeValue::Range(start, end, _step) => {
+                    let chars: Vec<char> = s.chars().collect();
+                    let start_idx = if start < 0 {
+                        (chars.len() as i64 + start).max(0) as usize
+                    } else {
+                        (start as usize).min(chars.len())
+                    };
+
+                    let end_idx = if end < 0 {
+                        chars.len()
+                    } else {
+                        (end as usize).min(chars.len())
+                    };
+
+                    if start_idx > end_idx {
+                        return Ok(RuntimeValue::String(String::new()));
+                    }
+
+                    let sliced: String = chars[start_idx..end_idx].iter().collect();
+                    Ok(RuntimeValue::String(sliced))
+                }
+                _ => Err(BuluError::RuntimeError {
+                    message: "String index must be an integer or range".to_string(),
+                    file: self.current_file.clone(),
+                }),
+            },
             _ => Err(BuluError::RuntimeError {
                 message: "Cannot index non-indexable value".to_string(),
                 file: self.current_file.clone(),
-            })
+            }),
         }
     }
 
-    fn execute_assignment_expr(&mut self, _expr: &AssignmentExpr) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+    fn execute_assignment_expr(&mut self, expr: &AssignmentExpr) -> Result<RuntimeValue> {
+        // Evaluate the right-hand side
+        let value = self.execute_expression(&expr.value)?;
+
+        // Handle different types of assignments
+        match expr.target.as_ref() {
+            Expression::Identifier(ident) => {
+                // Simple variable assignment
+                self.environment.set(&ident.name, value.clone())?;
+                Ok(value)
+            }
+            Expression::MemberAccess(member) => {
+                // Member assignment (e.g., obj.field = value)
+                // For now, return an error as this is more complex
+                Err(BuluError::RuntimeError {
+                    message: "Member assignment not yet implemented".to_string(),
+                    file: self.current_file.clone(),
+                })
+            }
+            Expression::Index(index) => {
+                // Index assignment (e.g., arr[0] = value)
+                // For now, return an error as this is more complex
+                Err(BuluError::RuntimeError {
+                    message: "Index assignment not yet implemented".to_string(),
+                    file: self.current_file.clone(),
+                })
+            }
+            _ => Err(BuluError::RuntimeError {
+                message: "Invalid assignment target".to_string(),
+                file: self.current_file.clone(),
+            }),
+        }
     }
 
     fn execute_if_expr(&mut self, _expr: &IfExpr) -> Result<RuntimeValue> {
@@ -1097,27 +1344,29 @@ impl AstInterpreter {
 
     fn execute_map_expr(&mut self, expr: &MapExpr) -> Result<RuntimeValue> {
         let mut fields = std::collections::HashMap::new();
-        
+
         for entry in &expr.entries {
             // Evaluate the key and value
             let key_value = self.execute_expression(&entry.key)?;
             let value_value = self.execute_expression(&entry.value)?;
-            
+
             // Convert key to string for field name
             let field_name = match key_value {
                 RuntimeValue::String(s) => s,
                 RuntimeValue::Integer(i) => i.to_string(),
                 RuntimeValue::Float64(f) => f.to_string(),
                 RuntimeValue::Bool(b) => b.to_string(),
-                _ => return Err(BuluError::RuntimeError {
-                    message: "Map keys must be convertible to strings".to_string(),
-                    file: self.current_file.clone(),
-                })
+                _ => {
+                    return Err(BuluError::RuntimeError {
+                        message: "Map keys must be convertible to strings".to_string(),
+                        file: self.current_file.clone(),
+                    })
+                }
             };
-            
+
             fields.insert(field_name, value_value);
         }
-        
+
         Ok(RuntimeValue::Struct {
             name: String::new(), // Anonymous struct for object literals
             fields,
@@ -1129,43 +1378,48 @@ impl AstInterpreter {
     }
 
     fn execute_async_expr(&mut self, expr: &AsyncExpr) -> Result<RuntimeValue> {
-        use crate::runtime::promises::{RuntimePromise, PromiseState};
-        
+        use crate::runtime::promises::{PromiseState, RuntimePromise};
+
         // For simple expressions, execute synchronously and return resolved promise
         // For function calls, we could spawn a thread, but for now keep it simple
         let result = self.execute_expression(&expr.expr)?;
-        
+
         // Create a new promise
         let promise_id = self.next_promise_id;
         self.next_promise_id += 1;
-        
+
         let promise = RuntimePromise::resolved(promise_id as usize, result);
-        self.promise_registry.insert(promise_id, std::sync::Arc::new(std::sync::Mutex::new(promise)));
-        
+        self.promise_registry.insert(
+            promise_id,
+            std::sync::Arc::new(std::sync::Mutex::new(promise)),
+        );
+
         Ok(RuntimeValue::Promise(promise_id))
     }
 
     fn execute_await_expr(&mut self, expr: &AwaitExpr) -> Result<RuntimeValue> {
         use crate::runtime::promises::PromiseState;
         use std::time::Duration;
-        
+
         // Evaluate the expression (should be a promise)
         let value = self.execute_expression(&expr.expr)?;
-        
+
         match value {
             RuntimeValue::Promise(promise_id) => {
                 // Get the promise from registry
-                let promise_arc = self.promise_registry.get(&promise_id)
+                let promise_arc = self
+                    .promise_registry
+                    .get(&promise_id)
                     .ok_or_else(|| BuluError::RuntimeError {
                         message: format!("Promise {} not found", promise_id),
                         file: self.current_file.clone(),
                     })?
                     .clone();
-                
+
                 // Poll the promise until it's resolved or rejected
                 loop {
                     let promise = promise_arc.lock().unwrap();
-                    
+
                     match &promise.state {
                         PromiseState::Resolved(val) => {
                             return Ok(val.clone());
@@ -1179,10 +1433,10 @@ impl AstInterpreter {
                         PromiseState::Pending => {
                             // Release the lock before sleeping
                             drop(promise);
-                            
+
                             // Sleep briefly to avoid busy-waiting
                             std::thread::sleep(Duration::from_millis(1));
-                            
+
                             // Continue polling
                             continue;
                         }
@@ -1198,7 +1452,7 @@ impl AstInterpreter {
         // Spawn a goroutine to execute the expression
         // For a real implementation, we need to clone the interpreter state
         // and run in a separate thread
-        
+
         // Clone the necessary state
         let expr_clone = expr.expr.clone();
         let env_clone = self.environment.clone();
@@ -1208,7 +1462,7 @@ impl AstInterpreter {
         let struct_defs = self.struct_definitions.clone();
         let channel_registry = self.channel_registry.clone();
         let promise_registry = self.promise_registry.clone();
-        
+
         // Spawn a thread to execute the goroutine
         std::thread::spawn(move || {
             // Create a new interpreter instance for this goroutine
@@ -1224,41 +1478,44 @@ impl AstInterpreter {
                 next_channel_id: 1000, // Use different range to avoid conflicts
                 next_promise_id: 1000,
             };
-            
+
             // Execute the expression
             match goroutine_interpreter.execute_expression(&expr_clone) {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => eprintln!("Goroutine error: {:?}", e),
             }
         });
-        
+
         // Return goroutine ID
-        static GOROUTINE_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+        static GOROUTINE_COUNTER: std::sync::atomic::AtomicU32 =
+            std::sync::atomic::AtomicU32::new(1);
         let goroutine_id = GOROUTINE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        
+
         Ok(RuntimeValue::Goroutine(goroutine_id))
     }
 
     fn execute_channel_expr(&mut self, expr: &ChannelExpr) -> Result<RuntimeValue> {
         use crate::ast::nodes::ChannelDirection;
-        
+
         let channel_value = self.execute_expression(&expr.channel)?;
-        
+
         match channel_value {
             RuntimeValue::Channel(channel_id) => {
-                let channel = self.channel_registry.get(&channel_id)
+                let channel = self
+                    .channel_registry
+                    .get(&channel_id)
                     .ok_or_else(|| BuluError::RuntimeError {
                         message: format!("Channel {} not found in registry", channel_id),
                         file: self.current_file.clone(),
                     })?
                     .clone();
-                
+
                 match expr.direction {
                     ChannelDirection::Send => {
                         // Send operation: channel <- value
                         if let Some(ref value_expr) = expr.value {
                             let value = self.execute_expression(value_expr)?;
-                            
+
                             // Blocking send
                             match channel.send(value) {
                                 Ok(_) => Ok(RuntimeValue::Null),
@@ -1274,19 +1531,18 @@ impl AstInterpreter {
                     ChannelDirection::Receive => {
                         // Receive operation: <-channel
                         use crate::runtime::channels::ChannelResult;
-                        
+
                         match channel.receive() {
                             Ok(ChannelResult::Ok(value)) => Ok(value),
-                            Ok(ChannelResult::Closed) => {
-                                Err(BuluError::RuntimeError {
-                                    message: "Cannot receive from closed channel".to_string(),
-                                    file: self.current_file.clone(),
-                                })
-                            }
+                            Ok(ChannelResult::Closed) => Err(BuluError::RuntimeError {
+                                message: "Cannot receive from closed channel".to_string(),
+                                file: self.current_file.clone(),
+                            }),
                             Ok(ChannelResult::WouldBlock) => {
                                 // This shouldn't happen with blocking receive
                                 Err(BuluError::RuntimeError {
-                                    message: "Unexpected WouldBlock on blocking receive".to_string(),
+                                    message: "Unexpected WouldBlock on blocking receive"
+                                        .to_string(),
                                     file: self.current_file.clone(),
                                 })
                             }
@@ -1299,7 +1555,7 @@ impl AstInterpreter {
                             // Has value, so it's a send operation
                             if let Some(ref value_expr) = expr.value {
                                 let value = self.execute_expression(value_expr)?;
-                                
+
                                 // Blocking send
                                 match channel.send(value) {
                                     Ok(_) => Ok(RuntimeValue::Null),
@@ -1311,21 +1567,18 @@ impl AstInterpreter {
                         } else {
                             // No value, so it's a receive operation
                             use crate::runtime::channels::ChannelResult;
-                            
+
                             match channel.receive() {
                                 Ok(ChannelResult::Ok(value)) => Ok(value),
-                                Ok(ChannelResult::Closed) => {
-                                    Err(BuluError::RuntimeError {
-                                        message: "Cannot receive from closed channel".to_string(),
-                                        file: self.current_file.clone(),
-                                    })
-                                }
-                                Ok(ChannelResult::WouldBlock) => {
-                                    Err(BuluError::RuntimeError {
-                                        message: "Unexpected WouldBlock on blocking receive".to_string(),
-                                        file: self.current_file.clone(),
-                                    })
-                                }
+                                Ok(ChannelResult::Closed) => Err(BuluError::RuntimeError {
+                                    message: "Cannot receive from closed channel".to_string(),
+                                    file: self.current_file.clone(),
+                                }),
+                                Ok(ChannelResult::WouldBlock) => Err(BuluError::RuntimeError {
+                                    message: "Unexpected WouldBlock on blocking receive"
+                                        .to_string(),
+                                    file: self.current_file.clone(),
+                                }),
                                 Err(e) => Err(e),
                             }
                         }
@@ -1354,30 +1607,34 @@ impl AstInterpreter {
     fn execute_range_expr(&mut self, expr: &RangeExpr) -> Result<RuntimeValue> {
         let start_val = self.execute_expression(&expr.start)?;
         let end_val = self.execute_expression(&expr.end)?;
-        
+
         // Convert to integers for range creation
         let start = match start_val {
             RuntimeValue::Int32(i) => i as i64,
             RuntimeValue::Int64(i) => i,
             RuntimeValue::Float32(f) => f as i64,
             RuntimeValue::Float64(f) => f as i64,
-            _ => return Err(BuluError::RuntimeError {
-                message: "Range start must be a number".to_string(),
-                file: self.current_file.clone(),
-            }),
+            _ => {
+                return Err(BuluError::RuntimeError {
+                    message: "Range start must be a number".to_string(),
+                    file: self.current_file.clone(),
+                })
+            }
         };
-        
+
         let end = match end_val {
             RuntimeValue::Int32(i) => i as i64,
             RuntimeValue::Int64(i) => i,
             RuntimeValue::Float32(f) => f as i64,
             RuntimeValue::Float64(f) => f as i64,
-            _ => return Err(BuluError::RuntimeError {
-                message: "Range end must be a number".to_string(),
-                file: self.current_file.clone(),
-            }),
+            _ => {
+                return Err(BuluError::RuntimeError {
+                    message: "Range end must be a number".to_string(),
+                    file: self.current_file.clone(),
+                })
+            }
         };
-        
+
         // Create range value
         let step = expr.step.as_ref().map(|step_expr| {
             match self.execute_expression(step_expr) {
@@ -1386,7 +1643,7 @@ impl AstInterpreter {
                 _ => 1, // Default step
             }
         });
-        
+
         Ok(RuntimeValue::Range(start, end, step))
     }
 
@@ -1404,11 +1661,16 @@ impl AstInterpreter {
 
     fn execute_struct_literal_expr(&mut self, expr: &StructLiteralExpr) -> Result<RuntimeValue> {
         // Debug: print available struct definitions
-        println!("Available struct definitions: {:?}", self.struct_definitions.keys().collect::<Vec<_>>());
+        println!(
+            "Available struct definitions: {:?}",
+            self.struct_definitions.keys().collect::<Vec<_>>()
+        );
         println!("Looking for struct: {}", expr.type_name);
-        
+
         // Get the struct definition
-        let struct_def = self.struct_definitions.get(&expr.type_name)
+        let struct_def = self
+            .struct_definitions
+            .get(&expr.type_name)
             .ok_or_else(|| BuluError::RuntimeError {
                 message: format!("Unknown struct type '{}'", expr.type_name),
                 file: None,
@@ -1468,7 +1730,7 @@ impl AstInterpreter {
         loop {
             // Evaluate the condition
             let condition_value = self.execute_expression(&stmt.condition)?;
-            
+
             // Check if condition is truthy
             let should_continue = match condition_value {
                 RuntimeValue::Bool(b) => b,
@@ -1480,27 +1742,30 @@ impl AstInterpreter {
                 RuntimeValue::String(s) => !s.is_empty(),
                 _ => true, // Other values are considered truthy
             };
-            
+
             if !should_continue {
                 break;
             }
-            
-            // Execute the body
-            match self.execute_block_stmt(&stmt.body) {
-                Ok(_) => continue,
-                Err(BuluError::Break) => break,
-                Err(BuluError::Continue) => continue,
-                Err(e) => return Err(e),
+
+            // Execute the body statements directly without creating a new scope
+            // This allows variable modifications to persist across iterations
+            for statement in &stmt.body.statements {
+                match self.execute_statement(statement) {
+                    Ok(_) => {}
+                    Err(BuluError::Break) => return Ok(RuntimeValue::Null),
+                    Err(BuluError::Continue) => break, // Break inner loop, continue outer loop
+                    Err(e) => return Err(e),
+                }
             }
         }
-        
+
         Ok(RuntimeValue::Null)
     }
 
     fn execute_for_stmt(&mut self, stmt: &ForStmt) -> Result<RuntimeValue> {
         // Evaluate the iterable expression
         let iterable_value = self.execute_expression(&stmt.iterable)?;
-        
+
         match iterable_value {
             RuntimeValue::Array(ref values) => {
                 if let Some(ref index_var) = stmt.index_variable {
@@ -1509,18 +1774,20 @@ impl AstInterpreter {
                         // Create new scope for each iteration
                         let parent_env = self.environment.clone();
                         self.environment = Environment::with_parent(parent_env.clone());
-                        
+
                         // Set the index variable
-                        self.environment.define(index_var.clone(), RuntimeValue::Int32(index as i32));
+                        self.environment
+                            .define(index_var.clone(), RuntimeValue::Int32(index as i32));
                         // Set the value variable
-                        self.environment.define(stmt.variable.clone(), value.clone());
-                        
+                        self.environment
+                            .define(stmt.variable.clone(), value.clone());
+
                         // Execute the body
                         let result = self.execute_block_stmt(&stmt.body);
-                        
+
                         // Restore environment
                         self.environment = parent_env;
-                        
+
                         match result {
                             Ok(_) => continue,
                             Err(BuluError::Break) => break,
@@ -1534,16 +1801,17 @@ impl AstInterpreter {
                         // Create new scope for each iteration
                         let parent_env = self.environment.clone();
                         self.environment = Environment::with_parent(parent_env.clone());
-                        
+
                         // Set the loop variable
-                        self.environment.define(stmt.variable.clone(), value.clone());
-                        
+                        self.environment
+                            .define(stmt.variable.clone(), value.clone());
+
                         // Execute the body
                         let result = self.execute_block_stmt(&stmt.body);
-                        
+
                         // Restore environment
                         self.environment = parent_env;
-                        
+
                         match result {
                             Ok(_) => continue,
                             Err(BuluError::Break) => break,
@@ -1562,18 +1830,20 @@ impl AstInterpreter {
                         // Create new scope for each iteration
                         let parent_env = self.environment.clone();
                         self.environment = Environment::with_parent(parent_env.clone());
-                        
+
                         // Set the index variable
-                        self.environment.define(index_var.clone(), RuntimeValue::Int32(index as i32));
+                        self.environment
+                            .define(index_var.clone(), RuntimeValue::Int32(index as i32));
                         // Set the character variable
-                        self.environment.define(stmt.variable.clone(), RuntimeValue::String(ch.to_string()));
-                        
+                        self.environment
+                            .define(stmt.variable.clone(), RuntimeValue::String(ch.to_string()));
+
                         // Execute the body
                         let result = self.execute_block_stmt(&stmt.body);
-                        
+
                         // Restore environment
                         self.environment = parent_env;
-                        
+
                         match result {
                             Ok(_) => continue,
                             Err(BuluError::Break) => break,
@@ -1587,16 +1857,17 @@ impl AstInterpreter {
                         // Create new scope for each iteration
                         let parent_env = self.environment.clone();
                         self.environment = Environment::with_parent(parent_env.clone());
-                        
+
                         // Set the loop variable
-                        self.environment.define(stmt.variable.clone(), RuntimeValue::String(ch.to_string()));
-                        
+                        self.environment
+                            .define(stmt.variable.clone(), RuntimeValue::String(ch.to_string()));
+
                         // Execute the body
                         let result = self.execute_block_stmt(&stmt.body);
-                        
+
                         // Restore environment
                         self.environment = parent_env;
-                        
+
                         match result {
                             Ok(_) => continue,
                             Err(BuluError::Break) => break,
@@ -1609,15 +1880,17 @@ impl AstInterpreter {
             }
             RuntimeValue::Channel(channel_id) => {
                 // Iterate over channel - receive until closed
-                let channel = self.channel_registry.get(&channel_id)
+                let channel = self
+                    .channel_registry
+                    .get(&channel_id)
                     .ok_or_else(|| BuluError::RuntimeError {
                         message: format!("Channel {} not found", channel_id),
                         file: self.current_file.clone(),
                     })?
                     .clone();
-                
+
                 use crate::runtime::channels::ChannelResult;
-                
+
                 loop {
                     // Receive from channel (blocking)
                     match channel.receive() {
@@ -1625,16 +1898,16 @@ impl AstInterpreter {
                             // Create new scope for each iteration
                             let parent_env = self.environment.clone();
                             self.environment = Environment::with_parent(parent_env.clone());
-                            
+
                             // Set the loop variable
                             self.environment.define(stmt.variable.clone(), value);
-                            
+
                             // Execute the body
                             let result = self.execute_block_stmt(&stmt.body);
-                            
+
                             // Restore environment
                             self.environment = parent_env;
-                            
+
                             match result {
                                 Ok(_) => continue,
                                 Err(BuluError::Break) => break,
@@ -1653,15 +1926,13 @@ impl AstInterpreter {
                         Err(e) => return Err(e),
                     }
                 }
-                
+
                 Ok(RuntimeValue::Null)
             }
-            _ => {
-                Err(BuluError::RuntimeError {
-                    message: format!("Cannot iterate over value of type: {:?}", iterable_value),
-                    file: self.current_file.clone(),
-                })
-            }
+            _ => Err(BuluError::RuntimeError {
+                message: format!("Cannot iterate over value of type: {:?}", iterable_value),
+                file: self.current_file.clone(),
+            }),
         }
     }
 
@@ -1671,35 +1942,37 @@ impl AstInterpreter {
 
     fn execute_select_stmt(&mut self, stmt: &SelectStmt) -> Result<RuntimeValue> {
         use crate::runtime::channels::{ChannelResult, SendResult};
-        
+
         // First pass: try all operations non-blocking
         let mut has_default = false;
         let mut default_arm_index = None;
-        
+
         for (index, arm) in stmt.arms.iter().enumerate() {
             if arm.channel_op.is_none() {
                 has_default = true;
                 default_arm_index = Some(index);
                 continue;
             }
-            
+
             let channel_op = arm.channel_op.as_ref().unwrap();
-            
+
             if channel_op.is_send {
                 // Send operation: channel <- value
                 let channel_value = self.execute_expression(&channel_op.channel)?;
-                
+
                 if let RuntimeValue::Channel(channel_id) = channel_value {
-                    let channel = self.channel_registry.get(&channel_id)
+                    let channel = self
+                        .channel_registry
+                        .get(&channel_id)
                         .ok_or_else(|| BuluError::RuntimeError {
                             message: format!("Channel {} not found", channel_id),
                             file: self.current_file.clone(),
                         })?
                         .clone();
-                    
+
                     if let Some(ref value_expr) = channel_op.value {
                         let value = self.execute_expression(value_expr)?;
-                        
+
                         // Try non-blocking send
                         match channel.try_send(value) {
                             Ok(SendResult::Ok) => {
@@ -1728,15 +2001,17 @@ impl AstInterpreter {
             } else {
                 // Receive operation: <-channel or variable := <-channel
                 let channel_value = self.execute_expression(&channel_op.channel)?;
-                
+
                 if let RuntimeValue::Channel(channel_id) = channel_value {
-                    let channel = self.channel_registry.get(&channel_id)
+                    let channel = self
+                        .channel_registry
+                        .get(&channel_id)
                         .ok_or_else(|| BuluError::RuntimeError {
                             message: format!("Channel {} not found", channel_id),
                             file: self.current_file.clone(),
                         })?
                         .clone();
-                    
+
                     // Try non-blocking receive
                     match channel.try_receive() {
                         Ok(ChannelResult::Ok(value)) => {
@@ -1745,7 +2020,7 @@ impl AstInterpreter {
                             if let Some(ref var_name) = channel_op.variable {
                                 self.environment.define(var_name.clone(), value);
                             }
-                            
+
                             // Execute this arm
                             return self.execute_statement(&arm.body);
                         }
@@ -1767,7 +2042,7 @@ impl AstInterpreter {
                 }
             }
         }
-        
+
         // If we reach here, no operation succeeded
         // If there's a default case, execute it
         if has_default {
@@ -1775,12 +2050,12 @@ impl AstInterpreter {
                 return self.execute_statement(&stmt.arms[index].body);
             }
         }
-        
+
         // No default case and no operation succeeded
         // Block until at least one operation can proceed
         // We'll poll all operations in a loop with a small sleep
         use std::time::Duration;
-        
+
         loop {
             // Try all operations again (non-blocking)
             for arm in &stmt.arms {
@@ -1788,18 +2063,20 @@ impl AstInterpreter {
                     if channel_op.is_send {
                         // Try send operation
                         let channel_value = self.execute_expression(&channel_op.channel)?;
-                        
+
                         if let RuntimeValue::Channel(channel_id) = channel_value {
-                            let channel = self.channel_registry.get(&channel_id)
+                            let channel = self
+                                .channel_registry
+                                .get(&channel_id)
                                 .ok_or_else(|| BuluError::RuntimeError {
                                     message: format!("Channel {} not found", channel_id),
                                     file: self.current_file.clone(),
                                 })?
                                 .clone();
-                            
+
                             if let Some(ref value_expr) = channel_op.value {
                                 let value = self.execute_expression(value_expr)?;
-                                
+
                                 match channel.try_send(value) {
                                     Ok(SendResult::Ok) => {
                                         return self.execute_statement(&arm.body);
@@ -1821,15 +2098,17 @@ impl AstInterpreter {
                     } else {
                         // Try receive operation
                         let channel_value = self.execute_expression(&channel_op.channel)?;
-                        
+
                         if let RuntimeValue::Channel(channel_id) = channel_value {
-                            let channel = self.channel_registry.get(&channel_id)
+                            let channel = self
+                                .channel_registry
+                                .get(&channel_id)
                                 .ok_or_else(|| BuluError::RuntimeError {
                                     message: format!("Channel {} not found", channel_id),
                                     file: self.current_file.clone(),
                                 })?
                                 .clone();
-                            
+
                             match channel.try_receive() {
                                 Ok(ChannelResult::Ok(value)) => {
                                     if let Some(ref var_name) = channel_op.variable {
@@ -1851,14 +2130,19 @@ impl AstInterpreter {
                     }
                 }
             }
-            
+
             // No operation succeeded, sleep briefly and retry
             std::thread::sleep(Duration::from_micros(100));
         }
     }
 
-    fn execute_return_stmt(&mut self, _stmt: &ReturnStmt) -> Result<RuntimeValue> {
-        Ok(RuntimeValue::Null)
+    fn execute_return_stmt(&mut self, stmt: &ReturnStmt) -> Result<RuntimeValue> {
+        if let Some(expr) = &stmt.value {
+            let value = self.execute_expression(expr)?;
+            Err(BuluError::Return(value))
+        } else {
+            Err(BuluError::Return(RuntimeValue::Null))
+        }
     }
 
     fn execute_break_stmt(&mut self, _stmt: &BreakStmt) -> Result<RuntimeValue> {
@@ -1887,7 +2171,7 @@ impl AstInterpreter {
     }
 
     // Built-in function implementations
-    
+
     fn execute_make_call(&mut self, expr: &CallExpr) -> Result<RuntimeValue> {
         if expr.args.is_empty() {
             return Err(BuluError::RuntimeError {
@@ -1906,10 +2190,12 @@ impl AstInterpreter {
                         match cap_val {
                             RuntimeValue::Int32(cap) => Some(cap as usize),
                             RuntimeValue::Int64(cap) => Some(cap as usize),
-                            _ => return Err(BuluError::RuntimeError {
-                                message: "Channel capacity must be an integer".to_string(),
-                                file: self.current_file.clone(),
-                            }),
+                            _ => {
+                                return Err(BuluError::RuntimeError {
+                                    message: "Channel capacity must be an integer".to_string(),
+                                    file: self.current_file.clone(),
+                                })
+                            }
                         }
                     } else {
                         None
@@ -1924,15 +2210,17 @@ impl AstInterpreter {
                         match cap_val {
                             RuntimeValue::Int32(cap) => Some(cap as usize),
                             RuntimeValue::Int64(cap) => Some(cap as usize),
-                            _ => return Err(BuluError::RuntimeError {
-                                message: "Channel capacity must be an integer".to_string(),
-                                file: self.current_file.clone(),
-                            }),
+                            _ => {
+                                return Err(BuluError::RuntimeError {
+                                    message: "Channel capacity must be an integer".to_string(),
+                                    file: self.current_file.clone(),
+                                })
+                            }
                         }
                     } else {
                         None
                     };
-                    
+
                     self.create_channel(capacity)
                 }
                 // Handle primitive types
@@ -1947,59 +2235,61 @@ impl AstInterpreter {
                         "uint16" => Ok(RuntimeValue::Int32(0)),
                         "uint32" => Ok(RuntimeValue::Int32(0)),
                         "uint64" => Ok(RuntimeValue::Int64(0)),
-                        
+
                         // Float types - return zero value
                         "float32" => Ok(RuntimeValue::Float64(0.0)),
                         "float64" => Ok(RuntimeValue::Float64(0.0)),
-                        
+
                         // Boolean type - return false
                         "bool" => Ok(RuntimeValue::Bool(false)),
-                        
+
                         // String type - return empty string
                         "string" => Ok(RuntimeValue::String(String::new())),
-                        
+
                         // Character types
                         "char" => Ok(RuntimeValue::String("\0".to_string())),
                         "byte" => Ok(RuntimeValue::Int32(0)),
                         "rune" => Ok(RuntimeValue::Int32(0)),
-                        
+
                         // Any type - return null
                         "any" => Ok(RuntimeValue::Null),
-                        
+
                         // Slice types
                         name if name.starts_with("[]") => {
                             // Extract element type from slice notation
                             let element_type = &name[2..];
-                            
+
                             // Get size if provided
                             let size = if expr.args.len() > 1 {
                                 let size_val = self.execute_expression(&expr.args[1])?;
                                 match size_val {
                                     RuntimeValue::Int32(s) => s as usize,
                                     RuntimeValue::Int64(s) => s as usize,
-                                    _ => return Err(BuluError::RuntimeError {
-                                        message: "Slice size must be an integer".to_string(),
-                                        file: self.current_file.clone(),
-                                    }),
+                                    _ => {
+                                        return Err(BuluError::RuntimeError {
+                                            message: "Slice size must be an integer".to_string(),
+                                            file: self.current_file.clone(),
+                                        })
+                                    }
                                 }
                             } else {
                                 0
                             };
-                            
+
                             // Create slice with zero values
                             let zero_value = self.get_zero_value_for_type(element_type)?;
                             let mut elements = Vec::new();
                             for _ in 0..size {
                                 elements.push(zero_value.clone());
                             }
-                            
+
                             Ok(RuntimeValue::Array(elements))
                         }
-                        
+
                         _ => Err(BuluError::RuntimeError {
                             message: format!("Unknown make() type: {}", ident.name),
                             file: self.current_file.clone(),
-                        })
+                        }),
                     }
                 }
             }
@@ -2015,21 +2305,23 @@ impl AstInterpreter {
                             // Default to any type
                             return self.create_channel(None);
                         };
-                        
+
                         let capacity = if expr.args.len() > 1 {
                             let cap_val = self.execute_expression(&expr.args[1])?;
                             match cap_val {
                                 RuntimeValue::Int32(cap) => Some(cap as usize),
                                 RuntimeValue::Int64(cap) => Some(cap as usize),
-                                _ => return Err(BuluError::RuntimeError {
-                                    message: "Channel capacity must be an integer".to_string(),
-                                    file: self.current_file.clone(),
-                                }),
+                                _ => {
+                                    return Err(BuluError::RuntimeError {
+                                        message: "Channel capacity must be an integer".to_string(),
+                                        file: self.current_file.clone(),
+                                    })
+                                }
                             }
                         } else {
                             None
                         };
-                        
+
                         self.create_channel(capacity)
                     } else {
                         Err(BuluError::RuntimeError {
@@ -2044,32 +2336,31 @@ impl AstInterpreter {
                     })
                 }
             }
-            _ => {
-                Err(BuluError::RuntimeError {
-                    message: "Invalid make() syntax".to_string(),
-                    file: self.current_file.clone(),
-                })
-            }
+            _ => Err(BuluError::RuntimeError {
+                message: "Invalid make() syntax".to_string(),
+                file: self.current_file.clone(),
+            }),
         }
     }
 
     fn create_channel(&mut self, capacity: Option<usize>) -> Result<RuntimeValue> {
         use crate::runtime::channels::Channel;
         use crate::types::primitive::TypeId;
-        
+
         // Create the actual channel
         let channel = if let Some(cap) = capacity {
             Channel::new_buffered(TypeId::Any, cap)
         } else {
             Channel::new_unbuffered(TypeId::Any)
         };
-        
+
         // Get a unique ID and store in registry
         let channel_id = self.next_channel_id;
         self.next_channel_id += 1;
-        
-        self.channel_registry.insert(channel_id, std::sync::Arc::new(channel));
-        
+
+        self.channel_registry
+            .insert(channel_id, std::sync::Arc::new(channel));
+
         Ok(RuntimeValue::Channel(channel_id))
     }
 
@@ -2132,6 +2423,70 @@ impl AstInterpreter {
         }
     }
 
+    fn execute_ord_call(&mut self, expr: &CallExpr) -> Result<RuntimeValue> {
+        if expr.args.len() != 1 {
+            return Err(BuluError::RuntimeError {
+                message: "ord() requires exactly one argument".to_string(),
+                file: self.current_file.clone(),
+            });
+        }
+
+        let value = self.execute_expression(&expr.args[0])?;
+        match value {
+            RuntimeValue::String(s) => {
+                if s.is_empty() {
+                    return Err(BuluError::RuntimeError {
+                        message: "ord() requires a non-empty string".to_string(),
+                        file: self.current_file.clone(),
+                    });
+                }
+                let first_char = s.chars().next().unwrap();
+                Ok(RuntimeValue::Int64(first_char as i64))
+            }
+            _ => Err(BuluError::RuntimeError {
+                message: "ord() can only be called on strings".to_string(),
+                file: self.current_file.clone(),
+            }),
+        }
+    }
+
+    fn execute_chr_call(&mut self, expr: &CallExpr) -> Result<RuntimeValue> {
+        if expr.args.len() != 1 {
+            return Err(BuluError::RuntimeError {
+                message: "chr() requires exactly one argument".to_string(),
+                file: self.current_file.clone(),
+            });
+        }
+
+        let value = self.execute_expression(&expr.args[0])?;
+        let code = match value {
+            RuntimeValue::Int32(n) => n as u32,
+            RuntimeValue::Int64(n) => n as u32,
+            RuntimeValue::Int8(n) => n as u32,
+            RuntimeValue::Int16(n) => n as u32,
+            RuntimeValue::UInt8(n) => n as u32,
+            RuntimeValue::UInt16(n) => n as u32,
+            RuntimeValue::UInt32(n) => n,
+            RuntimeValue::UInt64(n) => n as u32,
+            RuntimeValue::Integer(n) => n as u32,
+            _ => {
+                return Err(BuluError::RuntimeError {
+                    message: "chr() requires an integer argument".to_string(),
+                    file: self.current_file.clone(),
+                })
+            }
+        };
+
+        if let Some(ch) = char::from_u32(code) {
+            Ok(RuntimeValue::String(ch.to_string()))
+        } else {
+            Err(BuluError::RuntimeError {
+                message: format!("chr() invalid character code: {}", code),
+                file: self.current_file.clone(),
+            })
+        }
+    }
+
     fn execute_append_call(&mut self, _expr: &CallExpr) -> Result<RuntimeValue> {
         // TODO: Implement append
         Ok(RuntimeValue::Null)
@@ -2145,18 +2500,20 @@ impl AstInterpreter {
                 file: self.current_file.clone(),
             });
         }
-        
+
         let channel_value = self.execute_expression(&expr.args[0])?;
-        
+
         match channel_value {
             RuntimeValue::Channel(channel_id) => {
-                let channel = self.channel_registry.get(&channel_id)
+                let channel = self
+                    .channel_registry
+                    .get(&channel_id)
                     .ok_or_else(|| BuluError::RuntimeError {
                         message: format!("Channel {} not found", channel_id),
                         file: self.current_file.clone(),
                     })?
                     .clone();
-                
+
                 channel.close();
                 Ok(RuntimeValue::Null)
             }
@@ -2183,7 +2540,8 @@ impl AstInterpreter {
                 format!("[{}]", elements.join(", "))
             }
             RuntimeValue::Map(map) => {
-                let entries: Vec<String> = map.iter()
+                let entries: Vec<String> = map
+                    .iter()
                     .map(|(k, v)| format!("{}: {}", k, self.value_to_string(v)))
                     .collect();
                 format!("{{{}}}", entries.join(", "))
@@ -2201,40 +2559,54 @@ impl AstInterpreter {
     pub fn is_symbol_accessible(&self, symbol: &str) -> bool {
         self.globals.contains(symbol)
     }
-    
+
     /// Call a user-defined function
-    fn call_user_function(&mut self, func_decl: &FunctionDecl, args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    pub fn call_user_function(
+        &mut self,
+        func_decl: &FunctionDecl,
+        args: &[RuntimeValue],
+    ) -> Result<RuntimeValue> {
         use crate::runtime::promises::RuntimePromise;
-        
+
         // Create a new environment for the function
         let saved_env = self.environment.clone();
         self.environment = Environment::with_parent(saved_env.clone());
-        
+
         // Bind parameters to arguments
         for (param, arg) in func_decl.params.iter().zip(args.iter()) {
             self.environment.define(param.name.clone(), arg.clone());
         }
-        
+
         // Execute the function body
-        let result = self.execute_statement(&Statement::Block(func_decl.body.clone()));
-        
+        let result = match self.execute_statement(&Statement::Block(func_decl.body.clone())) {
+            Ok(value) => Ok(value),
+            Err(BuluError::Return(value)) => Ok(value),
+            Err(e) => Err(e),
+        };
+
         // Restore the environment
         self.environment = saved_env;
-        
+
         // If the function is async, wrap the result in a promise
         if func_decl.is_async {
             let promise_id = self.next_promise_id;
             self.next_promise_id += 1;
-            
+
             match result {
                 Ok(value) => {
                     let promise = RuntimePromise::resolved(promise_id as usize, value);
-                    self.promise_registry.insert(promise_id, std::sync::Arc::new(std::sync::Mutex::new(promise)));
+                    self.promise_registry.insert(
+                        promise_id,
+                        std::sync::Arc::new(std::sync::Mutex::new(promise)),
+                    );
                     Ok(RuntimeValue::Promise(promise_id))
                 }
                 Err(e) => {
                     let promise = RuntimePromise::rejected(promise_id as usize, e.to_string());
-                    self.promise_registry.insert(promise_id, std::sync::Arc::new(std::sync::Mutex::new(promise)));
+                    self.promise_registry.insert(
+                        promise_id,
+                        std::sync::Arc::new(std::sync::Mutex::new(promise)),
+                    );
                     Ok(RuntimeValue::Promise(promise_id))
                 }
             }
@@ -2242,11 +2614,11 @@ impl AstInterpreter {
             result
         }
     }
-    
+
     /// Call a builtin function by name
     fn call_builtin_function(&mut self, name: &str, args: &[RuntimeValue]) -> Result<RuntimeValue> {
         use crate::runtime::builtins::*;
-        
+
         match name {
             "flag_string" => builtin_flag_string(args),
             "flag_int8" => builtin_flag_int8(args),
@@ -2287,7 +2659,7 @@ mod tests {
     #[test]
     fn test_variable_declaration() {
         let mut interpreter = AstInterpreter::new();
-        
+
         let decl = VariableDecl {
             is_const: false,
             name: "x".to_string(),
@@ -2303,7 +2675,7 @@ mod tests {
 
         let result = interpreter.execute_variable_decl(&decl).unwrap();
         assert_eq!(result, RuntimeValue::Null);
-        
+
         let value = interpreter.environment.get("x").unwrap();
         assert_eq!(*value, RuntimeValue::Integer(42));
     }
@@ -2311,7 +2683,7 @@ mod tests {
     #[test]
     fn test_exported_variable() {
         let mut interpreter = AstInterpreter::new();
-        
+
         let decl = VariableDecl {
             is_const: false,
             name: "exported_var".to_string(),
@@ -2326,7 +2698,7 @@ mod tests {
         };
 
         interpreter.execute_variable_decl(&decl).unwrap();
-        
+
         // Should be in both local and global environments
         assert!(interpreter.environment.contains("exported_var"));
         assert!(interpreter.globals.contains("exported_var"));
@@ -2336,7 +2708,7 @@ mod tests {
     #[test]
     fn test_non_exported_variable() {
         let mut interpreter = AstInterpreter::new();
-        
+
         let decl = VariableDecl {
             is_const: false,
             name: "private_var".to_string(),
@@ -2351,7 +2723,7 @@ mod tests {
         };
 
         interpreter.execute_variable_decl(&decl).unwrap();
-        
+
         // Should only be in local environment
         assert!(interpreter.environment.contains("private_var"));
         assert!(!interpreter.globals.contains("private_var"));
@@ -2361,7 +2733,7 @@ mod tests {
     #[test]
     fn test_import_std_module() {
         let mut interpreter = AstInterpreter::new();
-        
+
         let import = ImportStmt {
             path: "std.io".to_string(),
             alias: Some("io".to_string()),
@@ -2371,7 +2743,7 @@ mod tests {
 
         let result = interpreter.execute_import_stmt(&import).unwrap();
         assert_eq!(result, RuntimeValue::Null);
-        
+
         // Should have imported the module as 'io'
         assert!(interpreter.environment.contains("io"));
     }

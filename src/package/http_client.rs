@@ -42,11 +42,23 @@ pub struct PackageListItem {
 #[derive(Debug, Deserialize)]
 pub struct PackageInfo {
     pub name: String,
-    pub versions: Vec<String>,
+    pub versions: Vec<PackageVersionSummary>,
     pub description: Option<String>,
     pub repository: Option<String>,
     pub keywords: Vec<String>,
+    pub total_downloads: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PackageVersionSummary {
+    pub version: String,
+    pub description: Option<String>,
+    pub license: Option<String>,
+    pub authors: Vec<String>,
+    pub dependencies: HashMap<String, String>,
+    pub published_at: String,
     pub downloads: u64,
+    pub checksum: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,7 +142,7 @@ impl RegistryHttpClient {
     /// Get package versions
     pub async fn get_package_versions(&self, name: &str) -> Result<Vec<String>> {
         let package = self.get_package(name).await?;
-        Ok(package.versions)
+        Ok(package.versions.into_iter().map(|v| v.version).collect())
     }
 
     /// Get specific package version info

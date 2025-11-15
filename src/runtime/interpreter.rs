@@ -166,7 +166,7 @@ pub struct Interpreter {
     method_call_stack: Vec<String>, // Track method calls to prevent infinite recursion
     channel_registry: std::sync::Arc<std::sync::Mutex<MockChannelRegistry>>, // Channel registry for send/receive operations
     is_goroutine_context: bool, // Flag to indicate if we're in a goroutine context
-                                // Removed old scheduler - using new goroutine system
+    module_resolver: Option<std::sync::Arc<std::sync::Mutex<crate::runtime::module::ModuleResolver>>>, // Module resolver for third-party packages
 }
 
 #[derive(Debug, Clone)]
@@ -263,7 +263,7 @@ impl Interpreter {
             method_call_stack: Vec::new(),
             channel_registry: get_global_channel_registry().clone(),
             is_goroutine_context: false, // Normal context
-                                         // Removed old scheduler - using new goroutine system
+            module_resolver: None,
         }
     }
 
@@ -292,7 +292,7 @@ impl Interpreter {
             method_call_stack: Vec::new(),
             channel_registry: get_global_channel_registry().clone(),
             is_goroutine_context: true, // This is a goroutine context
-                                        // Removed old scheduler - using new goroutine system
+            module_resolver: None,
         }
     }
 
@@ -316,6 +316,7 @@ impl Interpreter {
             method_call_stack: Vec::new(),
             channel_registry: get_global_channel_registry().clone(),
             is_goroutine_context: true, // This is also a goroutine context
+            module_resolver: None,
         }
     }
 
@@ -562,6 +563,20 @@ impl Interpreter {
     /// Set a global variable
     pub fn set_global(&mut self, name: String, value: RuntimeValue) {
         self.globals.insert(name, value);
+    }
+
+    /// Add a loaded module (for third-party package support)
+    pub fn add_loaded_module(&mut self, path: String, module: crate::runtime::module::Module) {
+        // Store the module in a shared resolver
+        if self.module_resolver.is_none() {
+            let resolver = crate::runtime::module::ModuleResolver::new();
+            self.module_resolver = Some(std::sync::Arc::new(std::sync::Mutex::new(resolver)));
+        }
+        
+        if let Some(resolver_arc) = &self.module_resolver {
+            let mut resolver = resolver_arc.lock().unwrap();
+            resolver.add_module(path, module);
+        }
     }
 
     /// Create a channel (stub implementation for tests)
@@ -1195,7 +1210,7 @@ impl Interpreter {
             method_call_stack: Vec::new(),
             channel_registry,
             is_goroutine_context: true, // This is also a goroutine context
-                                        // Removed old scheduler - using new goroutine system
+            module_resolver: None,
         }
     }
 
@@ -2457,8 +2472,8 @@ impl Interpreter {
                             builtin(&args)?
                         } else if let Some(global_value) = self.globals.get(function_name) {
                             // Check if it's a function reference (e.g., imported with alias)
-                            if let RuntimeValue::String(s) = global_value {
-                                if s.starts_with("function:") {
+                            match global_value {
+                                RuntimeValue::String(s) if s.starts_with("function:") => {
                                     let actual_function_name = s.strip_prefix("function:").unwrap();
                                     if let Some(builtin) =
                                         self.builtin_registry.get(actual_function_name)
@@ -2470,17 +2485,52 @@ impl Interpreter {
                                             actual_function_name
                                         )));
                                     }
-                                } else {
+                                }
+                                RuntimeValue::ModuleFunction { module_path, function_name: func_name } => {
+                                    // Call a function from an imported module
+                                    if let Some(resolver_arc) = &self.module_resolver {
+                                        let resolver = resolver_arc.lock().unwrap();
+                                        if let Ok(module) = resolver.get_loaded_module(module_path) {
+                                            // Get the module's interpreter context
+                                            if let Some(interpreter_wrapper) = &module.interpreter {
+                                                // Lock the module's interpreter
+                                                let mut module_interpreter = interpreter_wrapper.0.lock().unwrap();
+                                                
+                                                // Get the function definition from the module
+                                                if let Some(func_decl) = module_interpreter.get_function_definition(func_name) {
+                                                    // Call the function in the module's context
+                                                    module_interpreter.call_user_function(&func_decl, &args)?
+                                                } else {
+                                                    return Err(BuluError::Other(format!(
+                                                        "Function '{}' not found in module '{}'",
+                                                        func_name, module_path
+                                                    )));
+                                                }
+                                            } else {
+                                                return Err(BuluError::Other(format!(
+                                                    "Module '{}' has no execution context",
+                                                    module_path
+                                                )));
+                                            }
+                                        } else {
+                                            return Err(BuluError::Other(format!(
+                                                "Module '{}' not loaded",
+                                                module_path
+                                            )));
+                                        }
+                                    } else {
+                                        return Err(BuluError::Other(format!(
+                                            "Module '{}' not loaded (no resolver)",
+                                            module_path
+                                        )));
+                                    }
+                                }
+                                _ => {
                                     return Err(BuluError::Other(format!(
                                         "Cannot call non-function value: {}",
                                         function_name
                                     )));
                                 }
-                            } else {
-                                return Err(BuluError::Other(format!(
-                                    "Cannot call non-function value: {}",
-                                    function_name
-                                )));
                             }
                         } else {
                             // Look for user-defined function

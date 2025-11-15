@@ -5,6 +5,15 @@ use std::fmt;
 /// Result type alias for Bulu operations
 pub type Result<T> = std::result::Result<T, BuluError>;
 
+/// Stack frame for error tracing
+#[derive(Debug, Clone)]
+pub struct ErrorFrame {
+    pub file: String,
+    pub line: usize,
+    pub column: usize,
+    pub context: String,
+}
+
 /// Main error type for the Bulu language
 #[derive(Debug, Clone)]
 pub enum BuluError {
@@ -14,6 +23,10 @@ pub enum BuluError {
         line: usize,
         column: usize,
         file: Option<String>,
+        #[allow(dead_code)]
+        token: Option<String>,
+        #[allow(dead_code)]
+        stack: Vec<ErrorFrame>,
     },
     /// Syntax parsing errors
     ParseError {
@@ -21,6 +34,10 @@ pub enum BuluError {
         line: usize,
         column: usize,
         file: Option<String>,
+        #[allow(dead_code)]
+        token: Option<String>,
+        #[allow(dead_code)]
+        stack: Vec<ErrorFrame>,
     },
     /// Type checking errors
     TypeError {
@@ -28,6 +45,8 @@ pub enum BuluError {
         line: usize,
         column: usize,
         file: Option<String>,
+        #[allow(dead_code)]
+        stack: Vec<ErrorFrame>,
     },
     /// Runtime errors
     RuntimeError {
@@ -40,6 +59,8 @@ pub enum BuluError {
     Break,
     /// Continue statement (control flow)
     Continue,
+    /// Return statement (control flow)
+    Return(crate::types::primitive::RuntimeValue),
     /// Generic error
     Other(String),
 }
@@ -47,23 +68,53 @@ pub enum BuluError {
 impl fmt::Display for BuluError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BuluError::LexError { message, line, column, file } => {
+            BuluError::LexError { message, line, column, file, token, stack } => {
                 if let Some(file_path) = file {
-                    write!(f, "Lexical error in {} at {}:{}: {}", file_path, line, column, message)
+                    write!(f, "Lexical Error: {}\n", message)?;
+                    write!(f, "  --> {}:{}:{}\n", file_path, line, column)?;
+                    if let Some(tok) = token {
+                        write!(f, "  Token: '{}'\n", tok)?;
+                    }
+                    if !stack.is_empty() {
+                        write!(f, "\nStack trace:\n")?;
+                        for frame in stack {
+                            write!(f, "  at {}:{}:{} in {}\n", frame.file, frame.line, frame.column, frame.context)?;
+                        }
+                    }
+                    Ok(())
                 } else {
                     write!(f, "Lexical error at {}:{}: {}", line, column, message)
                 }
             }
-            BuluError::ParseError { message, line, column, file } => {
+            BuluError::ParseError { message, line, column, file, token, stack } => {
                 if let Some(file_path) = file {
-                    write!(f, "Parse error in {} at {}:{}: {}", file_path, line, column, message)
+                    write!(f, "Parse Error: {}\n", message)?;
+                    write!(f, "  --> {}:{}:{}\n", file_path, line, column)?;
+                    if let Some(tok) = token {
+                        write!(f, "  Token: '{}'\n", tok)?;
+                    }
+                    if !stack.is_empty() {
+                        write!(f, "\nStack trace:\n")?;
+                        for frame in stack {
+                            write!(f, "  at {}:{}:{} in {}\n", frame.file, frame.line, frame.column, frame.context)?;
+                        }
+                    }
+                    Ok(())
                 } else {
                     write!(f, "Parse error at {}:{}: {}", line, column, message)
                 }
             }
-            BuluError::TypeError { message, line, column, file } => {
+            BuluError::TypeError { message, line, column, file, stack } => {
                 if let Some(file_path) = file {
-                    write!(f, "Type error in {} at {}:{}: {}", file_path, line, column, message)
+                    write!(f, "Type Error: {}\n", message)?;
+                    write!(f, "  --> {}:{}:{}\n", file_path, line, column)?;
+                    if !stack.is_empty() {
+                        write!(f, "\nStack trace:\n")?;
+                        for frame in stack {
+                            write!(f, "  at {}:{}:{} in {}\n", frame.file, frame.line, frame.column, frame.context)?;
+                        }
+                    }
+                    Ok(())
                 } else {
                     write!(f, "Type error at {}:{}: {}", line, column, message)
                 }
@@ -84,6 +135,9 @@ impl fmt::Display for BuluError {
             BuluError::Continue => {
                 write!(f, "Continue statement outside of loop")
             }
+            BuluError::Return(_) => {
+                write!(f, "Return statement outside of function")
+            }
             BuluError::Other(message) => {
                 write!(f, "Error: {}", message)
             }
@@ -94,22 +148,44 @@ impl fmt::Display for BuluError {
 impl BuluError {
     /// Create a new lexical error with file information
     pub fn lex_error(message: String, line: usize, column: usize, file: Option<String>) -> Self {
-        BuluError::LexError { message, line, column, file }
+        BuluError::LexError { message, line, column, file, token: None, stack: Vec::new() }
     }
 
     /// Create a new parse error with file information
     pub fn parse_error(message: String, line: usize, column: usize, file: Option<String>) -> Self {
-        BuluError::ParseError { message, line, column, file }
+        BuluError::ParseError { message, line, column, file, token: None, stack: Vec::new() }
     }
 
     /// Create a new type error with file information
     pub fn type_error(message: String, line: usize, column: usize, file: Option<String>) -> Self {
-        BuluError::TypeError { message, line, column, file }
+        BuluError::TypeError { message, line, column, file, stack: Vec::new() }
     }
 
     /// Create a new runtime error with file information
     pub fn runtime_error(message: String, file: Option<String>) -> Self {
         BuluError::RuntimeError { message, file }
+    }
+    
+    /// Add token information to an error
+    pub fn with_token(mut self, token: String) -> Self {
+        match &mut self {
+            BuluError::LexError { token: tok, .. } => *tok = Some(token),
+            BuluError::ParseError { token: tok, .. } => *tok = Some(token),
+            _ => {}
+        }
+        self
+    }
+    
+    /// Add a stack frame to an error
+    pub fn with_frame(mut self, file: String, line: usize, column: usize, context: String) -> Self {
+        let frame = ErrorFrame { file, line, column, context };
+        match &mut self {
+            BuluError::LexError { stack, .. } => stack.push(frame),
+            BuluError::ParseError { stack, .. } => stack.push(frame),
+            BuluError::TypeError { stack, .. } => stack.push(frame),
+            _ => {}
+        }
+        self
     }
 
     /// Get the file path associated with this error, if any
@@ -139,6 +215,15 @@ impl BuluError {
             BuluError::LexError { column, .. } => Some(*column),
             BuluError::ParseError { column, .. } => Some(*column),
             BuluError::TypeError { column, .. } => Some(*column),
+            _ => None,
+        }
+    }
+    
+    /// Get the token associated with this error, if any
+    pub fn token(&self) -> Option<&String> {
+        match self {
+            BuluError::LexError { token, .. } => token.as_ref(),
+            BuluError::ParseError { token, .. } => token.as_ref(),
             _ => None,
         }
     }

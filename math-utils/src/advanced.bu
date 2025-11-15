@@ -1,0 +1,42 @@
+// Advanced mathematical operations
+
+export func power(base: int64, exp: int64): int64 {
+    let result = 1;
+    let i = 0;
+    while i < exp {
+        result = result * base;
+        i = i + 1;
+    }
+    return result;
+}
+
+export func abs(x: int64): int64 {
+    if x < 0 {
+        return 0 - x;
+    }
+    return x;
+}
+
+export func max(a: int64, b: int64): int64 {
+    if a > b {
+        return a;
+    }
+    return b;
+}
+
+export func min(a: int64, b: int64): int64 {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+export func clamp(value: int64, minVal: int64, maxVal: int64): int64 {
+    if value < minVal {
+        return minVal;
+    }
+    if value > maxVal {
+        return maxVal;
+    }
+    return value;
+}

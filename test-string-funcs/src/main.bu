@@ -1,0 +1,21 @@
+func main() {
+    println("=== Test ord and chr ===");
+    
+    // Test 1: ord() converts character to ASCII
+    let code_a = ord("A");
+    println(code_a);  // Should print 65
+    
+    // Test 2: chr() converts ASCII to character
+    let char_65 = chr(65);
+    println(char_65);  // Should print "A"
+    
+    // Test 3: String indexing returns a character
+    let s = "ABC";
+    let c = s[0];
+    println(c);  // Should print "A"
+    
+    // Test 4: Combining primitives
+    let first = s[0];
+    let code = ord(first);
+    println(code);  // Should print 65
+}

@@ -1,0 +1,13 @@
+// Math utilities package v2.0.0
+// Main entry point with re-exports
+
+// Re-export all basic operations
+export { add, subtract, multiply, divide, square } from "./basic.bu"
+
+// Re-export all advanced operations
+export { power, abs, max, min, clamp } from "./advanced.bu"
+
+// Re-export all geometry types and functions
+export { Point, Vector, createPoint, distanceSquared, translatePoint, 
+         createVector, vectorAdd, vectorSubtract, vectorScale, 
+         dotProduct, vectorMagnitudeSquared } from "./geometry.bu"

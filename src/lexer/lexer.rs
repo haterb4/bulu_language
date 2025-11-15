@@ -368,7 +368,7 @@ impl Lexer {
         }
         
         if depth > 0 {
-            return Err(BuluError::LexError {
+            return Err(BuluError::LexError { token: None, stack: Vec::new(),
                 message: "Unterminated block comment".to_string(),
                 line: self.line,
                 column: self.column,
@@ -427,7 +427,7 @@ impl Lexer {
                     '\'' => value.push('\''),
                     '0' => value.push('\0'),
                     _ => {
-                        return Err(BuluError::LexError {
+                        return Err(BuluError::LexError { token: None, stack: Vec::new(),
                             message: format!("Invalid escape sequence '\\{}'", self.peek()),
                             file: None,
                             line: self.line,
@@ -442,7 +442,7 @@ impl Lexer {
         }
         
         if self.is_at_end() {
-            return Err(BuluError::LexError {
+            return Err(BuluError::LexError { token: None, stack: Vec::new(),
                 message: "Unterminated string".to_string(),
                 file: None,
                 line: start_pos.line,
@@ -462,7 +462,7 @@ impl Lexer {
 
     fn char_literal(&mut self, start_pos: Position) -> Result<Token> {
         if self.is_at_end() {
-            return Err(BuluError::LexError {
+            return Err(BuluError::LexError { token: None, stack: Vec::new(),
                 message: "Unterminated character literal".to_string(),
                 file: None,
                 line: start_pos.line,
@@ -481,7 +481,7 @@ impl Lexer {
                 '\'' => '\'',
                 '0' => '\0',
                 _ => {
-                    return Err(BuluError::LexError {
+                    return Err(BuluError::LexError { token: None, stack: Vec::new(),
                         message: format!("Invalid escape sequence '\\{}'", self.peek()),
                         file: None,
                         line: self.line,
@@ -496,7 +496,7 @@ impl Lexer {
         self.advance(); // consume character
         
         if self.peek() != '\'' {
-            return Err(BuluError::LexError {
+            return Err(BuluError::LexError { token: None, stack: Vec::new(),
                 message: "Unterminated character literal".to_string(),
                 file: None,
                 line: start_pos.line,
@@ -557,7 +557,7 @@ impl Lexer {
             }
             
             if !self.peek().is_ascii_digit() {
-                return Err(BuluError::LexError {
+                return Err(BuluError::LexError { token: None, stack: Vec::new(),
                     message: "Invalid number format".to_string(),
                     file: None,
                     line: start_pos.line,
@@ -571,7 +571,7 @@ impl Lexer {
         }
         
         if is_float {
-            let float_val: f64 = value.parse().map_err(|_| BuluError::LexError {
+            let float_val: f64 = value.parse().map_err(|_| BuluError::LexError { token: None, stack: Vec::new(),
                 file: None,
                 message: "Invalid float literal".to_string(),
                 line: start_pos.line,
@@ -585,7 +585,7 @@ impl Lexer {
                 start_pos,
             ))
         } else {
-            let int_val: i64 = value.parse().map_err(|_| BuluError::LexError {
+            let int_val: i64 = value.parse().map_err(|_| BuluError::LexError { token: None, stack: Vec::new(),
                 file: None,
                 message: "Invalid integer literal".to_string(),
                 line: start_pos.line,
@@ -611,7 +611,7 @@ impl Lexer {
         }
         
         if value.is_empty() {
-            return Err(BuluError::LexError {
+            return Err(BuluError::LexError { token: None, stack: Vec::new(),
                 message: "Invalid hexadecimal number".to_string(),
                 file: None,
                 line: start_pos.line,
@@ -619,7 +619,7 @@ impl Lexer {
             });
         }
         
-        let int_val = i64::from_str_radix(&value, 16).map_err(|_| BuluError::LexError {
+        let int_val = i64::from_str_radix(&value, 16).map_err(|_| BuluError::LexError { token: None, stack: Vec::new(),
             message: "Invalid hexadecimal literal".to_string(),
             file: None,
             line: start_pos.line,
@@ -644,7 +644,7 @@ impl Lexer {
         }
         
         if value.is_empty() {
-            return Err(BuluError::LexError {
+            return Err(BuluError::LexError { token: None, stack: Vec::new(),
                 message: "Invalid octal number".to_string(),
                 file: None,
                 line: start_pos.line,
@@ -652,7 +652,7 @@ impl Lexer {
             });
         }
         
-        let int_val = i64::from_str_radix(&value, 8).map_err(|_| BuluError::LexError {
+        let int_val = i64::from_str_radix(&value, 8).map_err(|_| BuluError::LexError { token: None, stack: Vec::new(),
             message: "Invalid octal literal".to_string(),
             file: None,
             line: start_pos.line,
@@ -677,7 +677,7 @@ impl Lexer {
         }
         
         if value.is_empty() {
-            return Err(BuluError::LexError {
+            return Err(BuluError::LexError { token: None, stack: Vec::new(),
                 message: "Invalid binary number".to_string(),
                 file: None,
                 line: start_pos.line,
@@ -685,7 +685,7 @@ impl Lexer {
             });
         }
         
-        let int_val = i64::from_str_radix(&value, 2).map_err(|_| BuluError::LexError {
+        let int_val = i64::from_str_radix(&value, 2).map_err(|_| BuluError::LexError { token: None, stack: Vec::new(),
             message: "Invalid binary literal".to_string(),
             file: None,
             line: start_pos.line,

@@ -25,7 +25,7 @@ impl TypeCaster {
             TypeId::String => PrimitiveType::String,
             TypeId::Any => PrimitiveType::Any,
             _ => {
-                return Err(BuluError::TypeError {
+                return Err(BuluError::TypeError { stack: Vec::new(),
                     file: None,
                     message: format!("Cannot cast to {}", PrimitiveType::type_name(target_type)),
                     line: 0,

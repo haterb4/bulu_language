@@ -1,0 +1,53 @@
+// Geometry structures and operations
+
+// Point structure for 2D coordinates
+export struct Point {
+    x: int64,
+    y: int64
+}
+
+// Vector structure for mathematical operations
+export struct Vector {
+    x: int64,
+    y: int64
+}
+
+// Point operations
+export func createPoint(x: int64, y: int64): Point {
+    return Point { x: x, y: y };
+}
+
+export func distanceSquared(p1: Point, p2: Point): int64 {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    return dx * dx + dy * dy;
+}
+
+export func translatePoint(p: Point, dx: int64, dy: int64): Point {
+    return Point { x: p.x + dx, y: p.y + dy };
+}
+
+// Vector operations
+export func createVector(x: int64, y: int64): Vector {
+    return Vector { x: x, y: y };
+}
+
+export func vectorAdd(v1: Vector, v2: Vector): Vector {
+    return Vector { x: v1.x + v2.x, y: v1.y + v2.y };
+}
+
+export func vectorSubtract(v1: Vector, v2: Vector): Vector {
+    return Vector { x: v1.x - v2.x, y: v1.y - v2.y };
+}
+
+export func vectorScale(v: Vector, scalar: int64): Vector {
+    return Vector { x: v.x * scalar, y: v.y * scalar };
+}
+
+export func dotProduct(v1: Vector, v2: Vector): int64 {
+    return v1.x * v2.x + v1.y * v2.y;
+}
+
+export func vectorMagnitudeSquared(v: Vector): int64 {
+    return v.x * v.x + v.y * v.y;
+}

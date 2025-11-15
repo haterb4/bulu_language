@@ -1,0 +1,8 @@
+// Test simple sans imports
+
+func main() {
+    println("Test simple réussi !");
+    let x = 5;
+    let y = 3;
+    println("x + y = " + (x + y));
+}

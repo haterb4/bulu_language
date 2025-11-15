@@ -125,6 +125,9 @@ impl TypeChecker {
             ("cap", vec![TypeId::Any], Some(TypeId::Int32)),
             ("clone", vec![TypeId::Any], Some(TypeId::Any)),
             ("sizeof", vec![TypeId::Any], Some(TypeId::Int32)),
+            // String functions
+            ("ord", vec![TypeId::String], Some(TypeId::Int64)),
+            ("chr", vec![TypeId::Int64], Some(TypeId::String)),
             // Collection functions
             ("make", vec![TypeId::Any], Some(TypeId::Any)),
             ("append", vec![TypeId::Any, TypeId::Any], Some(TypeId::Any)),
@@ -799,7 +802,7 @@ impl TypeChecker {
                 };
 
                 if !is_compatible {
-                    return Err(BuluError::TypeError {
+                    return Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!(
                             "Cannot assign {} to variable of type {}",
@@ -814,7 +817,7 @@ impl TypeChecker {
             }
             // Neither type annotation nor initializer
             (None, None) => {
-                return Err(BuluError::TypeError {
+                return Err(BuluError::TypeError { stack: Vec::new(),
                     file: None,
                     message: "Variable declaration must have either type annotation or initializer"
                         .to_string(),
@@ -863,7 +866,7 @@ impl TypeChecker {
                 (Some(ref type_ann), Some(inferred)) => {
                     let explicit_type = self.ast_type_to_type_id(type_ann);
                     if !PrimitiveType::is_assignable(inferred, explicit_type) {
-                        return Err(BuluError::TypeError {
+                        return Err(BuluError::TypeError { stack: Vec::new(),
                             file: None,
                             message: format!(
                                 "Cannot assign {} to variable of type {}",
@@ -878,7 +881,7 @@ impl TypeChecker {
                 }
                 // Neither type annotation nor initializer
                 (None, None) => {
-                    return Err(BuluError::TypeError {
+                    return Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message:
                             "Variable declaration must have either type annotation or initializer"
@@ -926,7 +929,7 @@ impl TypeChecker {
                 Expression::Identifier(ident) => {
                     // Check that the identifier exists
                     if self.lookup_symbol(&ident.name).is_none() {
-                        return Err(BuluError::TypeError {
+                        return Err(BuluError::TypeError { stack: Vec::new(),
                             message: format!("Undefined variable '{}'", ident.name),
                             line: ident.position.line,
                             column: ident.position.column,
@@ -935,7 +938,7 @@ impl TypeChecker {
                     }
                 }
                 _ => {
-                    return Err(BuluError::TypeError {
+                    return Err(BuluError::TypeError { stack: Vec::new(),
                         message: "Only simple identifiers are supported in multiple assignment"
                             .to_string(),
                         line: 0,
@@ -1223,7 +1226,7 @@ impl TypeChecker {
         // Check condition
         let condition_type = self.check_expression(&stmt.condition)?;
         if condition_type != TypeId::Bool {
-            return Err(BuluError::TypeError {
+            return Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!(
                     "If condition must be bool, got {}",
@@ -1250,7 +1253,7 @@ impl TypeChecker {
         // Check condition
         let condition_type = self.check_expression(&stmt.condition)?;
         if condition_type != TypeId::Bool {
-            return Err(BuluError::TypeError {
+            return Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!(
                     "While condition must be bool, got {}",
@@ -1287,7 +1290,7 @@ impl TypeChecker {
                 TypeId::Int32
             }
             _ => {
-                return Err(BuluError::TypeError {
+                return Err(BuluError::TypeError { stack: Vec::new(),
                     file: None,
                     message: format!(
                         "Cannot iterate over {}",
@@ -1341,7 +1344,7 @@ impl TypeChecker {
             (Some(ref expr), Some(expected)) => {
                 let actual_type = self.check_expression(expr)?;
                 if !PrimitiveType::is_assignable(actual_type, expected) {
-                    return Err(BuluError::TypeError {
+                    return Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!(
                             "Cannot return {} from function expecting {}",
@@ -1362,7 +1365,7 @@ impl TypeChecker {
                 Ok(actual_type)
             }
             // Return without value but function expects a value
-            (None, Some(expected)) => Err(BuluError::TypeError {
+            (None, Some(expected)) => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!(
                     "Function expects return value of type {}",
@@ -1436,7 +1439,7 @@ impl TypeChecker {
                     }
                 }
 
-                Err(BuluError::TypeError {
+                Err(BuluError::TypeError { stack: Vec::new(),
                     file: None,
                     message: format!("Undefined identifier '{}'", ident.name),
                     line: ident.position.line,
@@ -1511,14 +1514,17 @@ impl TypeChecker {
         PrimitiveType::binary_operation_result_type(left_type, right_type, op_str).map_err(
             |mut e| {
                 if let BuluError::TypeError {
+                    ref mut stack,
                     file: None,
                     ref mut line,
                     ref mut column,
                     ..
                 } = e
                 {
-                    *line = bin.position.line;
-                    *column = bin.position.column;
+                    if stack.is_empty() {
+                        *line = bin.position.line;
+                        *column = bin.position.column;
+                    }
                 }
                 e
             },
@@ -1534,7 +1540,7 @@ impl TypeChecker {
                 if PrimitiveType::is_numeric_type_id(operand_type) {
                     Ok(operand_type)
                 } else {
-                    Err(BuluError::TypeError {
+                    Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!(
                             "Unary {} operator requires numeric operand, got {}",
@@ -1554,7 +1560,7 @@ impl TypeChecker {
                 if operand_type == TypeId::Bool {
                     Ok(TypeId::Bool)
                 } else {
-                    Err(BuluError::TypeError {
+                    Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!(
                             "Unary not operator requires bool operand, got {}",
@@ -1579,7 +1585,7 @@ impl TypeChecker {
                 if ident.name == "make" {
                     // make() takes 1-3 arguments depending on type
                     if call.args.is_empty() || call.args.len() > 3 {
-                        return Err(BuluError::TypeError {
+                        return Err(BuluError::TypeError { stack: Vec::new(),
                             file: None,
                             message: format!(
                                 "make() expects 1-3 arguments, got {}",
@@ -1641,7 +1647,7 @@ impl TypeChecker {
                                             | TypeId::UInt32
                                             | TypeId::UInt64
                                     ) {
-                                        return Err(BuluError::TypeError {
+                                        return Err(BuluError::TypeError { stack: Vec::new(),
                                             file: None,
                                             message:
                                                 "make() size/capacity arguments must be integers"
@@ -1753,7 +1759,7 @@ impl TypeChecker {
                                     arg_type,
                                     TypeId::Int32 | TypeId::Int64 | TypeId::UInt32 | TypeId::UInt64
                                 ) {
-                                    return Err(BuluError::TypeError {
+                                    return Err(BuluError::TypeError { stack: Vec::new(),
                                         file: None,
                                         message: "make() size/capacity arguments must be integers"
                                             .to_string(),
@@ -1779,7 +1785,7 @@ impl TypeChecker {
                                     arg_type,
                                     TypeId::Int32 | TypeId::Int64 | TypeId::UInt32 | TypeId::UInt64
                                 ) {
-                                    return Err(BuluError::TypeError {
+                                    return Err(BuluError::TypeError { stack: Vec::new(),
                                         file: None,
                                         message: "make() size/capacity arguments must be integers"
                                             .to_string(),
@@ -1828,7 +1834,7 @@ impl TypeChecker {
                     if ident.name == "typeof" {
                         // typeof takes exactly one argument of any type
                         if call.args.len() != 1 {
-                            return Err(BuluError::TypeError {
+                            return Err(BuluError::TypeError { stack: Vec::new(),
                                 file: None,
                                 message: format!(
                                     "typeof() expects exactly 1 argument, got {}",
@@ -1845,7 +1851,7 @@ impl TypeChecker {
 
                     // Check argument count
                     if call.args.len() != func_info.param_types.len() {
-                        return Err(BuluError::TypeError {
+                        return Err(BuluError::TypeError { stack: Vec::new(),
                             file: None,
                             message: format!(
                                 "Function '{}' expects {} arguments, got {}",
@@ -1867,7 +1873,7 @@ impl TypeChecker {
                     {
                         let actual_type = self.check_expression(arg)?;
                         if !self.is_type_compatible(actual_type, *expected_type) {
-                            return Err(BuluError::TypeError {
+                            return Err(BuluError::TypeError { stack: Vec::new(),
                                 file: None,
                                 message: format!(
                                     "Argument {} to function '{}': expected {}, got {}",
@@ -1885,15 +1891,16 @@ impl TypeChecker {
                     // Return the function's return type
                     Ok(func_info.return_type.unwrap_or(TypeId::Any))
                 } else if self.lookup_symbol(&ident.name).is_some() {
-                    // Symbol exists but is not a function
-                    return Err(BuluError::TypeError {
-                        file: None,
-                        message: format!("'{}' is not a function", ident.name),
-                        line: call.position.line,
-                        column: call.position.column,
-                    });
+                    // Symbol exists but is not a function in our type system
+                    // This could be an imported function from a module
+                    // For now, allow it and return Any type
+                    // Check arguments anyway
+                    for arg in &call.args {
+                        self.check_expression(arg)?;
+                    }
+                    Ok(TypeId::Any)
                 } else {
-                    return Err(BuluError::TypeError {
+                    return Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!("Undefined function '{}'", ident.name),
                         line: call.position.line,
@@ -2088,7 +2095,7 @@ impl TypeChecker {
 
                 // If method not found, provide a helpful error message
                 match object_type {
-                    TypeId::Interface(_) => Err(BuluError::TypeError {
+                    TypeId::Interface(_) => Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!(
                             "Method '{}' not found in interface '{}'",
@@ -2097,7 +2104,7 @@ impl TypeChecker {
                         line: call.position.line,
                         column: call.position.column,
                     }),
-                    TypeId::Struct(_) => Err(BuluError::TypeError {
+                    TypeId::Struct(_) => Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!(
                             "Method '{}' not found in struct '{}'",
@@ -2106,7 +2113,7 @@ impl TypeChecker {
                         line: call.position.line,
                         column: call.position.column,
                     }),
-                    _ => Err(BuluError::TypeError {
+                    _ => Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!(
                             "Method '{}' not found on type '{}'",
@@ -2142,7 +2149,7 @@ impl TypeChecker {
                     if let Some(export_symbol) = exports.get(&access.member) {
                         return Ok(export_symbol.type_id);
                     } else {
-                        return Err(BuluError::TypeError {
+                        return Err(BuluError::TypeError { stack: Vec::new(),
                             file: None,
                             message: format!(
                                 "Module '{}' does not export '{}'",
@@ -2248,7 +2255,7 @@ impl TypeChecker {
             }
         }
 
-        Err(BuluError::TypeError {
+        Err(BuluError::TypeError { stack: Vec::new(),
             message: format!("Member '{}' not found", access.member),
             line: access.position.line,
             column: access.position.column,
@@ -2274,7 +2281,7 @@ impl TypeChecker {
                         let end_type = self.check_expression(&range.end)?;
 
                         if !PrimitiveType::is_integer_type_id(start_type) {
-                            return Err(BuluError::TypeError {
+                            return Err(BuluError::TypeError { stack: Vec::new(),
                                 file: None,
                                 message: format!(
                                     "Slice start index must be integer, got {}",
@@ -2286,7 +2293,7 @@ impl TypeChecker {
                         }
 
                         if !PrimitiveType::is_integer_type_id(end_type) {
-                            return Err(BuluError::TypeError {
+                            return Err(BuluError::TypeError { stack: Vec::new(),
                                 file: None,
                                 message: format!(
                                     "Slice end index must be integer, got {}",
@@ -2300,7 +2307,7 @@ impl TypeChecker {
                 } else {
                     // Arrays, slices, and strings require integer indices for simple indexing
                     if !PrimitiveType::is_integer_type_id(index_type) {
-                        return Err(BuluError::TypeError {
+                        return Err(BuluError::TypeError { stack: Vec::new(),
                             file: None,
                             message: format!(
                                 "Array/slice/string index must be integer, got {}",
@@ -2317,7 +2324,7 @@ impl TypeChecker {
                 if let Some((key_type, _value_type)) = self.type_registry.get_map_types(object_type)
                 {
                     if !PrimitiveType::is_assignable(index_type, key_type) {
-                        return Err(BuluError::TypeError {
+                        return Err(BuluError::TypeError { stack: Vec::new(),
                             file: None,
                             message: format!(
                                 "Map key must be {}, got {}",
@@ -2343,8 +2350,9 @@ impl TypeChecker {
                     // String slicing returns a string
                     Ok(TypeId::String)
                 } else {
-                    // String indexing returns a char
-                    Ok(TypeId::Char)
+                    // String indexing returns a single-character string (not char)
+                    // This matches Python's behavior: "ABC"[0] -> "A"
+                    Ok(TypeId::String)
                 }
             }
             TypeId::Array(_type_id) | TypeId::Slice(_type_id) => {
@@ -2379,7 +2387,7 @@ impl TypeChecker {
                     Ok(TypeId::Any)
                 }
             }
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!(
                     "Cannot index into {}",
@@ -2398,7 +2406,7 @@ impl TypeChecker {
 
         // Check assignment compatibility
         if !PrimitiveType::is_assignable(value_type, target_type) {
-            return Err(BuluError::TypeError {
+            return Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!(
                     "Cannot assign {} to {}",
@@ -2414,7 +2422,7 @@ impl TypeChecker {
         if let Expression::Identifier(ident) = &*assign.target {
             if let Some(symbol) = self.lookup_symbol(&ident.name) {
                 if !symbol.is_mutable {
-                    return Err(BuluError::TypeError {
+                    return Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!("Cannot assign to immutable variable '{}'", ident.name),
                         line: assign.position.line,
@@ -2438,7 +2446,7 @@ impl TypeChecker {
         for element in &array.elements[1..] {
             let element_type = self.check_expression(element)?;
             if !PrimitiveType::is_assignable(element_type, first_type) {
-                return Err(BuluError::TypeError {
+                return Err(BuluError::TypeError { stack: Vec::new(),
                     file: None,
                     message: format!(
                         "Array elements must have the same type, expected {}, got {}",
@@ -2490,7 +2498,7 @@ impl TypeChecker {
             if !PrimitiveType::is_assignable(entry_key_type, key_type) {
                 let key_type_name = self.type_registry.get_type_name(key_type);
                 let entry_key_type_name = self.type_registry.get_type_name(entry_key_type);
-                return Err(BuluError::TypeError {
+                return Err(BuluError::TypeError { stack: Vec::new(),
                     file: None,
                     message: format!(
                         "Map keys must have the same type, expected {}, got {}",
@@ -2504,7 +2512,7 @@ impl TypeChecker {
             if !PrimitiveType::is_assignable(entry_value_type, value_type) {
                 let value_type_name = self.type_registry.get_type_name(value_type);
                 let entry_value_type_name = self.type_registry.get_type_name(entry_value_type);
-                return Err(BuluError::TypeError {
+                return Err(BuluError::TypeError { stack: Vec::new(),
                     file: None,
                     message: format!(
                         "Map values must have the same type, expected {}, got {}",
@@ -2544,7 +2552,7 @@ impl TypeChecker {
                         let expected_type = self.ast_type_to_type_id(&field.field_type);
 
                         if !PrimitiveType::is_assignable(value_type, expected_type) {
-                            return Err(BuluError::TypeError {
+                            return Err(BuluError::TypeError { stack: Vec::new(),
                                 message: format!(
                                     "Field '{}' expects type {}, got {}",
                                     field.name,
@@ -2576,7 +2584,7 @@ impl TypeChecker {
                 }
 
                 if !field_exists {
-                    return Err(BuluError::TypeError {
+                    return Err(BuluError::TypeError { stack: Vec::new(),
                         message: format!(
                             "Unknown field '{}' in struct '{}'",
                             field_init.name, struct_lit.type_name
@@ -2590,7 +2598,7 @@ impl TypeChecker {
 
             Ok(struct_type_id)
         } else {
-            Err(BuluError::TypeError {
+            Err(BuluError::TypeError { stack: Vec::new(),
                 message: format!("Unknown struct type '{}'", struct_lit.type_name),
                 line: struct_lit.position.line,
                 column: struct_lit.position.column,
@@ -2636,7 +2644,7 @@ impl TypeChecker {
         // Check if the cast is valid
         use crate::types::casting::TypeCaster;
         if !TypeCaster::is_cast_valid(expr_type, target_type) {
-            return Err(BuluError::TypeError {
+            return Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!(
                     "Cannot cast {} to {}",
@@ -2668,7 +2676,7 @@ impl TypeChecker {
 
         // Both start and end should be numeric types
         if !PrimitiveType::is_numeric_type_id(start_type) {
-            return Err(BuluError::TypeError {
+            return Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!(
                     "Range start must be numeric, got {}",
@@ -2680,7 +2688,7 @@ impl TypeChecker {
         }
 
         if !PrimitiveType::is_numeric_type_id(end_type) {
-            return Err(BuluError::TypeError {
+            return Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!(
                     "Range end must be numeric, got {}",
@@ -2695,7 +2703,7 @@ impl TypeChecker {
         if let Some(ref step) = range.step {
             let step_type = self.check_expression(step)?;
             if !PrimitiveType::is_numeric_type_id(step_type) {
-                return Err(BuluError::TypeError {
+                return Err(BuluError::TypeError { stack: Vec::new(),
                     file: None,
                     message: format!(
                         "Range step must be numeric, got {}",
@@ -2751,7 +2759,7 @@ impl TypeChecker {
                     {
                         Ok(**result_type)
                     } else {
-                        Err(BuluError::TypeError {
+                        Err(BuluError::TypeError { stack: Vec::new(),
             file: None,
                             message: "Internal error: Promise type ID does not map to Promise composite type".to_string(),
                             line: await_expr.position.line,
@@ -2759,7 +2767,7 @@ impl TypeChecker {
                         })
                     }
                 } else {
-                    Err(BuluError::TypeError {
+                    Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: "Internal error: Promise type ID not found in registry"
                             .to_string(),
@@ -2768,7 +2776,7 @@ impl TypeChecker {
                     })
                 }
             }
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot await non-Promise type: {:?}", expr_type),
                 line: await_expr.position.line,
@@ -2791,7 +2799,7 @@ impl TypeChecker {
     fn add_symbol(&mut self, symbol: Symbol) -> Result<()> {
         if let Some(current_scope) = self.scopes.last_mut() {
             if current_scope.contains_key(&symbol.name) {
-                return Err(BuluError::TypeError {
+                return Err(BuluError::TypeError { stack: Vec::new(),
                     file: None,
                     message: format!(
                         "Variable '{}' is already defined in this scope",
@@ -3647,7 +3655,7 @@ impl TypeChecker {
                                         field_type,
                                     )?;
                                 } else {
-                                    return Err(BuluError::TypeError {
+                                    return Err(BuluError::TypeError { stack: Vec::new(),
                                         message: format!(
                                             "Field '{}' not found in struct",
                                             field_pattern.name
@@ -3659,7 +3667,7 @@ impl TypeChecker {
                                 }
                             }
                         } else {
-                            return Err(BuluError::TypeError {
+                            return Err(BuluError::TypeError { stack: Vec::new(),
                                 message: "Unknown struct type in destructuring".to_string(),
                                 line: 0,
                                 column: 0,
@@ -3686,7 +3694,7 @@ impl TypeChecker {
                         }
                     }
                     _ => {
-                        return Err(BuluError::TypeError {
+                        return Err(BuluError::TypeError { stack: Vec::new(),
                             message: format!("Cannot destructure non-struct type"),
                             line: 0,
                             column: 0,
@@ -3705,7 +3713,7 @@ impl TypeChecker {
                     }
                     TypeId::Any => TypeId::Any,
                     _ => {
-                        return Err(BuluError::TypeError {
+                        return Err(BuluError::TypeError { stack: Vec::new(),
                             message: "Cannot destructure non-array type".to_string(),
                             line: 0,
                             column: 0,
@@ -3731,7 +3739,7 @@ impl TypeChecker {
                             {
                                 element_types.clone()
                             } else {
-                                return Err(BuluError::TypeError {
+                                return Err(BuluError::TypeError { stack: Vec::new(),
                                     message: "Type registry error: expected tuple type".to_string(),
                                     line: tuple_pattern.position.line,
                                     column: tuple_pattern.position.column,
@@ -3739,7 +3747,7 @@ impl TypeChecker {
                                 });
                             }
                         } else {
-                            return Err(BuluError::TypeError {
+                            return Err(BuluError::TypeError { stack: Vec::new(),
                                 message: "Unknown tuple type in destructuring".to_string(),
                                 line: tuple_pattern.position.line,
                                 column: tuple_pattern.position.column,
@@ -3749,7 +3757,7 @@ impl TypeChecker {
 
                         // Check that the number of patterns matches the number of tuple elements
                         if tuple_pattern.elements.len() != element_types.len() {
-                            return Err(BuluError::TypeError {
+                            return Err(BuluError::TypeError { stack: Vec::new(),
                                 message: format!(
                                     "Tuple destructuring pattern has {} elements but tuple has {} elements",
                                     tuple_pattern.elements.len(),
@@ -3769,7 +3777,7 @@ impl TypeChecker {
                         }
                     }
                     _ => {
-                        return Err(BuluError::TypeError {
+                        return Err(BuluError::TypeError { stack: Vec::new(),
                             message: "Cannot destructure non-tuple type".to_string(),
                             line: tuple_pattern.position.line,
                             column: tuple_pattern.position.column,

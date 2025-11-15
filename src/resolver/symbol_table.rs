@@ -22,6 +22,24 @@ pub enum SymbolKind {
     Module,
 }
 
+/// Function signature information
+#[derive(Debug, Clone)]
+pub struct FunctionSignature {
+    pub parameters: Vec<ParameterInfo>,
+    pub return_type: Option<crate::ast::nodes::Type>,
+    pub is_async: bool,
+    pub is_variadic: bool,
+}
+
+/// Parameter information
+#[derive(Debug, Clone)]
+pub struct ParameterInfo {
+    pub name: String,
+    pub param_type: Option<crate::ast::nodes::Type>,
+    pub has_default: bool,
+    pub is_variadic: bool,
+}
+
 /// Symbol information
 #[derive(Debug, Clone)]
 pub struct Symbol {
@@ -30,6 +48,8 @@ pub struct Symbol {
     pub visibility: Visibility,
     pub position: Position,
     pub module_path: Option<String>,
+    pub function_signature: Option<FunctionSignature>,
+    pub type_info: Option<crate::ast::nodes::Type>,
 }
 
 impl Symbol {
@@ -45,11 +65,23 @@ impl Symbol {
             visibility,
             position,
             module_path: None,
+            function_signature: None,
+            type_info: None,
         }
     }
 
     pub fn with_module_path(mut self, module_path: String) -> Self {
         self.module_path = Some(module_path);
+        self
+    }
+    
+    pub fn with_function_signature(mut self, signature: FunctionSignature) -> Self {
+        self.function_signature = Some(signature);
+        self
+    }
+    
+    pub fn with_type_info(mut self, type_info: crate::ast::nodes::Type) -> Self {
+        self.type_info = Some(type_info);
         self
     }
 

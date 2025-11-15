@@ -70,7 +70,7 @@ fn execute_source_file(path: &Path) -> Result<RuntimeValue> {
     // Set the current directory for the module resolver
     if let Some(parent_dir) = path.parent() {
         symbol_resolver
-            .module_resolver()
+            .module_resolver_mut()
             .set_current_dir(parent_dir.to_path_buf());
     }
 

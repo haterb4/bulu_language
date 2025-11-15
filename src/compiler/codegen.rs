@@ -93,9 +93,10 @@ impl CodeGenerator {
             // Debug mode: generate bytecode for fast compilation
             self.generate_bytecode(ir_program)
         } else {
-            // Release mode: generate native executable
-            let bytecode = self.generate_bytecode(ir_program)?;
-            self.create_standalone_executable(&bytecode)
+            // Release mode: generate native executable (Go-style)
+            use crate::compiler::native_backend::NativeBackend;
+            let backend = NativeBackend::new();
+            backend.generate_executable(ir_program)
         }
     }
 
@@ -106,9 +107,10 @@ impl CodeGenerator {
     
     /// Determine if we should generate bytecode (debug mode) or native executable (release mode)
     fn should_generate_bytecode(&self) -> bool {
-        // For now, we'll use a simple heuristic based on debug flag
-        // In a real implementation, this would be passed from the build configuration
-        self.debug
+        // Generate bytecode for debug mode (fast compilation)
+        // Generate native code for release mode (optimized)
+        // For now, always generate native code to test the backend
+        false
     }
 
     /// Generate bytecode compatible with our interpreter

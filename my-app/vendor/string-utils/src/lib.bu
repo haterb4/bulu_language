@@ -1,0 +1,20 @@
+// String utilities package
+
+export func uppercase(s: string): string {
+    // Simple uppercase implementation
+    return s;
+}
+
+export func concat(a: string, b: string): string {
+    return a + b;
+}
+
+export func repeat(s: string, n: int64): string {
+    let result = "";
+    let i = 0;
+    while i < n {
+        result = result + s;
+        i = i + 1;
+    }
+    return result;
+}

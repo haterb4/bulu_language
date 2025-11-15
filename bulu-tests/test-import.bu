@@ -1,0 +1,8 @@
+// Test import simple
+import { add } from "math-utils";
+
+func main() {
+    println("Test import");
+    let result = add(2, 3);
+    println("2 + 3 = " + result);
+}

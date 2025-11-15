@@ -426,7 +426,7 @@ impl PrimitiveType {
                     // String concatenation - allow string + any type or any type + string
                     Ok(TypeId::String)
                 } else {
-                    Err(BuluError::TypeError {
+                    Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!(
                             "Cannot apply {} to {} and {}",
@@ -446,7 +446,7 @@ impl PrimitiveType {
                     // Return the "wider" type
                     Ok(PrimitiveType::promote_numeric_types(left, right))
                 } else {
-                    Err(BuluError::TypeError {
+                    Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!(
                             "Cannot apply {} to {} and {}",
@@ -469,7 +469,7 @@ impl PrimitiveType {
                 } else if left == right {
                     Ok(TypeId::Bool)
                 } else {
-                    Err(BuluError::TypeError {
+                    Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!(
                             "Cannot compare {} and {}",
@@ -487,7 +487,7 @@ impl PrimitiveType {
                 if left == TypeId::Bool && right == TypeId::Bool {
                     Ok(TypeId::Bool)
                 } else {
-                    Err(BuluError::TypeError {
+                    Err(BuluError::TypeError { stack: Vec::new(),
                         file: None,
                         message: format!(
                             "Logical {} requires bool operands, got {} and {}",
@@ -501,7 +501,7 @@ impl PrimitiveType {
                 }
             }
 
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Unknown binary operator: {}", op),
                 line: 0,
@@ -607,6 +607,12 @@ pub enum RuntimeValue {
 
     // Function references
     Function(String), // Function name or identifier
+    
+    // Module function reference (function from an imported module)
+    ModuleFunction {
+        module_path: String,
+        function_name: String,
+    },
 
     // Method references
     MethodRef {
@@ -657,6 +663,7 @@ impl RuntimeValue {
             RuntimeValue::Integer(_) => PrimitiveType::Int64, // Generic integer maps to Int64
             RuntimeValue::Byte(_) => PrimitiveType::UInt8, // Byte maps to UInt8
             RuntimeValue::Function(_) => PrimitiveType::Any, // Functions are treated as Any type
+            RuntimeValue::ModuleFunction { .. } => PrimitiveType::Any, // Module functions are treated as Any type
             RuntimeValue::MethodRef { .. } => PrimitiveType::Any, // Method refs are treated as Any type
             RuntimeValue::Struct { .. } => PrimitiveType::Any, // Structs are treated as Any type
             RuntimeValue::Global(_) => PrimitiveType::Any, // Global refs are treated as Any type
@@ -692,6 +699,7 @@ impl RuntimeValue {
             RuntimeValue::Integer(i) => *i != 0, // Generic integer
             RuntimeValue::Byte(b) => *b != 0, // Byte is truthy if not zero
             RuntimeValue::Function(_) => true, // Functions are always truthy (they exist)
+            RuntimeValue::ModuleFunction { .. } => true, // Module functions are always truthy (they exist)
             RuntimeValue::MethodRef { .. } => true, // Method refs are always truthy (they exist)
             RuntimeValue::Struct { .. } => true, // Structs are always truthy (they exist)
             RuntimeValue::Global(_) => true, // Global refs are always truthy (they exist)
@@ -776,6 +784,7 @@ impl RuntimeValue {
             RuntimeValue::Integer(i) => i.to_string(),
             RuntimeValue::Byte(b) => b.to_string(),
             RuntimeValue::Function(name) => format!("Function({})", name),
+            RuntimeValue::ModuleFunction { module_path, function_name } => format!("Function({}::{})", module_path, function_name),
             RuntimeValue::MethodRef { method_name, .. } => format!("Method({})", method_name),
             RuntimeValue::Struct { name, fields } => {
                 let field_strs: Vec<String> = fields.iter()
@@ -791,7 +800,7 @@ impl RuntimeValue {
     /// Attempt to cast this value to another type
     pub fn cast_to(&self, target_type: PrimitiveType) -> Result<RuntimeValue> {
         if !self.get_type().can_explicitly_cast_to(&target_type) {
-            return Err(BuluError::TypeError {
+            return Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot cast {} to {}", self.get_type(), target_type),
                 line: 0,
@@ -833,7 +842,7 @@ impl RuntimeValue {
             RuntimeValue::Float64(f) => Ok(*f as i8),
             RuntimeValue::Bool(b) => Ok(if *b { 1 } else { 0 }),
             RuntimeValue::Char(c) => Ok(*c as u32 as i8),
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot convert {} to int8", self.get_type()),
                 line: 0,
@@ -856,7 +865,7 @@ impl RuntimeValue {
             RuntimeValue::Float64(f) => Ok(*f as i16),
             RuntimeValue::Bool(b) => Ok(if *b { 1 } else { 0 }),
             RuntimeValue::Char(c) => Ok(*c as u32 as i16),
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot convert {} to int16", self.get_type()),
                 line: 0,
@@ -879,7 +888,7 @@ impl RuntimeValue {
             RuntimeValue::Float64(f) => Ok(*f as i32),
             RuntimeValue::Bool(b) => Ok(if *b { 1 } else { 0 }),
             RuntimeValue::Char(c) => Ok(*c as u32 as i32),
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot convert {} to int32", self.get_type()),
                 line: 0,
@@ -902,7 +911,7 @@ impl RuntimeValue {
             RuntimeValue::Float64(f) => Ok(*f as i64),
             RuntimeValue::Bool(b) => Ok(if *b { 1 } else { 0 }),
             RuntimeValue::Char(c) => Ok(*c as u32 as i64),
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot convert {} to int64", self.get_type()),
                 line: 0,
@@ -925,7 +934,7 @@ impl RuntimeValue {
             RuntimeValue::Float64(f) => Ok(*f as u8),
             RuntimeValue::Bool(b) => Ok(if *b { 1 } else { 0 }),
             RuntimeValue::Char(c) => Ok(*c as u32 as u8),
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot convert {} to uint8", self.get_type()),
                 line: 0,
@@ -948,7 +957,7 @@ impl RuntimeValue {
             RuntimeValue::Float64(f) => Ok(*f as u16),
             RuntimeValue::Bool(b) => Ok(if *b { 1 } else { 0 }),
             RuntimeValue::Char(c) => Ok(*c as u32 as u16),
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot convert {} to uint16", self.get_type()),
                 line: 0,
@@ -971,7 +980,7 @@ impl RuntimeValue {
             RuntimeValue::Float64(f) => Ok(*f as u32),
             RuntimeValue::Bool(b) => Ok(if *b { 1 } else { 0 }),
             RuntimeValue::Char(c) => Ok(*c as u32),
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot convert {} to uint32", self.get_type()),
                 line: 0,
@@ -994,7 +1003,7 @@ impl RuntimeValue {
             RuntimeValue::Float64(f) => Ok(*f as u64),
             RuntimeValue::Bool(b) => Ok(if *b { 1 } else { 0 }),
             RuntimeValue::Char(c) => Ok(*c as u32 as u64),
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot convert {} to uint64", self.get_type()),
                 line: 0,
@@ -1015,7 +1024,7 @@ impl RuntimeValue {
             RuntimeValue::UInt64(i) => Ok(*i as f32),
             RuntimeValue::Float32(f) => Ok(*f),
             RuntimeValue::Float64(f) => Ok(*f as f32),
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot convert {} to float32", self.get_type()),
                 line: 0,
@@ -1036,7 +1045,7 @@ impl RuntimeValue {
             RuntimeValue::UInt64(i) => Ok(*i as f64),
             RuntimeValue::Float32(f) => Ok(*f as f64),
             RuntimeValue::Float64(f) => Ok(*f),
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot convert {} to float64", self.get_type()),
                 line: 0,
@@ -1048,21 +1057,21 @@ impl RuntimeValue {
     fn to_char(&self) -> Result<char> {
         match self {
             RuntimeValue::Char(c) => Ok(*c),
-            RuntimeValue::UInt32(i) => char::from_u32(*i).ok_or_else(|| BuluError::TypeError {
+            RuntimeValue::UInt32(i) => char::from_u32(*i).ok_or_else(|| BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Invalid Unicode code point: {}", i),
                 line: 0,
                 column: 0,
             }),
             RuntimeValue::Int32(i) if *i >= 0 => {
-                char::from_u32(*i as u32).ok_or_else(|| BuluError::TypeError {
+                char::from_u32(*i as u32).ok_or_else(|| BuluError::TypeError { stack: Vec::new(),
                     file: None,
                     message: format!("Invalid Unicode code point: {}", i),
                     line: 0,
                     column: 0,
                 })
             }
-            _ => Err(BuluError::TypeError {
+            _ => Err(BuluError::TypeError { stack: Vec::new(),
                 file: None,
                 message: format!("Cannot convert {} to char", self.get_type()),
                 line: 0,
@@ -1121,6 +1130,7 @@ impl fmt::Display for RuntimeValue {
             RuntimeValue::Integer(i) => write!(f, "{}", i),
             RuntimeValue::Byte(b) => write!(f, "{}", b),
             RuntimeValue::Function(name) => write!(f, "function({})", name),
+            RuntimeValue::ModuleFunction { module_path, function_name } => write!(f, "function({}::{})", module_path, function_name),
             RuntimeValue::MethodRef { method_name, .. } => write!(f, "method({})", method_name),
             RuntimeValue::Struct { name, fields } => {
                 let field_strs: Vec<String> = fields.iter()

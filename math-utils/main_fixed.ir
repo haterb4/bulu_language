@@ -1,0 +1,3711 @@
+IrProgram {
+    functions: [
+        IrFunction {
+            name: "power",
+            params: [
+                IrParam {
+                    name: "base",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "exp",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [
+                IrLocal {
+                    name: "result",
+                    local_type: Any,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                    is_mutable: true,
+                },
+                IrLocal {
+                    name: "i",
+                    local_type: Any,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                    is_mutable: true,
+                },
+            ],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Constant(
+                                    Integer(
+                                        1,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 4,
+                                column: 5,
+                                offset: 93,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Constant(
+                                    Integer(
+                                        0,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 5,
+                                column: 5,
+                                offset: 113,
+                            },
+                        },
+                    ],
+                    terminator: Branch(
+                        "bb1",
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb1",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Lt,
+                            result: Some(
+                                IrRegister {
+                                    id: 4,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 3,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 6,
+                                column: 11,
+                                offset: 134,
+                            },
+                        },
+                    ],
+                    terminator: ConditionalBranch {
+                        condition: Register(
+                            IrRegister {
+                                id: 4,
+                            },
+                        ),
+                        true_label: "bb2",
+                        false_label: "bb3",
+                    },
+                },
+                IrBasicBlock {
+                    label: "bb2",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Mul,
+                            result: Some(
+                                IrRegister {
+                                    id: 5,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 2,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 7,
+                                column: 18,
+                                offset: 161,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 5,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 7,
+                                column: 9,
+                                offset: 152,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 6,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 3,
+                                    },
+                                ),
+                                Constant(
+                                    Integer(
+                                        1,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 8,
+                                column: 13,
+                                offset: 188,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 6,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 8,
+                                column: 9,
+                                offset: 184,
+                            },
+                        },
+                    ],
+                    terminator: Branch(
+                        "bb1",
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb3",
+                    instructions: [],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 3,
+                column: 8,
+                offset: 44,
+            },
+        },
+        IrFunction {
+            name: "abs",
+            params: [
+                IrParam {
+                    name: "x",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Lt,
+                            result: Some(
+                                IrRegister {
+                                    id: 1,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Constant(
+                                    Integer(
+                                        0,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 14,
+                                column: 8,
+                                offset: 265,
+                            },
+                        },
+                    ],
+                    terminator: ConditionalBranch {
+                        condition: Register(
+                            IrRegister {
+                                id: 1,
+                            },
+                        ),
+                        true_label: "bb1",
+                        false_label: "bb2",
+                    },
+                },
+                IrBasicBlock {
+                    label: "bb1",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Sub,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Constant(
+                                    Integer(
+                                        0,
+                                    ),
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 15,
+                                column: 16,
+                                offset: 288,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb2",
+                    instructions: [],
+                    terminator: Branch(
+                        "bb3",
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb3",
+                    instructions: [],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 0,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 13,
+                column: 8,
+                offset: 230,
+            },
+        },
+        IrFunction {
+            name: "max",
+            params: [
+                IrParam {
+                    name: "a",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "b",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Gt,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 21,
+                                column: 8,
+                                offset: 370,
+                            },
+                        },
+                    ],
+                    terminator: ConditionalBranch {
+                        condition: Register(
+                            IrRegister {
+                                id: 2,
+                            },
+                        ),
+                        true_label: "bb1",
+                        false_label: "bb2",
+                    },
+                },
+                IrBasicBlock {
+                    label: "bb1",
+                    instructions: [],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 0,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb2",
+                    instructions: [],
+                    terminator: Branch(
+                        "bb3",
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb3",
+                    instructions: [],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 1,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 20,
+                column: 8,
+                offset: 325,
+            },
+        },
+        IrFunction {
+            name: "min",
+            params: [
+                IrParam {
+                    name: "a",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "b",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Lt,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 28,
+                                column: 8,
+                                offset: 471,
+                            },
+                        },
+                    ],
+                    terminator: ConditionalBranch {
+                        condition: Register(
+                            IrRegister {
+                                id: 2,
+                            },
+                        ),
+                        true_label: "bb1",
+                        false_label: "bb2",
+                    },
+                },
+                IrBasicBlock {
+                    label: "bb1",
+                    instructions: [],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 0,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb2",
+                    instructions: [],
+                    terminator: Branch(
+                        "bb3",
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb3",
+                    instructions: [],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 1,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 27,
+                column: 8,
+                offset: 426,
+            },
+        },
+        IrFunction {
+            name: "clamp",
+            params: [
+                IrParam {
+                    name: "value",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "minVal",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+                IrParam {
+                    name: "maxVal",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 2,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Lt,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 35,
+                                column: 8,
+                                offset: 598,
+                            },
+                        },
+                    ],
+                    terminator: ConditionalBranch {
+                        condition: Register(
+                            IrRegister {
+                                id: 3,
+                            },
+                        ),
+                        true_label: "bb1",
+                        false_label: "bb2",
+                    },
+                },
+                IrBasicBlock {
+                    label: "bb1",
+                    instructions: [],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 1,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb2",
+                    instructions: [],
+                    terminator: Branch(
+                        "bb3",
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb3",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Gt,
+                            result: Some(
+                                IrRegister {
+                                    id: 4,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 2,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 38,
+                                column: 8,
+                                offset: 651,
+                            },
+                        },
+                    ],
+                    terminator: ConditionalBranch {
+                        condition: Register(
+                            IrRegister {
+                                id: 4,
+                            },
+                        ),
+                        true_label: "bb4",
+                        false_label: "bb5",
+                    },
+                },
+                IrBasicBlock {
+                    label: "bb4",
+                    instructions: [],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb5",
+                    instructions: [],
+                    terminator: Branch(
+                        "bb6",
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb6",
+                    instructions: [],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 0,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 34,
+                column: 8,
+                offset: 527,
+            },
+        },
+        IrFunction {
+            name: "add",
+            params: [
+                IrParam {
+                    name: "a",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "b",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 4,
+                                column: 12,
+                                offset: 88,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 3,
+                column: 8,
+                offset: 39,
+            },
+        },
+        IrFunction {
+            name: "subtract",
+            params: [
+                IrParam {
+                    name: "a",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "b",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Sub,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 8,
+                                column: 12,
+                                offset: 159,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 7,
+                column: 8,
+                offset: 105,
+            },
+        },
+        IrFunction {
+            name: "multiply",
+            params: [
+                IrParam {
+                    name: "a",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "b",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Mul,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 12,
+                                column: 12,
+                                offset: 230,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 11,
+                column: 8,
+                offset: 176,
+            },
+        },
+        IrFunction {
+            name: "divide",
+            params: [
+                IrParam {
+                    name: "a",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "b",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Eq,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                                Constant(
+                                    Integer(
+                                        0,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 16,
+                                column: 8,
+                                offset: 295,
+                            },
+                        },
+                    ],
+                    terminator: ConditionalBranch {
+                        condition: Register(
+                            IrRegister {
+                                id: 2,
+                            },
+                        ),
+                        true_label: "bb1",
+                        false_label: "bb2",
+                    },
+                },
+                IrBasicBlock {
+                    label: "bb1",
+                    instructions: [],
+                    terminator: Return(
+                        Some(
+                            Constant(
+                                Integer(
+                                    0,
+                                ),
+                            ),
+                        ),
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb2",
+                    instructions: [],
+                    terminator: Branch(
+                        "bb3",
+                    ),
+                },
+                IrBasicBlock {
+                    label: "bb3",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Div,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 19,
+                                column: 12,
+                                offset: 339,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 15,
+                column: 8,
+                offset: 247,
+            },
+        },
+        IrFunction {
+            name: "square",
+            params: [
+                IrParam {
+                    name: "x",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Mul,
+                            result: Some(
+                                IrRegister {
+                                    id: 1,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 23,
+                                column: 12,
+                                offset: 398,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 1,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 22,
+                column: 8,
+                offset: 356,
+            },
+        },
+        IrFunction {
+            name: "createPoint",
+            params: [
+                IrParam {
+                    name: "x",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "y",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                Struct(
+                    "Point",
+                ),
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: StructConstruct,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "Point",
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 17,
+                                column: 12,
+                                offset: 314,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 16,
+                column: 8,
+                offset: 257,
+            },
+        },
+        IrFunction {
+            name: "distanceSquared",
+            params: [
+                IrParam {
+                    name: "p1",
+                    param_type: Struct(
+                        "Point",
+                    ),
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "p2",
+                    param_type: Struct(
+                        "Point",
+                    ),
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [
+                IrLocal {
+                    name: "dx",
+                    local_type: Any,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                    is_mutable: true,
+                },
+                IrLocal {
+                    name: "dy",
+                    local_type: Any,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                    is_mutable: true,
+                },
+            ],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 21,
+                                column: 14,
+                                offset: 411,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 4,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 21,
+                                column: 21,
+                                offset: 418,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Sub,
+                            result: Some(
+                                IrRegister {
+                                    id: 5,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 3,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 4,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 21,
+                                column: 14,
+                                offset: 411,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 5,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 21,
+                                column: 5,
+                                offset: 402,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 7,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 22,
+                                column: 14,
+                                offset: 437,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 8,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 22,
+                                column: 21,
+                                offset: 444,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Sub,
+                            result: Some(
+                                IrRegister {
+                                    id: 9,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 7,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 8,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 22,
+                                column: 14,
+                                offset: 437,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 6,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 9,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 22,
+                                column: 5,
+                                offset: 428,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Mul,
+                            result: Some(
+                                IrRegister {
+                                    id: 10,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 2,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 2,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 23,
+                                column: 12,
+                                offset: 461,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Mul,
+                            result: Some(
+                                IrRegister {
+                                    id: 11,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 6,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 6,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 23,
+                                column: 22,
+                                offset: 471,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 12,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 10,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 11,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 23,
+                                column: 12,
+                                offset: 461,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 12,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 20,
+                column: 8,
+                offset: 346,
+            },
+        },
+        IrFunction {
+            name: "translatePoint",
+            params: [
+                IrParam {
+                    name: "p",
+                    param_type: Struct(
+                        "Point",
+                    ),
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "dx",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+                IrParam {
+                    name: "dy",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 2,
+                    },
+                },
+            ],
+            return_type: Some(
+                Struct(
+                    "Point",
+                ),
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 4,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 27,
+                                column: 23,
+                                offset: 573,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 5,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 4,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 27,
+                                column: 23,
+                                offset: 573,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 6,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 27,
+                                column: 36,
+                                offset: 586,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 7,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 6,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 2,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 27,
+                                column: 36,
+                                offset: 586,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructConstruct,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "Point",
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 5,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 7,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 27,
+                                column: 12,
+                                offset: 562,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 26,
+                column: 8,
+                offset: 490,
+            },
+        },
+        IrFunction {
+            name: "createVector",
+            params: [
+                IrParam {
+                    name: "x",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "y",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                Struct(
+                    "Vector",
+                ),
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: StructConstruct,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "Vector",
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 32,
+                                column: 12,
+                                offset: 688,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 31,
+                column: 8,
+                offset: 629,
+            },
+        },
+        IrFunction {
+            name: "vectorAdd",
+            params: [
+                IrParam {
+                    name: "v1",
+                    param_type: Struct(
+                        "Vector",
+                    ),
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "v2",
+                    param_type: Struct(
+                        "Vector",
+                    ),
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                Struct(
+                    "Vector",
+                ),
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 36,
+                                column: 24,
+                                offset: 793,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 4,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 36,
+                                column: 31,
+                                offset: 800,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 5,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 3,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 4,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 36,
+                                column: 24,
+                                offset: 793,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 6,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 36,
+                                column: 40,
+                                offset: 809,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 7,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 36,
+                                column: 47,
+                                offset: 816,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 8,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 6,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 7,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 36,
+                                column: 40,
+                                offset: 809,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructConstruct,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "Vector",
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 5,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 8,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 36,
+                                column: 12,
+                                offset: 781,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 35,
+                column: 8,
+                offset: 721,
+            },
+        },
+        IrFunction {
+            name: "vectorSubtract",
+            params: [
+                IrParam {
+                    name: "v1",
+                    param_type: Struct(
+                        "Vector",
+                    ),
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "v2",
+                    param_type: Struct(
+                        "Vector",
+                    ),
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                Struct(
+                    "Vector",
+                ),
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 40,
+                                column: 24,
+                                offset: 911,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 4,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 40,
+                                column: 31,
+                                offset: 918,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Sub,
+                            result: Some(
+                                IrRegister {
+                                    id: 5,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 3,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 4,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 40,
+                                column: 24,
+                                offset: 911,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 6,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 40,
+                                column: 40,
+                                offset: 927,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 7,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 40,
+                                column: 47,
+                                offset: 934,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Sub,
+                            result: Some(
+                                IrRegister {
+                                    id: 8,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 6,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 7,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 40,
+                                column: 40,
+                                offset: 927,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructConstruct,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "Vector",
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 5,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 8,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 40,
+                                column: 12,
+                                offset: 899,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 39,
+                column: 8,
+                offset: 834,
+            },
+        },
+        IrFunction {
+            name: "vectorScale",
+            params: [
+                IrParam {
+                    name: "v",
+                    param_type: Struct(
+                        "Vector",
+                    ),
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "scalar",
+                    param_type: I64,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                Struct(
+                    "Vector",
+                ),
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 44,
+                                column: 24,
+                                offset: 1028,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Mul,
+                            result: Some(
+                                IrRegister {
+                                    id: 4,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 3,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 44,
+                                column: 24,
+                                offset: 1028,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 5,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 44,
+                                column: 41,
+                                offset: 1045,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Mul,
+                            result: Some(
+                                IrRegister {
+                                    id: 6,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 5,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 44,
+                                column: 41,
+                                offset: 1045,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructConstruct,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "Vector",
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 4,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 6,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 44,
+                                column: 12,
+                                offset: 1016,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 43,
+                column: 8,
+                offset: 952,
+            },
+        },
+        IrFunction {
+            name: "dotProduct",
+            params: [
+                IrParam {
+                    name: "v1",
+                    param_type: Struct(
+                        "Vector",
+                    ),
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+                IrParam {
+                    name: "v2",
+                    param_type: Struct(
+                        "Vector",
+                    ),
+                    register: IrRegister {
+                        id: 1,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 48,
+                                column: 12,
+                                offset: 1131,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 48,
+                                column: 19,
+                                offset: 1138,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Mul,
+                            result: Some(
+                                IrRegister {
+                                    id: 4,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 2,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 3,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 48,
+                                column: 12,
+                                offset: 1131,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 5,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 48,
+                                column: 26,
+                                offset: 1145,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 6,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 48,
+                                column: 33,
+                                offset: 1152,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Mul,
+                            result: Some(
+                                IrRegister {
+                                    id: 7,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 5,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 6,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 48,
+                                column: 26,
+                                offset: 1145,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 8,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 4,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 7,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 48,
+                                column: 12,
+                                offset: 1131,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 8,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 47,
+                column: 8,
+                offset: 1071,
+            },
+        },
+        IrFunction {
+            name: "vectorMagnitudeSquared",
+            params: [
+                IrParam {
+                    name: "v",
+                    param_type: Struct(
+                        "Vector",
+                    ),
+                    register: IrRegister {
+                        id: 0,
+                    },
+                },
+            ],
+            return_type: Some(
+                I64,
+            ),
+            locals: [],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 1,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 52,
+                                column: 12,
+                                offset: 1227,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "x",
+                                ),
+                            ],
+                            position: Position {
+                                line: 52,
+                                column: 18,
+                                offset: 1233,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Mul,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 2,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 52,
+                                column: 12,
+                                offset: 1227,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 4,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 52,
+                                column: 24,
+                                offset: 1239,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: StructAccess,
+                            result: Some(
+                                IrRegister {
+                                    id: 5,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 0,
+                                    },
+                                ),
+                                Global(
+                                    "y",
+                                ),
+                            ],
+                            position: Position {
+                                line: 52,
+                                column: 30,
+                                offset: 1245,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Mul,
+                            result: Some(
+                                IrRegister {
+                                    id: 6,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 4,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 5,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 52,
+                                column: 24,
+                                offset: 1239,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 7,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 3,
+                                    },
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 6,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 52,
+                                column: 12,
+                                offset: 1227,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        Some(
+                            Register(
+                                IrRegister {
+                                    id: 7,
+                                },
+                            ),
+                        ),
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 51,
+                column: 8,
+                offset: 1168,
+            },
+        },
+        IrFunction {
+            name: "main",
+            params: [],
+            return_type: None,
+            locals: [
+                IrLocal {
+                    name: "result1",
+                    local_type: Any,
+                    register: IrRegister {
+                        id: 0,
+                    },
+                    is_mutable: true,
+                },
+                IrLocal {
+                    name: "result2",
+                    local_type: Any,
+                    register: IrRegister {
+                        id: 1,
+                    },
+                    is_mutable: true,
+                },
+                IrLocal {
+                    name: "result3",
+                    local_type: Any,
+                    register: IrRegister {
+                        id: 2,
+                    },
+                    is_mutable: true,
+                },
+                IrLocal {
+                    name: "result4",
+                    local_type: Any,
+                    register: IrRegister {
+                        id: 3,
+                    },
+                    is_mutable: true,
+                },
+                IrLocal {
+                    name: "result5",
+                    local_type: Any,
+                    register: IrRegister {
+                        id: 4,
+                    },
+                    is_mutable: true,
+                },
+                IrLocal {
+                    name: "result6",
+                    local_type: Any,
+                    register: IrRegister {
+                        id: 5,
+                    },
+                    is_mutable: true,
+                },
+                IrLocal {
+                    name: "result7",
+                    local_type: Any,
+                    register: IrRegister {
+                        id: 6,
+                    },
+                    is_mutable: true,
+                },
+            ],
+            basic_blocks: [
+                IrBasicBlock {
+                    label: "bb0",
+                    instructions: [
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 0,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "println",
+                                ),
+                                Constant(
+                                    String(
+                                        "=== Math Utils Demo ===",
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 4,
+                                column: 5,
+                                offset: 90,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 2,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "add",
+                                ),
+                                Constant(
+                                    Integer(
+                                        2,
+                                    ),
+                                ),
+                                Constant(
+                                    Integer(
+                                        3,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 6,
+                                column: 19,
+                                offset: 148,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 1,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 2,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 6,
+                                column: 5,
+                                offset: 134,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 3,
+                                },
+                            ),
+                            operands: [
+                                Constant(
+                                    String(
+                                        "add(2, 3) = ",
+                                    ),
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 1,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 7,
+                                column: 13,
+                                offset: 170,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 4,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "println",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 3,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 7,
+                                column: 5,
+                                offset: 162,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 6,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "multiply",
+                                ),
+                                Constant(
+                                    Integer(
+                                        4,
+                                    ),
+                                ),
+                                Constant(
+                                    Integer(
+                                        5,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 9,
+                                column: 19,
+                                offset: 219,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 5,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 6,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 9,
+                                column: 5,
+                                offset: 205,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 7,
+                                },
+                            ),
+                            operands: [
+                                Constant(
+                                    String(
+                                        "multiply(4, 5) = ",
+                                    ),
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 5,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 10,
+                                column: 13,
+                                offset: 246,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 8,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "println",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 7,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 10,
+                                column: 5,
+                                offset: 238,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 10,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "square",
+                                ),
+                                Constant(
+                                    Integer(
+                                        7,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 12,
+                                column: 19,
+                                offset: 300,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 9,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 10,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 12,
+                                column: 5,
+                                offset: 286,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 11,
+                                },
+                            ),
+                            operands: [
+                                Constant(
+                                    String(
+                                        "square(7) = ",
+                                    ),
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 9,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 13,
+                                column: 13,
+                                offset: 322,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 12,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "println",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 11,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 13,
+                                column: 5,
+                                offset: 314,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 14,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "power",
+                                ),
+                                Constant(
+                                    Integer(
+                                        2,
+                                    ),
+                                ),
+                                Constant(
+                                    Integer(
+                                        8,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 15,
+                                column: 19,
+                                offset: 371,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 13,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 14,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 15,
+                                column: 5,
+                                offset: 357,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 15,
+                                },
+                            ),
+                            operands: [
+                                Constant(
+                                    String(
+                                        "power(2, 8) = ",
+                                    ),
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 13,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 16,
+                                column: 13,
+                                offset: 395,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 16,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "println",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 15,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 16,
+                                column: 5,
+                                offset: 387,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Sub,
+                            result: Some(
+                                IrRegister {
+                                    id: 18,
+                                },
+                            ),
+                            operands: [
+                                Constant(
+                                    Integer(
+                                        0,
+                                    ),
+                                ),
+                                Constant(
+                                    Integer(
+                                        42,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 18,
+                                column: 23,
+                                offset: 450,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 19,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "abs",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 18,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 18,
+                                column: 19,
+                                offset: 446,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 17,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 19,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 18,
+                                column: 5,
+                                offset: 432,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 20,
+                                },
+                            ),
+                            operands: [
+                                Constant(
+                                    String(
+                                        "abs(-42) = ",
+                                    ),
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 17,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 19,
+                                column: 13,
+                                offset: 470,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 21,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "println",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 20,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 19,
+                                column: 5,
+                                offset: 462,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 23,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "max",
+                                ),
+                                Constant(
+                                    Integer(
+                                        10,
+                                    ),
+                                ),
+                                Constant(
+                                    Integer(
+                                        20,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 21,
+                                column: 19,
+                                offset: 518,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 22,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 23,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 21,
+                                column: 5,
+                                offset: 504,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 24,
+                                },
+                            ),
+                            operands: [
+                                Constant(
+                                    String(
+                                        "max(10, 20) = ",
+                                    ),
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 22,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 22,
+                                column: 13,
+                                offset: 542,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 25,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "println",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 24,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 22,
+                                column: 5,
+                                offset: 534,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 27,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "min",
+                                ),
+                                Constant(
+                                    Integer(
+                                        10,
+                                    ),
+                                ),
+                                Constant(
+                                    Integer(
+                                        20,
+                                    ),
+                                ),
+                            ],
+                            position: Position {
+                                line: 24,
+                                column: 19,
+                                offset: 593,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Copy,
+                            result: Some(
+                                IrRegister {
+                                    id: 26,
+                                },
+                            ),
+                            operands: [
+                                Register(
+                                    IrRegister {
+                                        id: 27,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 24,
+                                column: 5,
+                                offset: 579,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Add,
+                            result: Some(
+                                IrRegister {
+                                    id: 28,
+                                },
+                            ),
+                            operands: [
+                                Constant(
+                                    String(
+                                        "min(10, 20) = ",
+                                    ),
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 26,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 25,
+                                column: 13,
+                                offset: 617,
+                            },
+                        },
+                        IrInstruction {
+                            opcode: Call,
+                            result: Some(
+                                IrRegister {
+                                    id: 29,
+                                },
+                            ),
+                            operands: [
+                                Global(
+                                    "println",
+                                ),
+                                Register(
+                                    IrRegister {
+                                        id: 28,
+                                    },
+                                ),
+                            ],
+                            position: Position {
+                                line: 25,
+                                column: 5,
+                                offset: 609,
+                            },
+                        },
+                    ],
+                    terminator: Return(
+                        None,
+                    ),
+                },
+            ],
+            is_async: false,
+            position: Position {
+                line: 3,
+                column: 1,
+                offset: 72,
+            },
+        },
+    ],
+    globals: [],
+    structs: [
+        IrStruct {
+            name: "Point",
+            fields: [
+                IrStructField {
+                    name: "x",
+                    field_type: I64,
+                    offset: 0,
+                },
+                IrStructField {
+                    name: "y",
+                    field_type: I64,
+                    offset: 8,
+                },
+            ],
+            methods: [],
+            position: Position {
+                line: 4,
+                column: 8,
+                offset: 84,
+            },
+        },
+        IrStruct {
+            name: "Vector",
+            fields: [
+                IrStructField {
+                    name: "x",
+                    field_type: I64,
+                    offset: 0,
+                },
+                IrStructField {
+                    name: "y",
+                    field_type: I64,
+                    offset: 8,
+                },
+            ],
+            methods: [],
+            position: Position {
+                line: 10,
+                column: 8,
+                offset: 184,
+            },
+        },
+    ],
+    interfaces: [],
+}

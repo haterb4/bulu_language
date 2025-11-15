@@ -105,10 +105,11 @@ impl SymbolResolver {
     /// Set the current module path for resolution context
     pub fn set_current_module(&mut self, path: String) {
         self.current_module_path = Some(path.clone());
-        
+
         // Also set the current directory for the module resolver
         if let Some(parent_dir) = std::path::Path::new(&path).parent() {
-            self.module_resolver.set_current_dir(parent_dir.to_path_buf());
+            self.module_resolver
+                .set_current_dir(parent_dir.to_path_buf());
         }
     }
 
@@ -159,17 +160,21 @@ impl SymbolResolver {
             match statement {
                 Statement::FunctionDecl(func) => {
                     let function_signature = Some(FunctionSignature {
-                        parameters: func.params.iter().map(|p| ParameterInfo {
-                            name: p.name.clone(),
-                            param_type: p.param_type.clone(),
-                            has_default: p.default_value.is_some(),
-                            is_variadic: p.is_variadic,
-                        }).collect(),
+                        parameters: func
+                            .params
+                            .iter()
+                            .map(|p| ParameterInfo {
+                                name: p.name.clone(),
+                                param_type: p.param_type.clone(),
+                                has_default: p.default_value.is_some(),
+                                is_variadic: p.is_variadic,
+                            })
+                            .collect(),
                         return_type: func.return_type.clone(),
                         is_async: func.is_async,
                         is_variadic: func.params.iter().any(|p| p.is_variadic),
                     });
-                    
+
                     let symbol = SymbolInfo {
                         name: func.name.clone(),
                         symbol_type: SymbolType::Function,
@@ -179,10 +184,14 @@ impl SymbolResolver {
                         type_info: None,
                         is_mutable: false,
                     };
-                    self.symbol_table.local_symbols.insert(func.name.clone(), symbol.clone());
-                    
+                    self.symbol_table
+                        .local_symbols
+                        .insert(func.name.clone(), symbol.clone());
+
                     if func.is_exported {
-                        self.symbol_table.exported_symbols.insert(func.name.clone(), symbol);
+                        self.symbol_table
+                            .exported_symbols
+                            .insert(func.name.clone(), symbol);
                     }
                 }
                 Statement::VariableDecl(var) => {
@@ -191,7 +200,7 @@ impl SymbolResolver {
                     } else {
                         SymbolType::Variable
                     };
-                    
+
                     let symbol = SymbolInfo {
                         name: var.name.clone(),
                         symbol_type,
@@ -201,10 +210,14 @@ impl SymbolResolver {
                         type_info: var.type_annotation.clone(),
                         is_mutable: !var.is_const,
                     };
-                    self.symbol_table.local_symbols.insert(var.name.clone(), symbol.clone());
-                    
+                    self.symbol_table
+                        .local_symbols
+                        .insert(var.name.clone(), symbol.clone());
+
                     if var.is_exported {
-                        self.symbol_table.exported_symbols.insert(var.name.clone(), symbol);
+                        self.symbol_table
+                            .exported_symbols
+                            .insert(var.name.clone(), symbol);
                     }
                 }
                 Statement::MultipleVariableDecl(multi_var) => {
@@ -213,7 +226,7 @@ impl SymbolResolver {
                     } else {
                         SymbolType::Variable
                     };
-                    
+
                     for var_decl in &multi_var.declarations {
                         let symbol = SymbolInfo {
                             name: var_decl.name.clone(),
@@ -224,10 +237,14 @@ impl SymbolResolver {
                             type_info: var_decl.type_annotation.clone(),
                             is_mutable: !multi_var.is_const,
                         };
-                        self.symbol_table.local_symbols.insert(var_decl.name.clone(), symbol.clone());
-                        
+                        self.symbol_table
+                            .local_symbols
+                            .insert(var_decl.name.clone(), symbol.clone());
+
                         if multi_var.is_exported {
-                            self.symbol_table.exported_symbols.insert(var_decl.name.clone(), symbol);
+                            self.symbol_table
+                                .exported_symbols
+                                .insert(var_decl.name.clone(), symbol);
                         }
                     }
                 }
@@ -237,10 +254,10 @@ impl SymbolResolver {
                     } else {
                         SymbolType::Variable
                     };
-                    
+
                     // Extract variable names from the destructuring pattern
                     let variable_names = self.extract_pattern_variables(&destructuring.pattern);
-                    
+
                     for var_name in variable_names {
                         let symbol = SymbolInfo {
                             name: var_name.clone(),
@@ -251,8 +268,10 @@ impl SymbolResolver {
                             type_info: None, // Type will be inferred from the initializer
                             is_mutable: !destructuring.is_const,
                         };
-                        self.symbol_table.local_symbols.insert(var_name.clone(), symbol.clone());
-                        
+                        self.symbol_table
+                            .local_symbols
+                            .insert(var_name.clone(), symbol.clone());
+
                         if destructuring.is_exported {
                             self.symbol_table.exported_symbols.insert(var_name, symbol);
                         }
@@ -268,10 +287,14 @@ impl SymbolResolver {
                         type_info: None,
                         is_mutable: false,
                     };
-                    self.symbol_table.local_symbols.insert(struct_decl.name.clone(), symbol.clone());
-                    
+                    self.symbol_table
+                        .local_symbols
+                        .insert(struct_decl.name.clone(), symbol.clone());
+
                     if struct_decl.is_exported {
-                        self.symbol_table.exported_symbols.insert(struct_decl.name.clone(), symbol);
+                        self.symbol_table
+                            .exported_symbols
+                            .insert(struct_decl.name.clone(), symbol);
                     }
                 }
                 Statement::InterfaceDecl(interface) => {
@@ -284,10 +307,14 @@ impl SymbolResolver {
                         type_info: None,
                         is_mutable: false,
                     };
-                    self.symbol_table.local_symbols.insert(interface.name.clone(), symbol.clone());
-                    
+                    self.symbol_table
+                        .local_symbols
+                        .insert(interface.name.clone(), symbol.clone());
+
                     if interface.is_exported {
-                        self.symbol_table.exported_symbols.insert(interface.name.clone(), symbol);
+                        self.symbol_table
+                            .exported_symbols
+                            .insert(interface.name.clone(), symbol);
                     }
                 }
                 Statement::TypeAlias(type_alias) => {
@@ -300,7 +327,9 @@ impl SymbolResolver {
                         type_info: Some(type_alias.target_type.clone()),
                         is_mutable: false,
                     };
-                    self.symbol_table.local_symbols.insert(type_alias.name.clone(), symbol);
+                    self.symbol_table
+                        .local_symbols
+                        .insert(type_alias.name.clone(), symbol);
                 }
                 Statement::Export(export_stmt) => {
                     // Handle explicit exports
@@ -323,17 +352,21 @@ impl SymbolResolver {
             }
             Statement::FunctionDecl(func) => {
                 let function_signature = Some(FunctionSignature {
-                    parameters: func.params.iter().map(|p| ParameterInfo {
-                        name: p.name.clone(),
-                        param_type: p.param_type.clone(),
-                        has_default: p.default_value.is_some(),
-                        is_variadic: p.is_variadic,
-                    }).collect(),
+                    parameters: func
+                        .params
+                        .iter()
+                        .map(|p| ParameterInfo {
+                            name: p.name.clone(),
+                            param_type: p.param_type.clone(),
+                            has_default: p.default_value.is_some(),
+                            is_variadic: p.is_variadic,
+                        })
+                        .collect(),
                     return_type: func.return_type.clone(),
                     is_async: func.is_async,
                     is_variadic: func.params.iter().any(|p| p.is_variadic),
                 });
-                
+
                 let symbol = SymbolInfo {
                     name: func.name.clone(),
                     symbol_type: SymbolType::Function,
@@ -343,7 +376,9 @@ impl SymbolResolver {
                     type_info: None,
                     is_mutable: false,
                 };
-                self.symbol_table.exported_symbols.insert(func.name.clone(), symbol);
+                self.symbol_table
+                    .exported_symbols
+                    .insert(func.name.clone(), symbol);
             }
             Statement::VariableDecl(var) => {
                 let symbol_type = if var.is_const {
@@ -351,7 +386,7 @@ impl SymbolResolver {
                 } else {
                     SymbolType::Variable
                 };
-                
+
                 let symbol = SymbolInfo {
                     name: var.name.clone(),
                     symbol_type,
@@ -361,7 +396,9 @@ impl SymbolResolver {
                     type_info: var.type_annotation.clone(),
                     is_mutable: !var.is_const,
                 };
-                self.symbol_table.exported_symbols.insert(var.name.clone(), symbol);
+                self.symbol_table
+                    .exported_symbols
+                    .insert(var.name.clone(), symbol);
             }
             Statement::MultipleVariableDecl(multi_var) => {
                 let symbol_type = if multi_var.is_const {
@@ -369,7 +406,7 @@ impl SymbolResolver {
                 } else {
                     SymbolType::Variable
                 };
-                
+
                 for var_decl in &multi_var.declarations {
                     let symbol = SymbolInfo {
                         name: var_decl.name.clone(),
@@ -380,7 +417,9 @@ impl SymbolResolver {
                         type_info: var_decl.type_annotation.clone(),
                         is_mutable: !multi_var.is_const,
                     };
-                    self.symbol_table.exported_symbols.insert(var_decl.name.clone(), symbol);
+                    self.symbol_table
+                        .exported_symbols
+                        .insert(var_decl.name.clone(), symbol);
                 }
             }
             Statement::DestructuringDecl(destructuring) => {
@@ -389,10 +428,10 @@ impl SymbolResolver {
                 } else {
                     SymbolType::Variable
                 };
-                
+
                 // Extract variable names from the destructuring pattern
                 let variable_names = self.extract_pattern_variables(&destructuring.pattern);
-                
+
                 for var_name in variable_names {
                     let symbol = SymbolInfo {
                         name: var_name.clone(),
@@ -408,7 +447,9 @@ impl SymbolResolver {
             }
             _ => {
                 return Err(BuluError::TypeError {
-                    message: "Only functions, variables, and re-exports can be exported".to_string(),
+                    stack: Vec::new(),
+                    message: "Only functions, variables, and re-exports can be exported"
+                        .to_string(),
                     line: export_stmt.position.line,
                     column: export_stmt.position.column,
                     file: self.current_module_path.clone(),
@@ -422,23 +463,48 @@ impl SymbolResolver {
     fn handle_reexport(&mut self, import_stmt: &ImportStmt) -> Result<()> {
         // Load the module to get its exports
         let module = self.module_resolver.load_module(&import_stmt.path)?;
-        
+
         if let Some(items) = &import_stmt.items {
             // Re-export specific items
             for item in items {
                 if module.exports.contains_key(&item.name) {
+                    // Extract function signature from the module's function_definitions if it's a function
+                    let function_signature =
+                        if let Some(func_decl) = module.function_definitions.get(&item.name) {
+                            Some(FunctionSignature {
+                                parameters: func_decl
+                                    .params
+                                    .iter()
+                                    .map(|p| ParameterInfo {
+                                        name: p.name.clone(),
+                                        param_type: p.param_type.clone(),
+                                        has_default: p.default_value.is_some(),
+                                        is_variadic: p.is_variadic,
+                                    })
+                                    .collect(),
+                                return_type: func_decl.return_type.clone(),
+                                is_async: func_decl.is_async,
+                                is_variadic: func_decl.params.iter().any(|p| p.is_variadic),
+                            })
+                        } else {
+                            None
+                        };
+
                     let symbol = SymbolInfo {
                         name: item.alias.as_ref().unwrap_or(&item.name).clone(),
                         symbol_type: self.infer_symbol_type_from_value(&module.exports[&item.name]),
                         is_exported: true,
                         position: item.position,
-                        function_signature: None, // TODO: Extract function signature from module exports
+                        function_signature,
                         type_info: self.extract_type_info_from_module(&module, &item.name),
                         is_mutable: false, // Re-exported items are not mutable by default
                     };
-                    self.symbol_table.exported_symbols.insert(symbol.name.clone(), symbol);
+                    self.symbol_table
+                        .exported_symbols
+                        .insert(symbol.name.clone(), symbol);
                 } else {
                     return Err(BuluError::TypeError {
+                        stack: Vec::new(),
                         message: format!(
                             "Module '{}' does not export '{}'",
                             import_stmt.path, item.name
@@ -451,20 +517,43 @@ impl SymbolResolver {
             }
         } else {
             // Re-export all items from the module
-            for (name, value) in &module.exports {
+            for (name, _exported_value) in &module.exports {
+                // Extract function signature if it's a function
+                let function_signature = if let Some(func_decl) = module.function_definitions.get(name) {
+                    Some(FunctionSignature {
+                        parameters: func_decl
+                            .params
+                            .iter()
+                            .map(|p| ParameterInfo {
+                                name: p.name.clone(),
+                                param_type: p.param_type.clone(),
+                                has_default: p.default_value.is_some(),
+                                is_variadic: p.is_variadic,
+                            })
+                            .collect(),
+                        return_type: func_decl.return_type.clone(),
+                        is_async: func_decl.is_async,
+                        is_variadic: func_decl.params.iter().any(|p| p.is_variadic),
+                    })
+                } else {
+                    None
+                };
+
                 let symbol = SymbolInfo {
                     name: name.clone(),
-                    symbol_type: self.infer_symbol_type_from_value(value),
+                    symbol_type: self.infer_symbol_type_from_value(&module.exports[name]),
                     is_exported: true,
                     position: import_stmt.position,
-                    function_signature: None, // TODO: Extract function signature from module exports
+                    function_signature,
                     type_info: self.extract_type_info_from_module(&module, name),
                     is_mutable: false, // Re-exported items are not mutable by default
                 };
-                self.symbol_table.exported_symbols.insert(name.clone(), symbol);
+                self.symbol_table
+                    .exported_symbols
+                    .insert(name.clone(), symbol);
             }
         }
-        
+
         Ok(())
     }
 
@@ -494,7 +583,7 @@ impl SymbolResolver {
                     } else {
                         None
                     };
-                    
+
                     let imported_symbol = ImportedSymbolInfo {
                         name: symbol_name.clone(),
                         original_name: item.name.clone(),
@@ -505,9 +594,12 @@ impl SymbolResolver {
                         type_info: self.extract_type_info_from_module(&module, &item.name),
                         is_mutable: symbol_type == SymbolType::Variable,
                     };
-                    self.symbol_table.imported_symbols.insert(symbol_name.clone(), imported_symbol);
+                    self.symbol_table
+                        .imported_symbols
+                        .insert(symbol_name.clone(), imported_symbol);
                 } else {
                     return Err(BuluError::TypeError {
+                        stack: Vec::new(),
                         message: format!(
                             "Module '{}' does not export '{}'",
                             import_stmt.path, item.name
@@ -530,7 +622,9 @@ impl SymbolResolver {
                 type_info: None,
                 is_mutable: false,
             };
-            self.symbol_table.imported_symbols.insert(alias.clone(), imported_symbol);
+            self.symbol_table
+                .imported_symbols
+                .insert(alias.clone(), imported_symbol);
         } else {
             // Import all exports: import "path"
             for (name, value) in &module.exports {
@@ -540,7 +634,7 @@ impl SymbolResolver {
                 } else {
                     None
                 };
-                
+
                 let imported_symbol = ImportedSymbolInfo {
                     name: name.clone(),
                     original_name: name.clone(),
@@ -551,7 +645,9 @@ impl SymbolResolver {
                     type_info: self.extract_type_info_from_module(&module, name),
                     is_mutable: symbol_type == SymbolType::Variable,
                 };
-                self.symbol_table.imported_symbols.insert(name.clone(), imported_symbol);
+                self.symbol_table
+                    .imported_symbols
+                    .insert(name.clone(), imported_symbol);
             }
         }
 
@@ -559,18 +655,45 @@ impl SymbolResolver {
     }
 
     /// Extract function signature from module AST
-    fn extract_function_signature_from_module(&self, module: &crate::runtime::module::Module, function_name: &str) -> Option<FunctionSignature> {
-        // Search through the module's AST for the function declaration
+    fn extract_function_signature_from_module(
+        &self,
+        module: &crate::runtime::module::Module,
+        function_name: &str,
+    ) -> Option<FunctionSignature> {
+        // First, check in function_definitions which includes re-exported functions
+        if let Some(func_decl) = module.function_definitions.get(function_name) {
+            return Some(FunctionSignature {
+                parameters: func_decl
+                    .params
+                    .iter()
+                    .map(|p| ParameterInfo {
+                        name: p.name.clone(),
+                        param_type: p.param_type.clone(),
+                        has_default: p.default_value.is_some(),
+                        is_variadic: p.is_variadic,
+                    })
+                    .collect(),
+                return_type: func_decl.return_type.clone(),
+                is_async: func_decl.is_async,
+                is_variadic: func_decl.params.iter().any(|p| p.is_variadic),
+            });
+        }
+        
+        // Fallback: Search through the module's AST for the function declaration
         for statement in &module.ast.statements {
             match statement {
                 Statement::FunctionDecl(func) if func.name == function_name => {
                     return Some(FunctionSignature {
-                        parameters: func.params.iter().map(|p| ParameterInfo {
-                            name: p.name.clone(),
-                            param_type: p.param_type.clone(),
-                            has_default: p.default_value.is_some(),
-                            is_variadic: p.is_variadic,
-                        }).collect(),
+                        parameters: func
+                            .params
+                            .iter()
+                            .map(|p| ParameterInfo {
+                                name: p.name.clone(),
+                                param_type: p.param_type.clone(),
+                                has_default: p.default_value.is_some(),
+                                is_variadic: p.is_variadic,
+                            })
+                            .collect(),
                         return_type: func.return_type.clone(),
                         is_async: func.is_async,
                         is_variadic: func.params.iter().any(|p| p.is_variadic),
@@ -581,12 +704,16 @@ impl SymbolResolver {
                     if let Statement::FunctionDecl(func) = export_stmt.item.as_ref() {
                         if func.name == function_name {
                             return Some(FunctionSignature {
-                                parameters: func.params.iter().map(|p| ParameterInfo {
-                                    name: p.name.clone(),
-                                    param_type: p.param_type.clone(),
-                                    has_default: p.default_value.is_some(),
-                                    is_variadic: p.is_variadic,
-                                }).collect(),
+                                parameters: func
+                                    .params
+                                    .iter()
+                                    .map(|p| ParameterInfo {
+                                        name: p.name.clone(),
+                                        param_type: p.param_type.clone(),
+                                        has_default: p.default_value.is_some(),
+                                        is_variadic: p.is_variadic,
+                                    })
+                                    .collect(),
                                 return_type: func.return_type.clone(),
                                 is_async: func.is_async,
                                 is_variadic: func.params.iter().any(|p| p.is_variadic),
@@ -605,14 +732,33 @@ impl SymbolResolver {
         &self.symbol_table
     }
 
+    /// Get a reference to the module resolver
+    pub fn module_resolver(&self) -> &ModuleResolver {
+        &self.module_resolver
+    }
+
+    /// Get a mutable reference to the module resolver
+    pub fn module_resolver_mut(&mut self) -> &mut ModuleResolver {
+        &mut self.module_resolver
+    }
+
     /// Get all loaded modules for compilation
     pub fn get_loaded_modules(&self) -> Vec<&crate::runtime::module::Module> {
+        self.module_resolver.get_loaded_modules()
+    }
+    
+    /// Get all loaded modules including transitive dependencies
+    pub fn get_all_modules_recursive(&self) -> Vec<&crate::runtime::module::Module> {
+        // For now, just return all loaded modules
+        // TODO: Implement proper recursive traversal if needed
         self.module_resolver.get_loaded_modules()
     }
 
     /// Infer symbol type from runtime value
     fn infer_symbol_type_from_value(&self, value: &RuntimeValue) -> SymbolType {
         match value {
+            RuntimeValue::Function(_) => SymbolType::Function,
+            RuntimeValue::ModuleFunction { .. } => SymbolType::Function,
             RuntimeValue::String(s) => {
                 if s.starts_with("function:") {
                     SymbolType::Function
@@ -650,11 +796,15 @@ impl SymbolResolver {
                 if let Some(ref initializer) = var_decl.initializer {
                     self.validate_expression_symbols(initializer)?;
                 }
-                
+
                 // Then add the variable to the current scope
                 let symbol = SymbolInfo {
                     name: var_decl.name.clone(),
-                    symbol_type: if var_decl.is_const { SymbolType::Constant } else { SymbolType::Variable },
+                    symbol_type: if var_decl.is_const {
+                        SymbolType::Constant
+                    } else {
+                        SymbolType::Variable
+                    },
                     is_exported: var_decl.is_exported,
                     position: var_decl.position,
                     function_signature: None,
@@ -670,11 +820,15 @@ impl SymbolResolver {
                     if let Some(ref initializer) = var_decl.initializer {
                         self.validate_expression_symbols(initializer)?;
                     }
-                    
+
                     // Then add the variable to the current scope
                     let symbol = SymbolInfo {
                         name: var_decl.name.clone(),
-                        symbol_type: if multi_var_decl.is_const { SymbolType::Constant } else { SymbolType::Variable },
+                        symbol_type: if multi_var_decl.is_const {
+                            SymbolType::Constant
+                        } else {
+                            SymbolType::Variable
+                        },
                         is_exported: multi_var_decl.is_exported,
                         position: multi_var_decl.position,
                         function_signature: None,
@@ -687,14 +841,18 @@ impl SymbolResolver {
             Statement::DestructuringDecl(destructuring_decl) => {
                 // First validate the initializer
                 self.validate_expression_symbols(&destructuring_decl.initializer)?;
-                
+
                 // Extract variable names from the pattern and add them to the current scope
                 let variable_names = self.extract_pattern_variables(&destructuring_decl.pattern);
-                
+
                 for var_name in variable_names {
                     let symbol = SymbolInfo {
                         name: var_name.clone(),
-                        symbol_type: if destructuring_decl.is_const { SymbolType::Constant } else { SymbolType::Variable },
+                        symbol_type: if destructuring_decl.is_const {
+                            SymbolType::Constant
+                        } else {
+                            SymbolType::Variable
+                        },
                         is_exported: destructuring_decl.is_exported,
                         position: destructuring_decl.position,
                         function_signature: None,
@@ -709,7 +867,7 @@ impl SymbolResolver {
                 for target in &multi_assign.targets {
                     self.validate_expression_symbols(target)?;
                 }
-                
+
                 // Validate all value expressions
                 for value in &multi_assign.values {
                     self.validate_expression_symbols(value)?;
@@ -718,7 +876,7 @@ impl SymbolResolver {
             Statement::FunctionDecl(func_decl) => {
                 // Create a new scope for the function
                 self.push_scope();
-                
+
                 // Add parameters to the function scope
                 for param in &func_decl.params {
                     let symbol = SymbolInfo {
@@ -732,21 +890,21 @@ impl SymbolResolver {
                     };
                     self.define_local_symbol(param.name.clone(), symbol);
                 }
-                
+
                 // Validate the function body
                 self.validate_block_symbols(&func_decl.body)?;
-                
+
                 // Pop the function scope
                 self.pop_scope();
             }
             Statement::If(if_stmt) => {
                 self.validate_expression_symbols(&if_stmt.condition)?;
-                
+
                 // Create new scope for then branch
                 self.push_scope();
                 self.validate_block_symbols(&if_stmt.then_branch)?;
                 self.pop_scope();
-                
+
                 if let Some(ref else_branch) = if_stmt.else_branch {
                     self.push_scope();
                     self.validate_statement_symbols(else_branch)?;
@@ -755,17 +913,17 @@ impl SymbolResolver {
             }
             Statement::While(while_stmt) => {
                 self.validate_expression_symbols(&while_stmt.condition)?;
-                
+
                 self.push_scope();
                 self.validate_block_symbols(&while_stmt.body)?;
                 self.pop_scope();
             }
             Statement::For(for_stmt) => {
                 self.validate_expression_symbols(&for_stmt.iterable)?;
-                
+
                 // Create new scope for the loop
                 self.push_scope();
-                
+
                 // Add loop variables to scope
                 let var_symbol = SymbolInfo {
                     name: for_stmt.variable.clone(),
@@ -777,7 +935,7 @@ impl SymbolResolver {
                     is_mutable: true,
                 };
                 self.define_local_symbol(for_stmt.variable.clone(), var_symbol);
-                
+
                 if let Some(ref index_var) = for_stmt.index_variable {
                     let index_symbol = SymbolInfo {
                         name: index_var.clone(),
@@ -790,7 +948,7 @@ impl SymbolResolver {
                     };
                     self.define_local_symbol(index_var.clone(), index_symbol);
                 }
-                
+
                 self.validate_block_symbols(&for_stmt.body)?;
                 self.pop_scope();
             }
@@ -865,7 +1023,11 @@ impl SymbolResolver {
     }
 
     /// Validate that an identifier is properly defined or imported
-    fn validate_identifier(&self, name: &str, position: crate::lexer::token::Position) -> Result<()> {
+    fn validate_identifier(
+        &self,
+        name: &str,
+        position: crate::lexer::token::Position,
+    ) -> Result<()> {
         // Check if it's in a local scope (function/block variables)
         if self.is_in_local_scope(name) {
             return Ok(());
@@ -888,6 +1050,7 @@ impl SymbolResolver {
 
         // Symbol not found
         Err(BuluError::TypeError {
+            stack: Vec::new(),
             message: format!("Undefined symbol '{}'", name),
             line: position.line,
             column: position.column,
@@ -908,6 +1071,8 @@ impl SymbolResolver {
             | "float32" | "float64" | "bool" | "char" | "string"
             // Memory functions
             | "len" | "cap" | "clone" | "sizeof"
+            // String functions
+            | "ord" | "chr"
             // Collection functions
             | "make" | "append" | "copy" | "delete"
             // Utility functions
@@ -924,23 +1089,22 @@ impl SymbolResolver {
         ) {
             return true;
         }
-        
+
         // Check patterns for generated type identifiers
-        if name.starts_with("chan_") || name.starts_with("slice_") || name.starts_with("array_") || name.starts_with("map_") {
+        if name.starts_with("chan_")
+            || name.starts_with("slice_")
+            || name.starts_with("array_")
+            || name.starts_with("map_")
+        {
             return true;
         }
-        
+
         false
     }
 
     /// Get the symbol table
     pub fn symbol_table(&self) -> &SymbolTable {
         &self.symbol_table
-    }
-
-    /// Get the module resolver
-    pub fn module_resolver(&mut self) -> &mut ModuleResolver {
-        &mut self.module_resolver
     }
 
     /// Check if a symbol is available in the current scope
@@ -962,7 +1126,11 @@ impl SymbolResolver {
     }
 
     /// Extract type information from a module for a specific symbol
-    fn extract_type_info_from_module(&self, module: &crate::runtime::module::Module, symbol_name: &str) -> Option<Type> {
+    fn extract_type_info_from_module(
+        &self,
+        module: &crate::runtime::module::Module,
+        symbol_name: &str,
+    ) -> Option<Type> {
         // Try to find the symbol in the module's AST and extract its type
         let ast = &module.ast;
         for statement in &ast.statements {

@@ -10,6 +10,7 @@ pub mod ir;
 pub mod ir_optimizer;
 pub mod control_flow;
 pub mod symbol_resolver;
+pub mod native_backend;
 
 pub use semantic::SemanticAnalyzer;
 pub use codegen::CodeGenerator;

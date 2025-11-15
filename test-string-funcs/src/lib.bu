@@ -1,0 +1,32 @@
+// String manipulation functions using language primitives
+
+export func uppercase(s: string): string {
+    let length = len(s);
+    let result = "";
+    let i = 0;
+    
+    while i < length {
+        let c = s[i];
+        // Convert lowercase to uppercase (a-z -> A-Z)
+        if c >= 97 && c <= 122 {
+            c = c - 32;
+        }
+        // TODO: Need a way to build strings from characters
+        // For now, this won't work without string building primitives
+        i = i + 1;
+    }
+    
+    return result;
+}
+
+export func repeat(s: string, n: int64): string {
+    let result = "";
+    let i = 0;
+    
+    while i < n {
+        result = result + s;
+        i = i + 1;
+    }
+    
+    return result;
+}

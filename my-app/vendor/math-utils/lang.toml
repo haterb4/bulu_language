@@ -1,0 +1,20 @@
+[package]
+name = "math-utils"
+version = "0.1.1"
+authors = ["Bulu Team <team@bulu-lang.com>"]
+description = "Mathematical utility functions for Bulu"
+keywords = ["math", "utilities"]
+
+[dependencies]
+
+[build]
+optimization = "2"
+target = "native"
+features = []
+incremental = true
+parallel = true
+
+[test]
+parallel = true
+timeout = 30
+coverage = false

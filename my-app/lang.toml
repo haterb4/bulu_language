@@ -1,0 +1,21 @@
+[package]
+name = "my-app"
+version = "0.1.0"
+authors = ["Your Name <your.email@example.com>"]
+description = "A Bulu project named my-app"
+
+[dependencies]
+math-utils = "0.1.1"
+string-utils = "0.1.1"
+
+[build]
+optimization = "2"
+target = "native"
+features = []
+incremental = true
+parallel = true
+
+[test]
+parallel = true
+timeout = 30
+coverage = false

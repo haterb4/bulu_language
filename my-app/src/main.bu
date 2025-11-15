@@ -1,0 +1,25 @@
+// Main entry point for the Bulu program
+import { add, multiply, square } from "math-utils";
+import { concat, repeat, uppercase } from "string-utils";
+
+func main() {
+    println("=== Demo des packages math-utils et string-utils ===");
+    println("");
+    
+    // Test math-utils
+    println("--- Math Utils ---");
+    let a = 5;
+    let b = 3;
+    println("add(5, 3) = " + add(a, b));
+    println("multiply(5, 3) = " + multiply(a, b));
+    println("square(5) = " + square(a));
+    println("");
+    
+    // Test string-utils
+    println("--- String Utils ---");
+    let str1 = "hello";
+    let str2 = " world";
+    println("concat('hello', ' world') = " + concat(str1, str2));
+    println("repeat('*', 5) = " + repeat("*", 5));
+    println("uppercase('hello') = " + uppercase(str1));
+}

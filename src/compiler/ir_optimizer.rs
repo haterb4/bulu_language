@@ -34,18 +34,13 @@ impl IrOptimizer {
     /// Apply all optimization passes to an IR program
     pub fn optimize(&mut self, mut program: IrProgram) -> Result<IrProgram> {
         // Apply optimization passes in order
-        program = self.dead_code_elimination(program)?;
+        // ONLY run constant folding for now - other passes break the native backend
         program = self.constant_folding(program)?;
-        program = self.constant_propagation(program)?;
-        program = self.copy_propagation(program)?;
 
         if self.aggressive {
             program = self.function_inlining(program)?;
             program = self.loop_optimization(program)?;
         }
-
-        // Clean up after optimizations
-        program = self.dead_code_elimination(program)?;
 
         Ok(program)
     }
@@ -116,6 +111,8 @@ impl IrOptimizer {
                 }
             }
         }
+        
+
 
         // Remove dead instructions
         for block in &mut function.basic_blocks {
@@ -169,6 +166,11 @@ impl IrOptimizer {
 
             // Generator operations have side effects
             IrOpcode::Yield => true,
+
+            // IMPORTANT: Copy operations that initialize variables should not be eliminated
+            // They are needed for the native backend even if the result seems unused
+            // The liveness analysis will handle truly dead copies
+            // IrOpcode::Copy => false, // Keep as pure for now, liveness analysis handles it
 
             // Pure operations don't have side effects
             _ => false,

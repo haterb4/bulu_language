@@ -483,7 +483,7 @@ fn compile(config: &CompilerConfig, verbose: bool) -> Result<()> {
     // Set the current directory for the module resolver
     if let Some(parent_dir) = config.input_file.parent() {
         symbol_resolver
-            .module_resolver()
+            .module_resolver_mut()
             .set_current_dir(parent_dir.to_path_buf());
     }
 
@@ -726,11 +726,51 @@ fn combine_ast_with_imports(
     symbol_resolver: &SymbolResolver,
 ) -> Result<bulu::ast::Program> {
     use bulu::ast::*;
+    use bulu::runtime::module::Module;
+    use std::collections::HashSet;
 
     let mut combined_statements = Vec::new();
+    let mut processed_modules = HashSet::new();
 
+    // Recursively collect all modules including transitive dependencies
+    fn collect_all_modules<'a>(
+        modules: &'a [&'a Module],
+        processed: &mut HashSet<String>,
+        result: &mut Vec<&'a Module>,
+    ) {
+        for module in modules {
+            if processed.insert(module.path.clone()) {
+                result.push(module);
+                
+                // Check for re-exports in this module
+                for statement in &module.ast.statements {
+                    if let Statement::Export(export_stmt) = statement {
+                        if let Statement::Import(import_stmt) = export_stmt.item.as_ref() {
+                            // This module re-exports from another module
+                            // We need to find and include that module too
+                            // Note: The module should already be loaded by symbol_resolver
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let loaded_modules = symbol_resolver.get_loaded_modules();
+    eprintln!("📦 Modules from symbol_resolver:");
+    for m in &loaded_modules {
+        eprintln!("    - {}", m.path);
+    }
+    
+    let mut all_modules = Vec::new();
+    collect_all_modules(&loaded_modules, &mut processed_modules, &mut all_modules);
+    
+    eprintln!("📦 Total modules to process: {}", all_modules.len());
+    
     // First, add all statements from imported modules (excluding imports/exports)
-    for module in symbol_resolver.get_loaded_modules() {
+    for module in &all_modules {
+        eprintln!("  - Module: {} ({} statements)", module.path, module.ast.statements.len());
+        let mut func_count = 0;
         for statement in &module.ast.statements {
             match statement {
                 // Skip import statements as they're already resolved
@@ -738,15 +778,32 @@ fn combine_ast_with_imports(
 
                 // For export statements, add the wrapped statement
                 Statement::Export(export_stmt) => {
-                    combined_statements.push(export_stmt.item.as_ref().clone());
+                    match export_stmt.item.as_ref() {
+                        Statement::Import(_) => {
+                            // This is a re-export: export { x } from "module"
+                            // Skip it - the actual module should be in our list
+                            continue;
+                        }
+                        Statement::FunctionDecl(_) => {
+                            func_count += 1;
+                            combined_statements.push(export_stmt.item.as_ref().clone());
+                        }
+                        _ => {
+                            combined_statements.push(export_stmt.item.as_ref().clone());
+                        }
+                    }
                 }
 
                 // Add all other statements (functions, variables, etc.)
                 _ => {
+                    if matches!(statement, Statement::FunctionDecl(_)) {
+                        func_count += 1;
+                    }
                     combined_statements.push(statement.clone());
                 }
             }
         }
+        eprintln!("    → Added {} functions from this module", func_count);
     }
 
     // Then add statements from the main AST (excluding imports)

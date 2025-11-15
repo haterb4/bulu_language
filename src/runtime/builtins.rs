@@ -176,6 +176,8 @@ impl BuiltinRegistry {
         self.register("cap", builtin_cap);
         self.register("clone", builtin_clone);
         self.register("sizeof", builtin_sizeof);
+        self.register("ord", builtin_ord);
+        self.register("chr", builtin_chr);
     }
 
     /// Register collection functions
@@ -597,6 +599,71 @@ pub fn builtin_clone(args: &[RuntimeValue]) -> Result<RuntimeValue> {
     Ok(args[0].clone())
 }
 
+/// Convert a character to its ASCII code
+pub fn builtin_ord(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 1 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "ord() expects exactly 1 argument".to_string(),
+        });
+    }
+
+    match &args[0] {
+        RuntimeValue::String(s) => {
+            if s.is_empty() {
+                return Err(BuluError::RuntimeError {
+                    file: None,
+                    message: "ord() requires a non-empty string".to_string(),
+                });
+            }
+            // Get the first character and return its ASCII code
+            let first_char = s.chars().next().unwrap();
+            Ok(RuntimeValue::Int64(first_char as i64))
+        }
+        _ => Err(BuluError::RuntimeError {
+            file: None,
+            message: format!("ord() expects a string, got {:?}", args[0].get_type()),
+        }),
+    }
+}
+
+/// Convert an ASCII code to a character
+pub fn builtin_chr(args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    if args.len() != 1 {
+        return Err(BuluError::RuntimeError {
+            file: None,
+            message: "chr() expects exactly 1 argument".to_string(),
+        });
+    }
+
+    let code = match &args[0] {
+        RuntimeValue::Int32(n) => *n as u32,
+        RuntimeValue::Int64(n) => *n as u32,
+        RuntimeValue::Int8(n) => *n as u32,
+        RuntimeValue::Int16(n) => *n as u32,
+        RuntimeValue::UInt8(n) => *n as u32,
+        RuntimeValue::UInt16(n) => *n as u32,
+        RuntimeValue::UInt32(n) => *n,
+        RuntimeValue::UInt64(n) => *n as u32,
+        _ => {
+            return Err(BuluError::RuntimeError {
+                file: None,
+                message: format!("chr() expects an integer, got {:?}", args[0].get_type()),
+            })
+        }
+    };
+
+    // Convert code to character
+    if let Some(ch) = char::from_u32(code) {
+        Ok(RuntimeValue::String(ch.to_string()))
+    } else {
+        Err(BuluError::RuntimeError {
+            file: None,
+            message: format!("chr() invalid character code: {}", code),
+        })
+    }
+}
+
 /// Get size in bytes of a value
 pub fn builtin_sizeof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
     if args.len() != 1 {
@@ -635,6 +702,7 @@ pub fn builtin_sizeof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Null => 0,
         RuntimeValue::Range(_, _, _) => std::mem::size_of::<(i64, i64, Option<i64>)>(),
         RuntimeValue::Function(_) => std::mem::size_of::<String>(), // Function refs are pointer-sized
+        RuntimeValue::ModuleFunction { .. } => std::mem::size_of::<String>() * 2, // Module path + function name
         RuntimeValue::MethodRef { .. } => std::mem::size_of::<String>() * 2, // Object + method name
         RuntimeValue::Struct { fields, .. } => {
             // Estimate struct size as sum of field sizes
@@ -1323,6 +1391,7 @@ pub fn builtin_typeof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Integer(_) => "integer",
         RuntimeValue::Byte(_) => "byte",
         RuntimeValue::Function(_) => "function",
+        RuntimeValue::ModuleFunction { .. } => "function",
         RuntimeValue::MethodRef { .. } => "method",
         RuntimeValue::Struct { name, .. } => name,
         RuntimeValue::Global(_) => "global",
@@ -1378,6 +1447,7 @@ pub fn builtin_instanceof(args: &[RuntimeValue]) -> Result<RuntimeValue> {
         RuntimeValue::Integer(_) => "integer",
         RuntimeValue::Byte(_) => "byte",
         RuntimeValue::Function(_) => "function",
+        RuntimeValue::ModuleFunction { .. } => "function",
         RuntimeValue::MethodRef { .. } => "method",
         RuntimeValue::Struct { name, .. } => name,
         RuntimeValue::Global(_) => "global",
@@ -1889,6 +1959,7 @@ pub fn format_runtime_value(value: &RuntimeValue) -> String {
         RuntimeValue::Integer(i) => i.to_string(),
         RuntimeValue::Byte(b) => b.to_string(),
         RuntimeValue::Function(name) => format!("function({})", name),
+        RuntimeValue::ModuleFunction { module_path, function_name } => format!("function({}::{})", module_path, function_name),
         RuntimeValue::MethodRef { method_name, .. } => format!("method({})", method_name),
         RuntimeValue::Struct { name, fields } => {
             let field_strs: Vec<String> = fields

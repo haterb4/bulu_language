@@ -1,0 +1,6 @@
+// Test simple de chargement de module
+import { add } from "math-utils";
+
+func main() {
+    println("Module chargé !");
+}

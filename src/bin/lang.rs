@@ -591,7 +591,7 @@ fn execute_source_file_with_args(path: &Path, extra_args: Option<Vec<String>>) -
     // This ensures relative imports are resolved correctly regardless of where lang is executed
     if let Some(parent_dir) = path.parent() {
         symbol_resolver
-            .module_resolver()
+            .module_resolver_mut()
             .set_current_dir(parent_dir.to_path_buf());
     }
 
@@ -612,114 +612,19 @@ fn execute_source_file_with_args(path: &Path, extra_args: Option<Vec<String>>) -
 
     type_checker.check(&ast)?;
 
-    // Semantic analysis
-    let mut semantic_analyzer = SemanticAnalyzer::new();
-    semantic_analyzer.analyze(&mut ast.clone())?;
-
-    // Get all loaded modules from the symbol resolver
-    let loaded_modules = symbol_resolver.get_loaded_modules();
-
-    // Create a combined IR program that includes all modules
-    let mut ir_generator = IrGenerator::new();
-    let mut combined_ir_program = ir_generator.generate(&ast)?;
-
-    // Generate IR for all imported modules and merge them
-    for module in loaded_modules {
-        let module_ir = ir_generator.generate(&module.ast)?;
-
-        // Merge functions, globals, structs, and interfaces
-        combined_ir_program.functions.extend(module_ir.functions);
-        combined_ir_program.globals.extend(module_ir.globals);
-        combined_ir_program.structs.extend(module_ir.structs);
-        combined_ir_program.interfaces.extend(module_ir.interfaces);
-    }
-
-    // Execute with interpreter
-    let mut interpreter = Interpreter::new();
+    // Use AST interpreter for better module support
+    use bulu::runtime::ast_interpreter::AstInterpreter;
+    let mut ast_interpreter = AstInterpreter::with_file(file_path.clone());
     
-    // Add imported symbols to interpreter globals
-    let symbol_table = symbol_resolver.get_symbol_table();
-    for (name, imported_symbol) in &symbol_table.imported_symbols {
-        // For now, we'll add the imported symbols as string identifiers
-        // This allows the interpreter to recognize them as available globals
-        match imported_symbol.symbol_type {
-            SymbolType::Module => {
-                // For modules imported with alias (e.g., import "std/os" as os)
-                // Create a map with the module's exports
-                let mut module_exports = std::collections::HashMap::new();
-                
-                // Handle std modules
-                if imported_symbol.module_path.starts_with("std/") || imported_symbol.module_path.starts_with("std.") {
-                    let module_name = imported_symbol.module_path
-                        .strip_prefix("std/")
-                        .or_else(|| imported_symbol.module_path.strip_prefix("std."))
-                        .unwrap_or(&imported_symbol.module_path);
-                    
-                    match module_name {
-                        "os" => {
-                            // Add os module exports as function references
-                            module_exports.insert("args".to_string(), RuntimeValue::String("function:args".to_string()));
-                            module_exports.insert("getEnv".to_string(), RuntimeValue::String("function:getEnv".to_string()));
-                            module_exports.insert("cwd".to_string(), RuntimeValue::String("function:cwd".to_string()));
-                            module_exports.insert("exit".to_string(), RuntimeValue::String("function:exit".to_string()));
-                        }
-                        "net" => {
-                            module_exports.insert("TcpServer".to_string(), RuntimeValue::String("struct:TcpServer".to_string()));
-                            module_exports.insert("TcpConnection".to_string(), RuntimeValue::String("struct:TcpConnection".to_string()));
-                            module_exports.insert("UdpConnection".to_string(), RuntimeValue::String("struct:UdpConnection".to_string()));
-                            module_exports.insert("NetAddr".to_string(), RuntimeValue::String("struct:NetAddr".to_string()));
-                        }
-                        "time" => {
-                            module_exports.insert("sleep".to_string(), RuntimeValue::String("function:sleep".to_string()));
-                        }
-                        "flag" => {
-                            // Add flag module exports as function references
-                            module_exports.insert("String".to_string(), RuntimeValue::String("function:String".to_string()));
-                            // Integer types
-                            module_exports.insert("Int8".to_string(), RuntimeValue::String("function:Int8".to_string()));
-                            module_exports.insert("Int16".to_string(), RuntimeValue::String("function:Int16".to_string()));
-                            module_exports.insert("Int32".to_string(), RuntimeValue::String("function:Int32".to_string()));
-                            module_exports.insert("Int64".to_string(), RuntimeValue::String("function:Int64".to_string()));
-                            // Unsigned integer types
-                            module_exports.insert("UInt8".to_string(), RuntimeValue::String("function:UInt8".to_string()));
-                            module_exports.insert("UInt16".to_string(), RuntimeValue::String("function:UInt16".to_string()));
-                            module_exports.insert("UInt32".to_string(), RuntimeValue::String("function:UInt32".to_string()));
-                            module_exports.insert("UInt64".to_string(), RuntimeValue::String("function:UInt64".to_string()));
-                            module_exports.insert("Byte".to_string(), RuntimeValue::String("function:Byte".to_string()));
-                            // Other types
-                            module_exports.insert("Bool".to_string(), RuntimeValue::String("function:Bool".to_string()));
-                            module_exports.insert("Float32".to_string(), RuntimeValue::String("function:Float32".to_string()));
-                            module_exports.insert("Float64".to_string(), RuntimeValue::String("function:Float64".to_string()));
-                            // Functions
-                            module_exports.insert("Parse".to_string(), RuntimeValue::String("function:Parse".to_string()));
-                            module_exports.insert("Get".to_string(), RuntimeValue::String("function:Get".to_string()));
-                            module_exports.insert("Args".to_string(), RuntimeValue::String("function:Args".to_string()));
-                            module_exports.insert("Usage".to_string(), RuntimeValue::String("function:Usage".to_string()));
-                        }
-                        _ => {}
-                    }
-                }
-                
-                interpreter.set_global(name.clone(), RuntimeValue::Map(module_exports));
-            }
-            SymbolType::Struct => {
-                // For types like NetAddr, TcpServer, etc., add them as struct identifiers
-                interpreter.set_global(name.clone(), RuntimeValue::String(format!("struct:{}", name)));
-            }
-            SymbolType::Function => {
-                // For functions like sleep, add them as function identifiers
-                // Use original_name to preserve the actual function name even with aliases
-                interpreter.set_global(name.clone(), RuntimeValue::String(format!("function:{}", imported_symbol.original_name)));
-            }
-            _ => {
-                // For other symbols, add them as generic identifiers
-                interpreter.set_global(name.clone(), RuntimeValue::String(name.clone()));
-            }
-        }
-    }
+    // Execute the program (defines functions, imports, etc.)
+    ast_interpreter.execute_program(&ast)?;
     
-    interpreter.load_program(combined_ir_program);
-    interpreter.execute()
+    // Call main() if it exists
+    if let Some(main_func) = ast_interpreter.get_function_definition("main") {
+        ast_interpreter.call_user_function(&main_func, &[])
+    } else {
+        Ok(RuntimeValue::Null)
+    }
 }
 
 /// Execute a Bulu executable or bytecode file

@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 pub struct ModuleResolver {
     search_paths: Vec<PathBuf>,
     std_lib_path: Option<PathBuf>,
+    project_root: Option<PathBuf>,
 }
 
 impl ModuleResolver {
@@ -19,6 +20,7 @@ impl ModuleResolver {
         Self {
             search_paths: vec![PathBuf::from(".")],
             std_lib_path: None,
+            project_root: None,
         }
     }
 
@@ -32,14 +34,45 @@ impl ModuleResolver {
         self.std_lib_path = Some(path);
     }
 
+    /// Set the project root directory
+    pub fn set_project_root(&mut self, path: PathBuf) {
+        self.project_root = Some(path);
+    }
+
+    /// Set the current directory for module resolution (used for vendor packages)
+    pub fn set_current_dir(&mut self, path: PathBuf) {
+        // Replace the first search path with the new current directory
+        if self.search_paths.is_empty() {
+            self.search_paths.push(path);
+        } else {
+            self.search_paths[0] = path;
+        }
+    }
+
     /// Resolve a module path to an actual file path
     pub fn resolve_module_path(&self, module_path: &str, current_file: Option<&Path>) -> Result<PathBuf> {
-        // Handle standard library imports
+        // 1. Handle standard library imports (std/ or std.)
         if module_path.starts_with("std/") || module_path.starts_with("std.") {
             return self.resolve_std_module(module_path);
         }
 
-        // Handle relative imports
+        // 2. Handle explicit file imports (ends with .bu)
+        if module_path.ends_with(".bu") {
+            if let Some(current) = current_file {
+                let base_dir = current.parent().unwrap_or(Path::new("."));
+                let resolved = base_dir.join(module_path);
+                if resolved.exists() {
+                    return Ok(resolved);
+                }
+            }
+            // Try from current directory
+            let path = PathBuf::from(module_path);
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+
+        // 3. Handle relative imports (./ or ../)
         if module_path.starts_with("./") || module_path.starts_with("../") {
             if let Some(current) = current_file {
                 let base_dir = current.parent().unwrap_or(Path::new("."));
@@ -48,7 +81,16 @@ impl ModuleResolver {
             }
         }
 
-        // Handle absolute imports - search in all search paths
+        // 4. Handle third-party package imports
+        // Extract the package name (first part before /)
+        let package_name = module_path.split('/').next().unwrap_or(module_path);
+        
+        // Check if this package is in dependencies by looking for it in vendor
+        if let Ok(vendor_path) = self.resolve_vendor_module(module_path) {
+            return Ok(vendor_path);
+        }
+
+        // 5. Handle absolute imports - search in all search paths
         for search_path in &self.search_paths {
             let candidate = search_path.join(module_path);
             if let Ok(resolved) = self.try_resolve_file(&candidate) {
@@ -57,6 +99,106 @@ impl ModuleResolver {
         }
 
         Err(BuluError::Other(format!("Module not found: {}", module_path)))
+    }
+
+    /// Resolve a third-party package from vendor directory
+    fn resolve_vendor_module(&self, package_name: &str) -> Result<PathBuf> {
+        // Try from current working directory first (where lang command was executed)
+        let cwd = std::env::current_dir()
+            .map_err(|e| BuluError::Other(format!("Failed to get current directory: {}", e)))?;
+        
+        if let Ok(path) = self.try_resolve_vendor_from_dir(&cwd, package_name) {
+            return Ok(path);
+        }
+        
+        // Then try from search paths
+        for search_path in &self.search_paths {
+            if let Ok(path) = self.try_resolve_vendor_from_dir(search_path, package_name) {
+                return Ok(path);
+            }
+        }
+        
+        Err(BuluError::Other(format!("Package '{}' not found in vendor directory", package_name)))
+    }
+
+    /// Try to resolve a vendor package from a specific directory, searching upwards
+    /// Supports both "package-name" and "package-name/submodule" formats
+    fn try_resolve_vendor_from_dir(&self, start_dir: &Path, module_path: &str) -> Result<PathBuf> {
+        // Split the module path to get package name and subpath
+        let parts: Vec<&str> = module_path.split('/').collect();
+        let package_name = parts[0];
+        let subpath = if parts.len() > 1 {
+            Some(parts[1..].join("/"))
+        } else {
+            None
+        };
+        
+        let mut current_dir = start_dir.to_path_buf();
+        
+        loop {
+            let vendor_package_dir = current_dir.join("vendor").join(package_name);
+            
+            if vendor_package_dir.exists() {
+                // If there's a subpath (e.g., "math-utils/geometry")
+                if let Some(sub) = &subpath {
+                    let submodule_path = vendor_package_dir.join(sub);
+                    
+                    // Try submodule as a file with .bu extension
+                    let with_ext = submodule_path.with_extension("bu");
+                    if with_ext.exists() {
+                        return Ok(with_ext);
+                    }
+                    
+                    // Try submodule as a directory with lib.bu
+                    let sub_lib = submodule_path.join("lib.bu");
+                    if sub_lib.exists() {
+                        return Ok(sub_lib);
+                    }
+                    
+                    return Err(BuluError::Other(format!(
+                        "Submodule '{}' not found in package '{}'", 
+                        sub, package_name
+                    )));
+                }
+                
+                // No subpath, look for main entry point
+                // 1. Try src/lib.bu
+                let lib_path = vendor_package_dir.join("src").join("lib.bu");
+                if lib_path.exists() {
+                    return Ok(lib_path);
+                }
+                
+                // 2. Try src/index.bu
+                let index_path = vendor_package_dir.join("src").join("index.bu");
+                if index_path.exists() {
+                    return Ok(index_path);
+                }
+                
+                // 3. Try lib.bu at root
+                let root_lib = vendor_package_dir.join("lib.bu");
+                if root_lib.exists() {
+                    return Ok(root_lib);
+                }
+                
+                // 4. Try index.bu at root
+                let root_index = vendor_package_dir.join("index.bu");
+                if root_index.exists() {
+                    return Ok(root_index);
+                }
+                
+                return Err(BuluError::Other(format!(
+                    "Package '{}' found in vendor but no entry point (lib.bu or index.bu) found", 
+                    package_name
+                )));
+            }
+            
+            // Move to parent directory
+            if !current_dir.pop() {
+                break;
+            }
+        }
+        
+        Err(BuluError::Other(format!("Package '{}' not found in vendor directory from {}", package_name, start_dir.display())))
     }
 
     /// Resolve a standard library module
@@ -162,12 +304,24 @@ impl ModuleResolver {
                         Visibility::Private
                     };
 
+                    let function_signature = crate::resolver::symbol_table::FunctionSignature {
+                        parameters: func_decl.params.iter().map(|p| crate::resolver::symbol_table::ParameterInfo {
+                            name: p.name.clone(),
+                            param_type: Some(p.param_type.clone()),
+                            has_default: p.default_value.is_some(),
+                            is_variadic: p.is_variadic,
+                        }).collect(),
+                        return_type: func_decl.return_type.clone(),
+                        is_async: func_decl.is_async,
+                        is_variadic: func_decl.params.iter().any(|p| p.is_variadic),
+                    };
+
                     let symbol = Symbol::new(
                         func_decl.name.clone(),
                         SymbolKind::Function,
                         visibility,
                         func_decl.position,
-                    );
+                    ).with_function_signature(function_signature);
 
                     module.symbols.define(symbol.clone())
                         .map_err(|e| BuluError::Other(e))?;
@@ -258,12 +412,110 @@ impl ModuleResolver {
                         .map_err(|e| BuluError::Other(e))?;
                     module.add_export(type_alias.name.clone(), symbol);
                 }
+                Statement::Export(export_stmt) => {
+                    // Handle export statements
+                    self.handle_export_in_module(export_stmt, module)?;
+                }
                 _ => {
                     // Other statements don't define exportable symbols
                 }
             }
         }
 
+        Ok(())
+    }
+    
+    /// Handle export statements in a module
+    fn handle_export_in_module(&self, export_stmt: &crate::ast::nodes::ExportStmt, module: &mut Module) -> Result<()> {
+        use crate::ast::nodes::Statement;
+        
+        match export_stmt.item.as_ref() {
+            Statement::Import(import_stmt) => {
+                // This is a re-export: export { items } from "path"
+                // Load the source module
+                let source_module = self.load_module(&import_stmt.path)?;
+                
+                if let Some(items) = &import_stmt.items {
+                    // Re-export specific items
+                    for item in items {
+                        let export_name = item.alias.as_ref().unwrap_or(&item.name);
+                        
+                        // Find the symbol in the source module
+                        if let Some(source_symbol) = source_module.exports.get(&item.name) {
+                            // Add it to this module's exports
+                            module.add_export(export_name.clone(), source_symbol.clone());
+                        } else {
+                            return Err(BuluError::Other(format!(
+                                "Module '{}' does not export '{}'",
+                                import_stmt.path, item.name
+                            )));
+                        }
+                    }
+                } else {
+                    // Re-export all items from the source module
+                    for (name, symbol) in &source_module.exports {
+                        module.add_export(name.clone(), symbol.clone());
+                    }
+                }
+            }
+            Statement::FunctionDecl(func_decl) => {
+                // Regular export of a function
+                let function_signature = crate::resolver::symbol_table::FunctionSignature {
+                    parameters: func_decl.params.iter().map(|p| crate::resolver::symbol_table::ParameterInfo {
+                        name: p.name.clone(),
+                        param_type: Some(p.param_type.clone()),
+                        has_default: p.default_value.is_some(),
+                        is_variadic: p.is_variadic,
+                    }).collect(),
+                    return_type: func_decl.return_type.clone(),
+                    is_async: func_decl.is_async,
+                    is_variadic: func_decl.params.iter().any(|p| p.is_variadic),
+                };
+                
+                let symbol = Symbol::new(
+                    func_decl.name.clone(),
+                    SymbolKind::Function,
+                    Visibility::Public,
+                    func_decl.position,
+                ).with_function_signature(function_signature);
+                module.symbols.define(symbol.clone())
+                    .map_err(|e| BuluError::Other(e))?;
+                module.add_export(func_decl.name.clone(), symbol);
+            }
+            Statement::StructDecl(struct_decl) => {
+                // Regular export of a struct
+                let symbol = Symbol::new(
+                    struct_decl.name.clone(),
+                    SymbolKind::Struct,
+                    Visibility::Public,
+                    struct_decl.position,
+                );
+                module.symbols.define(symbol.clone())
+                    .map_err(|e| BuluError::Other(e))?;
+                module.add_export(struct_decl.name.clone(), symbol);
+            }
+            Statement::VariableDecl(var_decl) => {
+                // Regular export of a variable
+                let kind = if var_decl.is_const {
+                    SymbolKind::Constant
+                } else {
+                    SymbolKind::Variable
+                };
+                let symbol = Symbol::new(
+                    var_decl.name.clone(),
+                    kind,
+                    Visibility::Public,
+                    var_decl.position,
+                );
+                module.symbols.define(symbol.clone())
+                    .map_err(|e| BuluError::Other(e))?;
+                module.add_export(var_decl.name.clone(), symbol);
+            }
+            _ => {
+                // Other export types not yet handled
+            }
+        }
+        
         Ok(())
     }
 

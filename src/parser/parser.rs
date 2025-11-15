@@ -3416,14 +3416,17 @@ impl Parser {
                 } else {
                     // Handle other identifier types
                     match name.as_str() {
+                        "int" => Ok(Type::Int64), // Default int is int64
                         "int8" => Ok(Type::Int8),
                         "int16" => Ok(Type::Int16),
                         "int32" => Ok(Type::Int32),
                         "int64" => Ok(Type::Int64),
+                        "uint" => Ok(Type::UInt64), // Default uint is uint64
                         "uint8" => Ok(Type::UInt8),
                         "uint16" => Ok(Type::UInt16),
                         "uint32" => Ok(Type::UInt32),
                         "uint64" => Ok(Type::UInt64),
+                        "float" => Ok(Type::Float64), // Default float is float64
                         "float32" => Ok(Type::Float32),
                         "float64" => Ok(Type::Float64),
                         "bool" => Ok(Type::Bool),
