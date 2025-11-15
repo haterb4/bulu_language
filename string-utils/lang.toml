@@ -1,0 +1,20 @@
+[package]
+name = "string-utils"
+version = "2.0.0"
+authors = ["Bulu Team <team@bulu-lang.com>"]
+description = "String manipulation utilities with StringBuilder and text analysis for Bulu"
+keywords = ["string", "text", "utilities", "builder", "analysis"]
+
+[dependencies]
+
+[build]
+optimization = "2"
+target = "native"
+features = []
+incremental = true
+parallel = true
+
+[test]
+parallel = true
+timeout = 30
+coverage = false

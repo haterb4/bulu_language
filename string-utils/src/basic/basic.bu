@@ -1,0 +1,63 @@
+// Basic string operations
+
+export func uppercase(s: string): string {
+    let result = "";
+    let i = 0;
+    let length = len(s);
+    
+    while i < length {
+        let c = s[i];
+        let code = ord(c);
+        // Convert lowercase to uppercase (a-z -> A-Z)
+        if code >= 97 && code <= 122 {
+            code = code - 32;
+            c = chr(code);
+        }
+        result = result + c;
+        i = i + 1;
+    }
+    
+    return result;
+}
+
+export func lowercase(s: string): string {
+    let result = "";
+    let i = 0;
+    let length = len(s);
+    
+    while i < length {
+        let c = s[i];
+        let code = ord(c);
+        // Convert uppercase to lowercase (A-Z -> a-z)
+        if code >= 65 && code <= 90 {
+            code = code + 32;
+            c = chr(code);
+        }
+        result = result + c;
+        i = i + 1;
+    }
+    
+    return result;
+}
+
+export func concat(a: string, b: string): string {
+    return a + b;
+}
+
+export func repeat(s: string, n: int64): string {
+    let result = "";
+    let i = 0;
+    while i < n {
+        result = result + s;
+        i = i + 1;
+    }
+    return result;
+}
+
+export func isEmpty(text: string): bool {
+    return text == "";
+}
+
+export func length(text: string): int64 {
+    return len(text);
+}
