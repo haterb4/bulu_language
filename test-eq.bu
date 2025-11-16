@@ -1,0 +1,10 @@
+func main() {
+    let x = 4;
+    let isCorrect = x == 4;
+    
+    if isCorrect {
+        println("x equals 4");
+    }
+    
+    println("Done");
+}

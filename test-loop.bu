@@ -1,0 +1,11 @@
+func main() {
+    let result = "";
+    let i = 0;
+    
+    while i < 3 {
+        result = result + "A";
+        i = i + 1;
+    }
+    
+    println(result);
+}

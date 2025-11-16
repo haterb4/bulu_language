@@ -1,0 +1,29 @@
+func uppercase(s: string): string {
+    let result = "";
+    let i = 0;
+    let length = len(s);
+    
+    while i < length {
+        let c = s[i];
+        let code = ord(c);
+        // Convert lowercase to uppercase (a-z -> A-Z)
+        let isLower = code >= 97;
+        let isLower2 = code <= 122;
+        if isLower {
+            if isLower2 {
+                let newCode = code - 32;
+                let newC = chr(newCode);
+                result = result + newC;
+            }
+        }
+        i = i + 1;
+    }
+    
+    return result;
+}
+
+func main() {
+    let text = "hello";
+    let upper = uppercase(text);
+    println(upper);
+}

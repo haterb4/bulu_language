@@ -1,0 +1,13 @@
+func main() {
+    let s = "a";
+    let c = s[0];
+    println(c);
+    
+    let code = ord(c);
+    println("Code:");
+    // println(code);  // TODO: fix integer printing
+    
+    let newCode = code - 32;
+    let upper = chr(newCode);
+    println(upper);
+}

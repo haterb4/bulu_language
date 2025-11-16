@@ -1,4 +1,4 @@
-import { add, multiply, square, power, abs, max, min } from "./lib.bu"
+import { add, multiply, square, power, abs, max, min, Complex, createComplex, addComplex } from "./lib.bu"
 
 func main() {
     println("=== Math Utils Demo ===")
@@ -23,4 +23,37 @@ func main() {
     
     let result7 = min(10, 20)
     println("min(10, 20) = " + result7)
+
+    println("=== Math Utils Demo - Complex Numbers ===");
+    
+    // Create complex numbers
+    let c1 = createComplex(3, 4);
+    let c2 = Complex {
+        real: 1,
+        imag: 2
+    }
+    
+    // Test addition
+    let sum = addComplex(c1, c2);
+    println(c1.toString(), "+", c2.toString(), "=", sum.toString())
+    
+    // Test using methods
+    let c3 = Complex { real: 5, imag: 3 };
+    let c4 = Complex { real: 2, imag: 1 };
+    
+    let result = c3.add(c4);
+    println(c3.toString(), "+", c4.toString(), "=", result.toString())
+    // Test subtraction
+    let diff = c3.sub(c4);
+    println(c3.toString(), "-", c4.toString(), "=", diff.toString())
+    
+    // Test multiplication
+    let prod: Complex = c3.mul(c4);
+     println(c3.toString(), "*", c4.toString(), "=", prod.toString())
+    
+    // Test magnitude
+    let mag = c3.magnitude();
+    println("Magnitude", c3.toString(), "=", mag);
+    
+    println("All tests passed!");
 }

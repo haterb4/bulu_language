@@ -103,6 +103,7 @@ pub struct IrBasicBlock {
 pub struct IrInstruction {
     pub opcode: IrOpcode,
     pub result: Option<IrRegister>,
+    pub result_type: Option<IrType>, // Type of the result
     pub operands: Vec<IrValue>,
     pub position: Position,
 }
@@ -254,7 +255,7 @@ pub enum IrConstant {
 }
 
 /// IR type system
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IrType {
     // Primitive types
     I8,
@@ -324,6 +325,8 @@ pub struct IrGenerator {
     next_block_id: u32,
     current_function: Option<String>,
     pub register_map: HashMap<String, IrRegister>, // Variable name to register mapping
+    pub register_types: HashMap<u32, IrType>,      // Register ID to type mapping
+    pub variable_types: HashMap<String, IrType>,   // Variable name to type mapping
     block_stack: Vec<String>,                      // Stack of block labels for break/continue
 
     // Current function being generated
@@ -334,6 +337,9 @@ pub struct IrGenerator {
     // Control flow management
     break_labels: Vec<String>,    // Stack of break target labels
     continue_labels: Vec<String>, // Stack of continue target labels
+
+    // Struct metadata for field resolution
+    struct_definitions: HashMap<String, Vec<(String, IrType)>>, // Struct name -> (field name, field type)
 }
 
 impl IrGenerator {
@@ -343,12 +349,15 @@ impl IrGenerator {
             next_block_id: 0,
             current_function: None,
             register_map: HashMap::new(),
+            register_types: HashMap::new(),
+            variable_types: HashMap::new(),
             block_stack: Vec::new(),
             current_function_blocks: Vec::new(),
             current_block_instructions: Vec::new(),
             current_block_label: None,
             break_labels: Vec::new(),
             continue_labels: Vec::new(),
+            struct_definitions: HashMap::new(),
         }
     }
 
@@ -369,7 +378,42 @@ impl IrGenerator {
             interfaces: Vec::new(),
         };
 
-        // Process all top-level declarations
+        // First pass: register all struct definitions
+        for statement in &program.statements {
+            match statement {
+                Statement::StructDecl(struct_decl) => {
+                    let fields: Vec<(String, IrType)> = struct_decl
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            let field_type =
+                                self.convert_type(&f.field_type).unwrap_or(IrType::Any);
+                            (f.name.clone(), field_type)
+                        })
+                        .collect();
+                    self.struct_definitions
+                        .insert(struct_decl.name.clone(), fields);
+                }
+                Statement::Export(export_stmt) => {
+                    if let Statement::StructDecl(struct_decl) = export_stmt.item.as_ref() {
+                        let fields: Vec<(String, IrType)> = struct_decl
+                            .fields
+                            .iter()
+                            .map(|f| {
+                                let field_type =
+                                    self.convert_type(&f.field_type).unwrap_or(IrType::Any);
+                                (f.name.clone(), field_type)
+                            })
+                            .collect();
+                        self.struct_definitions
+                            .insert(struct_decl.name.clone(), fields);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Second pass: process all top-level declarations
         for statement in &program.statements {
             match statement {
                 Statement::FunctionDecl(func_decl) => {
@@ -511,14 +555,17 @@ impl IrGenerator {
         // Generate parameters
         let mut params = Vec::new();
         for param in &func_decl.params {
-            let register = self.new_register();
             let ir_type = self.convert_type(&param.param_type)?;
+            let register = self.new_register_with_type(ir_type.clone());
             params.push(IrParam {
                 name: param.name.clone(),
-                param_type: ir_type,
+                param_type: ir_type.clone(),
                 register,
             });
             self.register_map.insert(param.name.clone(), register);
+            self.variable_types
+                .insert(param.name.clone(), ir_type.clone());
+            self.register_types.insert(register.id, ir_type);
         }
 
         // Start entry block
@@ -628,9 +675,10 @@ impl IrGenerator {
 
         // Add method parameters
         for (i, param) in method.params.iter().enumerate() {
+            let param_type = self.convert_type(&param.param_type)?;
             params.push(IrParam {
                 name: param.name.clone(),
-                param_type: self.convert_type(&param.param_type)?,
+                param_type: param_type.clone(),
                 register: IrRegister { id: (i + 1) as u32 },
             });
         }
@@ -653,6 +701,8 @@ impl IrGenerator {
         self.register_map.clear();
         for param in &params {
             self.register_map.insert(param.name.clone(), param.register);
+            self.register_types
+                .insert(param.register.id, param.param_type.clone());
         }
 
         // Start a new basic block for the method using proper label generation
@@ -819,6 +869,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Throw,
                     result: None,
+                    result_type: None,
                     operands: vec![message],
                     position: fail_stmt.position,
                 });
@@ -843,11 +894,7 @@ impl IrGenerator {
 
     /// Generate instructions for variable declaration
     pub fn generate_variable_declaration(&mut self, var_decl: &VariableDecl) -> Result<()> {
-        // Allocate register for the variable
-        let register = self.new_register();
-        self.register_map.insert(var_decl.name.clone(), register);
-
-        // Generate initializer if present, otherwise use default value
+        // Generate initializer first to infer type if needed
         let init_value = if let Some(ref initializer) = var_decl.initializer {
             self.generate_expression(initializer)?
         } else {
@@ -859,10 +906,27 @@ impl IrGenerator {
             }
         };
 
+        // Determine the type of the variable
+        let var_type = if let Some(ref type_annotation) = var_decl.type_annotation {
+            self.convert_type(type_annotation).unwrap_or(IrType::Any)
+        } else {
+            // Infer type from initializer
+            self.infer_value_type(&init_value)
+        };
+
+        // Store the variable type
+        self.variable_types
+            .insert(var_decl.name.clone(), var_type.clone());
+
+        // Allocate register for the variable with the correct type
+        let register = self.new_register_with_type(var_type);
+        self.register_map.insert(var_decl.name.clone(), register);
+
         // Generate copy instruction to assign the value
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::Copy,
             result: Some(register),
+            result_type: None,
             operands: vec![init_value],
             position: var_decl.position,
         });
@@ -893,6 +957,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Load,
                     result: Some(null_reg.clone()),
+                    result_type: None,
                     operands: vec![IrValue::Constant(IrConstant::Null)],
                     position: stmt.position,
                 });
@@ -904,6 +969,7 @@ impl IrGenerator {
             self.emit_instruction(IrInstruction {
                 opcode: IrOpcode::Copy,
                 result: Some(temp_reg.clone()),
+                result_type: None,
                 operands: vec![value_reg],
                 position: stmt.position,
             });
@@ -921,6 +987,7 @@ impl IrGenerator {
                         self.emit_instruction(IrInstruction {
                             opcode: IrOpcode::Move,
                             result: Some(register),
+                            result_type: None,
                             operands: vec![temp_reg.clone()],
                             position: stmt.position,
                         });
@@ -976,6 +1043,7 @@ impl IrGenerator {
             self.emit_instruction(IrInstruction {
                 opcode: IrOpcode::Copy,
                 result: Some(register),
+                result_type: None,
                 operands: vec![init_value],
                 position: decl.position,
             });
@@ -1009,6 +1077,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Copy,
                     result: Some(register),
+                    result_type: None,
                     operands: vec![value],
                     position: Position::new(0, 0, 0),
                 });
@@ -1077,6 +1146,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::StructAccess,
             result: Some(result_register),
+            result_type: None,
             operands: vec![
                 object,
                 IrValue::Constant(IrConstant::String(field_name.to_string())),
@@ -1094,6 +1164,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::ArrayAccess,
             result: Some(result_register),
+            result_type: None,
             operands: vec![array, IrValue::Constant(IrConstant::Integer(index as i64))],
             position: Position::new(0, 0, 0),
         });
@@ -1108,6 +1179,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::TupleAccess,
             result: Some(result_register),
+            result_type: None,
             operands: vec![tuple, IrValue::Constant(IrConstant::Integer(index as i64))],
             position: Position::new(0, 0, 0),
         });
@@ -1132,36 +1204,103 @@ impl IrGenerator {
             }
 
             Expression::Binary(binary) => {
-                let left = self.generate_expression(&binary.left)?;
-                let right = self.generate_expression(&binary.right)?;
-                let result_register = self.new_register();
+                let mut left = self.generate_expression(&binary.left)?;
+                let mut right = self.generate_expression(&binary.right)?;
 
-                let opcode = match binary.operator {
-                    BinaryOperator::Add => IrOpcode::Add,
-                    BinaryOperator::Subtract => IrOpcode::Sub,
-                    BinaryOperator::Multiply => IrOpcode::Mul,
-                    BinaryOperator::Divide => IrOpcode::Div,
-                    BinaryOperator::Modulo => IrOpcode::Mod,
-                    BinaryOperator::Power => IrOpcode::Pow,
-                    BinaryOperator::Equal => IrOpcode::Eq,
-                    BinaryOperator::NotEqual => IrOpcode::Ne,
-                    BinaryOperator::Less => IrOpcode::Lt,
-                    BinaryOperator::Greater => IrOpcode::Gt,
-                    BinaryOperator::LessEqual => IrOpcode::Le,
-                    BinaryOperator::GreaterEqual => IrOpcode::Ge,
-                    BinaryOperator::And => IrOpcode::LogicalAnd,
-                    BinaryOperator::Or => IrOpcode::LogicalOr,
-                    BinaryOperator::BitwiseAnd => IrOpcode::And,
-                    BinaryOperator::BitwiseOr => IrOpcode::Or,
-                    BinaryOperator::BitwiseXor => IrOpcode::Xor,
-                    BinaryOperator::LeftShift => IrOpcode::Shl,
-                    BinaryOperator::RightShift => IrOpcode::Shr,
+                // Infer the type of the operation
+                let left_type = self.infer_value_type(&left);
+                let right_type = self.infer_value_type(&right);
+
+                // Determine result type and opcode based on operand types
+                let (opcode, result_type) = match binary.operator {
+                    BinaryOperator::Add => {
+                        // If either operand is a string, it's string concatenation
+                        if matches!(left_type, IrType::String)
+                            || matches!(right_type, IrType::String)
+                        {
+                            // Convert non-string operands to string
+                            if !matches!(left_type, IrType::String) {
+                                // Insert toString() call
+                                left = self.generate_tostring_call(left, &left_type)?;
+                            }
+
+                            if !matches!(right_type, IrType::String) {
+                                // Insert toString() call
+                                right = self.generate_tostring_call(right, &right_type)?;
+                            }
+
+                            (IrOpcode::StringConcat, IrType::String)
+                        } else if matches!(left_type, IrType::F32 | IrType::F64)
+                            || matches!(right_type, IrType::F32 | IrType::F64)
+                        {
+                            // Float addition
+                            let float_type = if matches!(left_type, IrType::F64)
+                                || matches!(right_type, IrType::F64)
+                            {
+                                IrType::F64
+                            } else {
+                                IrType::F32
+                            };
+                            (IrOpcode::Add, float_type)
+                        } else {
+                            // Integer addition - use the larger type
+                            (
+                                IrOpcode::Add,
+                                self.promote_numeric_type(&left_type, &right_type),
+                            )
+                        }
+                    }
+                    BinaryOperator::Subtract => (
+                        IrOpcode::Sub,
+                        self.promote_numeric_type(&left_type, &right_type),
+                    ),
+                    BinaryOperator::Multiply => (
+                        IrOpcode::Mul,
+                        self.promote_numeric_type(&left_type, &right_type),
+                    ),
+                    BinaryOperator::Divide => (
+                        IrOpcode::Div,
+                        self.promote_numeric_type(&left_type, &right_type),
+                    ),
+                    BinaryOperator::Modulo => (
+                        IrOpcode::Mod,
+                        self.promote_numeric_type(&left_type, &right_type),
+                    ),
+                    BinaryOperator::Power => (
+                        IrOpcode::Pow,
+                        self.promote_numeric_type(&left_type, &right_type),
+                    ),
+                    BinaryOperator::Equal => (IrOpcode::Eq, IrType::Bool),
+                    BinaryOperator::NotEqual => (IrOpcode::Ne, IrType::Bool),
+                    BinaryOperator::Less => (IrOpcode::Lt, IrType::Bool),
+                    BinaryOperator::Greater => (IrOpcode::Gt, IrType::Bool),
+                    BinaryOperator::LessEqual => (IrOpcode::Le, IrType::Bool),
+                    BinaryOperator::GreaterEqual => (IrOpcode::Ge, IrType::Bool),
+                    BinaryOperator::And => (IrOpcode::LogicalAnd, IrType::Bool),
+                    BinaryOperator::Or => (IrOpcode::LogicalOr, IrType::Bool),
+                    BinaryOperator::BitwiseAnd => (
+                        IrOpcode::And,
+                        self.promote_numeric_type(&left_type, &right_type),
+                    ),
+                    BinaryOperator::BitwiseOr => (
+                        IrOpcode::Or,
+                        self.promote_numeric_type(&left_type, &right_type),
+                    ),
+                    BinaryOperator::BitwiseXor => (
+                        IrOpcode::Xor,
+                        self.promote_numeric_type(&left_type, &right_type),
+                    ),
+                    BinaryOperator::LeftShift => (IrOpcode::Shl, left_type.clone()),
+                    BinaryOperator::RightShift => (IrOpcode::Shr, left_type.clone()),
                 };
+
+                let result_register = self.new_register_with_type(result_type.clone());
 
                 // Emit the binary operation instruction
                 self.emit_instruction(IrInstruction {
                     opcode,
                     result: Some(result_register),
+                    result_type: Some(result_type),
                     operands: vec![left, right],
                     position: binary.position,
                 });
@@ -1170,8 +1309,30 @@ impl IrGenerator {
             }
 
             Expression::Call(call) => {
-                let callee = self.generate_expression(&call.callee)?;
+                // Check if this is a method call (callee is a MemberAccess)
+                let (callee, this_object) =
+                    if let Expression::MemberAccess(member_access) = call.callee.as_ref() {
+                        // Method call: generate the object and create a direct function call
+                        let object = self.generate_expression(&member_access.object)?;
+                        let method_name = format!(
+                            "{}.{}",
+                            self.get_type_name_from_value(&object)?,
+                            member_access.member
+                        );
+                        (IrValue::Global(method_name), Some(object))
+                    } else {
+                        // Regular function call
+                        let callee = self.generate_expression(&call.callee)?;
+                        (callee, None)
+                    };
+
                 let mut args = Vec::new();
+
+                // For method calls, add 'this' as the first argument
+                if let Some(this) = this_object {
+                    args.push(this);
+                }
+
                 for arg in &call.args {
                     args.push(self.generate_expression(arg)?);
                 }
@@ -1179,15 +1340,64 @@ impl IrGenerator {
                 let result_register = self.new_register();
 
                 // Create the call instruction
-                let mut operands = vec![callee];
+                let mut operands = vec![callee.clone()];
                 operands.extend(args);
 
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Call,
                     result: Some(result_register),
+                    result_type: None,
                     operands,
                     position: call.position,
                 });
+
+                // Try to infer the return type
+                if let IrValue::Global(func_name) = &callee {
+                    if let Some(dot_pos) = func_name.rfind('.') {
+                        // Method call
+                        let struct_name = &func_name[..dot_pos];
+                        let method = &func_name[dot_pos + 1..];
+
+                        // Register return types based on method name (heuristic)
+                        match method {
+                            // Methods that return the same struct type
+                            "add" | "sub" | "mul" | "div" => {
+                                self.register_types.insert(
+                                    result_register.id,
+                                    IrType::Struct(struct_name.to_string()),
+                                );
+                            }
+                            // Methods that return int64
+                            "magnitude" | "length" | "size" | "count" => {
+                                self.register_types.insert(result_register.id, IrType::I64);
+                            }
+                            // Methods that return string
+                            "toString" => {
+                                self.register_types
+                                    .insert(result_register.id, IrType::String);
+                            }
+                            _ => {}
+                        }
+                    } else if func_name.starts_with("create") {
+                        // Factory function like createComplex
+                        let type_name = &func_name[6..]; // Skip "create"
+                        self.register_types
+                            .insert(result_register.id, IrType::Struct(type_name.to_string()));
+                    } else if func_name.starts_with("add") && func_name.len() > 3 {
+                        // Function like addComplex
+                        let type_name = &func_name[3..]; // Skip "add"
+                        self.register_types
+                            .insert(result_register.id, IrType::Struct(type_name.to_string()));
+                    } else {
+                        // Common math functions return int64
+                        match func_name.as_str() {
+                            "add" | "multiply" | "square" | "power" | "abs" | "max" | "min" => {
+                                self.register_types.insert(result_register.id, IrType::I64);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
 
                 Ok(IrValue::Register(result_register))
             }
@@ -1206,6 +1416,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode,
                     result: Some(result_register),
+                    result_type: None,
                     operands: vec![operand],
                     position: unary.position,
                 });
@@ -1224,6 +1435,7 @@ impl IrGenerator {
                             self.emit_instruction(IrInstruction {
                                 opcode: IrOpcode::Copy,
                                 result: Some(register),
+                                result_type: None,
                                 operands: vec![value.clone()],
                                 position: assignment.position,
                             });
@@ -1234,6 +1446,7 @@ impl IrGenerator {
                         self.emit_instruction(IrInstruction {
                             opcode: IrOpcode::Store,
                             result: None,
+                            result_type: None,
                             operands: vec![
                                 object,
                                 IrValue::Global(member_access.member.clone()),
@@ -1248,6 +1461,7 @@ impl IrGenerator {
                         self.emit_instruction(IrInstruction {
                             opcode: IrOpcode::Store,
                             result: None,
+                            result_type: None,
                             operands: vec![object, index_val, value.clone()],
                             position: assignment.position,
                         });
@@ -1258,6 +1472,7 @@ impl IrGenerator {
                         self.emit_instruction(IrInstruction {
                             opcode: IrOpcode::Store,
                             result: None,
+                            result_type: None,
                             operands: vec![target, value.clone()],
                             position: assignment.position,
                         });
@@ -1281,6 +1496,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Alloca,
                     result: Some(result_register),
+                    result_type: None,
                     operands: vec![IrValue::Constant(
                         IrConstant::Integer(elements.len() as i64),
                     )],
@@ -1292,6 +1508,7 @@ impl IrGenerator {
                     self.emit_instruction(IrInstruction {
                         opcode: IrOpcode::Store,
                         result: None,
+                        result_type: None,
                         operands: vec![
                             IrValue::Register(result_register),
                             IrValue::Constant(IrConstant::Integer(i as i64)),
@@ -1308,13 +1525,46 @@ impl IrGenerator {
                 let object = self.generate_expression(&member_access.object)?;
                 let result_register = self.new_register();
 
+                // Try to resolve field name to index and get field type
+                let (field_operand, field_type) =
+                    if let Ok(struct_name) = self.get_type_name_from_value(&object) {
+                        // Look up the struct definition to find the field index and type
+                        if let Some(fields) = self.struct_definitions.get(&struct_name) {
+                            if let Some((field_index, (_, field_type))) = fields
+                                .iter()
+                                .enumerate()
+                                .find(|(_, (name, _))| name == &member_access.member)
+                            {
+                                (
+                                    IrValue::Constant(IrConstant::Integer(field_index as i64)),
+                                    Some(field_type.clone()),
+                                )
+                            } else {
+                                // Field not found, might be a method - use the name
+                                (IrValue::Global(member_access.member.clone()), None)
+                            }
+                        } else {
+                            // Struct not found, use the name as fallback
+                            (IrValue::Global(member_access.member.clone()), None)
+                        }
+                    } else {
+                        // Fallback to using the field name
+                        (IrValue::Global(member_access.member.clone()), None)
+                    };
+
                 // Create member access instruction
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::StructAccess,
                     result: Some(result_register),
-                    operands: vec![object, IrValue::Global(member_access.member.clone())],
+                    result_type: None,
+                    operands: vec![object, field_operand],
                     position: member_access.position,
                 });
+
+                // Register the field type if we found it
+                if let Some(ftype) = field_type {
+                    self.register_types.insert(result_register.id, ftype);
+                }
 
                 Ok(IrValue::Register(result_register))
             }
@@ -1327,6 +1577,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::ArrayAccess,
                     result: Some(result_register),
+                    result_type: None,
                     operands: vec![object, index_val],
                     position: index.position,
                 });
@@ -1369,6 +1620,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Phi,
                     result: Some(result_register),
+                    result_type: None,
                     operands: vec![
                         then_val,
                         IrValue::Global(then_block_label),
@@ -1388,6 +1640,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Alloca,
                     result: Some(result_register),
+                    result_type: None,
                     operands: vec![IrValue::Constant(IrConstant::Integer(0))], // Empty map initially
                     position: map.position,
                 });
@@ -1400,6 +1653,7 @@ impl IrGenerator {
                     self.emit_instruction(IrInstruction {
                         opcode: IrOpcode::MapInsert,
                         result: None,
+                        result_type: None,
                         operands: vec![IrValue::Register(result_register), key, value],
                         position: entry.position,
                     });
@@ -1431,6 +1685,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::TupleConstruct,
                     result: Some(result_register),
+                    result_type: None,
                     operands: elements,
                     position: tuple.position,
                 });
@@ -1446,6 +1701,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Cast,
                     result: Some(result_register),
+                    result_type: None,
                     operands: vec![expr_val, IrValue::Global(format!("{:?}", target_type))],
                     position: cast.position,
                 });
@@ -1460,6 +1716,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::TypeOf,
                     result: Some(result_register),
+                    result_type: None,
                     operands: vec![expr_val],
                     position: typeof_expr.position,
                 });
@@ -1476,6 +1733,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Call,
                     result: Some(result_register),
+                    result_type: None,
                     operands: vec![
                         IrValue::Global("__create_range".to_string()),
                         start,
@@ -1495,6 +1753,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Spawn,
                     result: Some(result_register),
+                    result_type: None,
                     operands: vec![expr_val],
                     position: async_expr.position,
                 });
@@ -1509,6 +1768,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Await,
                     result: Some(result_register),
+                    result_type: None,
                     operands: vec![expr_val],
                     position: await_expr.position,
                 });
@@ -1527,6 +1787,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Yield,
                     result: Some(result_register),
+                    result_type: None,
                     operands,
                     position: yield_expr.position,
                 });
@@ -1590,6 +1851,7 @@ impl IrGenerator {
                     self.emit_instruction(IrInstruction {
                         opcode: IrOpcode::Copy,
                         result: Some(result_register),
+                        result_type: None,
                         operands: vec![arm_val],
                         position: arm.position,
                     });
@@ -1617,10 +1879,17 @@ impl IrGenerator {
 
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::StructConstruct,
+                    result_type: None,
                     result: Some(result_register),
                     operands,
                     position: struct_lit.position,
                 });
+
+                // Register the type of the result
+                self.register_types.insert(
+                    result_register.id,
+                    IrType::Struct(struct_lit.type_name.clone()),
+                );
 
                 Ok(IrValue::Register(result_register))
             }
@@ -1645,6 +1914,7 @@ impl IrGenerator {
                         self.emit_instruction(IrInstruction {
                             opcode: IrOpcode::ChannelSend,
                             result: Some(result_register),
+                            result_type: None,
                             operands: vec![channel_val, value_val],
                             position: channel_expr.position,
                         });
@@ -1659,6 +1929,7 @@ impl IrGenerator {
                         self.emit_instruction(IrInstruction {
                             opcode: IrOpcode::ChannelReceive,
                             result: Some(result_register),
+                            result_type: None,
                             operands: vec![channel_val],
                             position: channel_expr.position,
                         });
@@ -1710,6 +1981,7 @@ impl IrGenerator {
                         self.emit_instruction(IrInstruction {
                             opcode: IrOpcode::Spawn,
                             result: Some(result_register),
+                            result_type: None,
                             operands,
                             position: run_expr.position,
                         });
@@ -1722,6 +1994,7 @@ impl IrGenerator {
                         self.emit_instruction(IrInstruction {
                             opcode: IrOpcode::Spawn,
                             result: Some(result_register),
+                            result_type: None,
                             operands: vec![expr_val],
                             position: run_expr.position,
                         });
@@ -1884,9 +2157,7 @@ impl IrGenerator {
 
     /// Generate next register ID
     fn next_register(&mut self) -> IrRegister {
-        let id = self.next_register_id;
-        self.next_register_id += 1;
-        IrRegister { id }
+        self.new_register()
     }
 
     /// Generate next basic block label
@@ -1921,16 +2192,131 @@ impl IrGenerator {
 
     /// Add an instruction to the current basic block
     fn emit_instruction(&mut self, instruction: IrInstruction) {
+        // Propagate types for Copy instructions
+        if instruction.opcode == IrOpcode::Copy {
+            if let (Some(result), Some(source)) = (instruction.result, instruction.operands.first())
+            {
+                if let IrValue::Register(source_reg) = source {
+                    if let Some(source_type) = self.register_types.get(&source_reg.id).cloned() {
+                        self.register_types.insert(result.id, source_type);
+                    }
+                }
+            }
+        }
+
         self.current_block_instructions.push(instruction);
     }
 
     /// Create a new register and return it
     fn new_register(&mut self) -> IrRegister {
+        self.new_register_with_type(IrType::Any)
+    }
+
+    /// Create a new register with a specific type
+    fn new_register_with_type(&mut self, reg_type: IrType) -> IrRegister {
         let reg = IrRegister {
             id: self.next_register_id,
         };
+        self.register_types.insert(self.next_register_id, reg_type);
         self.next_register_id += 1;
         reg
+    }
+
+    /// Create a register with a specific ID and type (for parameters, etc.)
+    fn make_register_with_type(id: u32, reg_type: IrType) -> (IrRegister, IrType) {
+        (IrRegister { id }, reg_type)
+    }
+
+    /// Infer the type of an IR value
+    fn infer_value_type(&self, value: &IrValue) -> IrType {
+        match value {
+            IrValue::Register(reg) => {
+                // Check register_types
+                if let Some(ty) = self.register_types.get(&reg.id) {
+                    return ty.clone();
+                }
+                // If not found, try to find the variable name for this register
+                for (var_name, var_reg) in &self.register_map {
+                    if var_reg.id == reg.id {
+                        if let Some(var_type) = self.variable_types.get(var_name) {
+                            return var_type.clone();
+                        }
+                    }
+                }
+                IrType::Any
+            }
+            IrValue::Global(name) => {
+                // Check if it's a known variable
+                self.variable_types
+                    .get(name)
+                    .cloned()
+                    .unwrap_or(IrType::Any)
+            }
+            IrValue::Constant(constant) => match constant {
+                IrConstant::Integer(_) => IrType::I64, // Default integer type
+                IrConstant::Float(_) => IrType::F64,   // Default float type
+                IrConstant::String(_) => IrType::String,
+                IrConstant::Char(_) => IrType::Char,
+                IrConstant::Boolean(_) => IrType::Bool,
+                IrConstant::Null => IrType::Any,
+                IrConstant::Array(elements) => {
+                    if let Some(first) = elements.first() {
+                        let elem_type = match first {
+                            IrConstant::Integer(_) => IrType::I64,
+                            IrConstant::Float(_) => IrType::F64,
+                            IrConstant::String(_) => IrType::String,
+                            IrConstant::Char(_) => IrType::Char,
+                            IrConstant::Boolean(_) => IrType::Bool,
+                            _ => IrType::Any,
+                        };
+                        IrType::Array(Box::new(elem_type), Some(elements.len()))
+                    } else {
+                        IrType::Array(Box::new(IrType::Any), Some(0))
+                    }
+                }
+                IrConstant::Struct(_) => IrType::Any, // Would need struct name
+                IrConstant::Tuple(elements) => {
+                    let types = elements
+                        .iter()
+                        .map(|c| match c {
+                            IrConstant::Integer(_) => IrType::I64,
+                            IrConstant::Float(_) => IrType::F64,
+                            IrConstant::String(_) => IrType::String,
+                            IrConstant::Char(_) => IrType::Char,
+                            IrConstant::Boolean(_) => IrType::Bool,
+                            _ => IrType::Any,
+                        })
+                        .collect();
+                    IrType::Tuple(types)
+                }
+            },
+            IrValue::Global(_) => IrType::Any, // Would need to look up global type
+            IrValue::Function(_) => IrType::Function(vec![], Some(Box::new(IrType::Void))),
+        }
+    }
+
+    /// Promote numeric types for binary operations (choose the larger/more precise type)
+    fn promote_numeric_type(&self, left: &IrType, right: &IrType) -> IrType {
+        match (left, right) {
+            // Float types take precedence
+            (IrType::F64, _) | (_, IrType::F64) => IrType::F64,
+            (IrType::F32, _) | (_, IrType::F32) => IrType::F32,
+
+            // Signed integer promotion
+            (IrType::I64, _) | (_, IrType::I64) => IrType::I64,
+            (IrType::I32, _) | (_, IrType::I32) => IrType::I32,
+            (IrType::I16, _) | (_, IrType::I16) => IrType::I16,
+            (IrType::I8, _) | (_, IrType::I8) => IrType::I8,
+
+            // Unsigned integer promotion
+            (IrType::U64, _) | (_, IrType::U64) => IrType::U64,
+            (IrType::U32, _) | (_, IrType::U32) => IrType::U32,
+            (IrType::U16, _) | (_, IrType::U16) => IrType::U16,
+            (IrType::U8, _) | (_, IrType::U8) => IrType::U8,
+
+            // Default to I64 for unknown types
+            _ => IrType::I64,
+        }
     }
 
     /// Branch to a target block
@@ -1974,7 +2360,7 @@ impl IrGenerator {
                     {
                         locals.push(IrLocal {
                             name: var_decl.name.clone(),
-                            local_type: ir_type,
+                            local_type: ir_type.clone(),
                             register: IrRegister {
                                 id: locals.len() as u32,
                             },
@@ -1993,7 +2379,7 @@ impl IrGenerator {
                         {
                             locals.push(IrLocal {
                                 name: var_decl.name.clone(),
-                                local_type: ir_type,
+                                local_type: ir_type.clone(),
                                 register: IrRegister {
                                     id: locals.len() as u32,
                                 },
@@ -2214,6 +2600,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::Copy,
             result: Some(index_reg),
+            result_type: None,
             operands: vec![IrValue::Constant(IrConstant::Integer(0))],
             position: for_stmt.position,
         });
@@ -2223,6 +2610,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::Copy,
             result: Some(array_reg),
+            result_type: None,
             operands: vec![iterable],
             position: for_stmt.position,
         });
@@ -2242,6 +2630,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::ArrayLength,
             result: Some(array_length),
+            result_type: None,
             operands: vec![IrValue::Register(array_reg)],
             position: for_stmt.position,
         });
@@ -2251,6 +2640,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::Lt,
             result: Some(condition),
+            result_type: None,
             operands: vec![
                 IrValue::Register(index_reg),
                 IrValue::Register(array_length),
@@ -2272,6 +2662,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::ArrayAccess,
             result: Some(current_element),
+            result_type: None,
             operands: vec![IrValue::Register(array_reg), IrValue::Register(index_reg)],
             position: for_stmt.position,
         });
@@ -2282,6 +2673,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::IsNull,
             result: Some(is_null),
+            result_type: None,
             operands: vec![IrValue::Register(current_element)],
             position: for_stmt.position,
         });
@@ -2303,6 +2695,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::Copy,
             result: Some(loop_var_reg),
+            result_type: None,
             operands: vec![IrValue::Register(current_element)],
             position: for_stmt.position,
         });
@@ -2315,6 +2708,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::Add,
             result: Some(incremented),
+            result_type: None,
             operands: vec![
                 IrValue::Register(index_reg),
                 IrValue::Constant(IrConstant::Integer(1)),
@@ -2324,6 +2718,7 @@ impl IrGenerator {
         self.emit_instruction(IrInstruction {
             opcode: IrOpcode::Copy,
             result: Some(index_reg),
+            result_type: None,
             operands: vec![IrValue::Register(incremented)],
             position: for_stmt.position,
         });
@@ -2435,6 +2830,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Eq,
                     result: Some(result_reg.clone()),
+                    result_type: None,
                     operands: vec![expr_val.clone(), literal_val],
                     position: Position::new(0, 0, 0),
                 });
@@ -2473,6 +2869,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Ge,
                     result: Some(ge_reg.clone()),
+                    result_type: None,
                     operands: vec![expr_val.clone(), start_val],
                     position: Position::new(0, 0, 0),
                 });
@@ -2487,6 +2884,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: end_op,
                     result: Some(le_reg.clone()),
+                    result_type: None,
                     operands: vec![expr_val.clone(), end_val],
                     position: Position::new(0, 0, 0),
                 });
@@ -2496,6 +2894,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::LogicalAnd,
                     result: Some(result_reg.clone()),
+                    result_type: None,
                     operands: vec![IrValue::Register(ge_reg), IrValue::Register(le_reg)],
                     position: Position::new(0, 0, 0),
                 });
@@ -2539,6 +2938,7 @@ impl IrGenerator {
                 self.emit_instruction(IrInstruction {
                     opcode: IrOpcode::Catch,
                     result: Some(error_reg),
+                    result_type: None,
                     operands: vec![],
                     position: catch_clause.position,
                 });
@@ -2697,6 +3097,96 @@ impl IrGenerator {
                 Ok(IrValue::Constant(IrConstant::Boolean(result)))
             }
             _ => Ok(IrValue::Constant(IrConstant::Null)),
+        }
+    }
+
+    /// Generate a toString() call for a value
+    fn generate_tostring_call(&mut self, value: IrValue, value_type: &IrType) -> Result<IrValue> {
+        let type_name = match value_type {
+            IrType::I64 => "Int64",
+            IrType::I32 => "Int32",
+            IrType::F64 => "Float64",
+            IrType::Bool => "Bool",
+            IrType::String => return Ok(value), // Already a string
+            IrType::Struct(name) => name.as_str(),
+            _ => "Unknown",
+        };
+
+        let result_register = self.new_register();
+        let method_name = format!("{}.toString", type_name);
+
+        self.emit_instruction(IrInstruction {
+            opcode: IrOpcode::Call,
+            result: Some(result_register),
+            result_type: None,
+            operands: vec![IrValue::Global(method_name), value],
+            position: Position {
+                line: 0,
+                column: 0,
+                offset: 0,
+            },
+        });
+
+        // Register the result type as String
+        self.register_types
+            .insert(result_register.id, IrType::String);
+
+        Ok(IrValue::Register(result_register))
+    }
+
+    /// Get the type name from a value (for method calls)
+    fn get_type_name_from_value(&self, value: &IrValue) -> Result<String> {
+        match value {
+            IrValue::Register(reg) => {
+                // Try to find the type from register_types
+                if let Some(ir_type) = self.register_types.get(&reg.id) {
+                    return match ir_type {
+                        IrType::Struct(name) => Ok(name.clone()),
+                        IrType::I64 => Ok("Int64".to_string()),
+                        IrType::I32 => Ok("Int32".to_string()),
+                        IrType::F64 => Ok("Float64".to_string()),
+                        IrType::Bool => Ok("Bool".to_string()),
+                        IrType::String => Ok("String".to_string()),
+                        _ => Ok("Unknown".to_string()),
+                    };
+                }
+
+                // If not found, try to trace back through Copy instructions
+                // Look through current_block_instructions and current_function_blocks
+                for inst in self.current_block_instructions.iter().rev() {
+                    if let Some(result) = inst.result {
+                        if result.id == reg.id && inst.opcode == IrOpcode::Copy {
+                            if let Some(source) = inst.operands.first() {
+                                return self.get_type_name_from_value(source);
+                            }
+                        }
+                    }
+                }
+
+                for bb in self.current_function_blocks.iter().rev() {
+                    for inst in bb.instructions.iter().rev() {
+                        if let Some(result) = inst.result {
+                            if result.id == reg.id {
+                                if inst.opcode == IrOpcode::Copy {
+                                    if let Some(source) = inst.operands.first() {
+                                        return self.get_type_name_from_value(source);
+                                    }
+                                } else if inst.opcode == IrOpcode::StructConstruct {
+                                    if let Some(IrValue::Global(struct_name)) =
+                                        inst.operands.first()
+                                    {
+                                        return Ok(struct_name.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // If not found, return Unknown
+                Ok("Unknown".to_string())
+            }
+            _ => Ok("Unknown".to_string()),
         }
     }
 }

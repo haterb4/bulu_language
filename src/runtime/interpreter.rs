@@ -1829,6 +1829,7 @@ impl Interpreter {
                     instructions: vec![IrInstruction {
                         opcode: IrOpcode::Call,
                         result: Some(IrRegister { id: 0 }),
+                        result_type: None,
                         operands: vec![
                             IrValue::Global("println".to_string()),
                             IrValue::Constant(IrConstant::String("Hello, Bulu!".to_string())),

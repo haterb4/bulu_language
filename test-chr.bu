@@ -1,0 +1,9 @@
+func main() {
+    let code = 65;  // 'A'
+    let c = chr(code);
+    println(c);
+    
+    let s = "Hello";
+    let result = s + c;
+    println(result);
+}

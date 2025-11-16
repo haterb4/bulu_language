@@ -534,6 +534,52 @@ impl NativeBackend {
         Ok(())
     }
 
+    /// Helper to generate comparison instruction
+    fn generate_comparison(
+        &self,
+        asm: &mut String,
+        inst: &IrInstruction,
+        reg_map: &HashMap<u32, i32>,
+        set_instruction: &str, // e.g., "setg", "setl", "sete"
+    ) {
+        if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
+            if let Some(result) = inst.result {
+                if let Some(&res_off) = reg_map.get(&result.id) {
+                    match (op1, op2) {
+                        (IrValue::Register(r1), IrValue::Register(r2)) => {
+                            if let (Some(&off1), Some(&off2)) = (reg_map.get(&r1.id), reg_map.get(&r2.id)) {
+                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
+                                asm.push_str(&format!("    cmpq {}(%rbp), %rax\n", off2));
+                                asm.push_str(&format!("    {} %al\n", set_instruction));
+                                asm.push_str("    movzbq %al, %rax\n");
+                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                            }
+                        }
+                        (IrValue::Register(r1), IrValue::Constant(IrConstant::Integer(val))) => {
+                            if let Some(&off1) = reg_map.get(&r1.id) {
+                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
+                                asm.push_str(&format!("    cmpq ${}, %rax\n", val));
+                                asm.push_str(&format!("    {} %al\n", set_instruction));
+                                asm.push_str("    movzbq %al, %rax\n");
+                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                            }
+                        }
+                        (IrValue::Constant(IrConstant::Integer(val)), IrValue::Register(r2)) => {
+                            if let Some(&off2) = reg_map.get(&r2.id) {
+                                asm.push_str(&format!("    mov ${}, %rax\n", val));
+                                asm.push_str(&format!("    cmpq {}(%rbp), %rax\n", off2));
+                                asm.push_str(&format!("    {} %al\n", set_instruction));
+                                asm.push_str("    movzbq %al, %rax\n");
+                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
     /// Generate assembly for a single instruction
     fn generate_instruction(
         &self,
@@ -584,8 +630,51 @@ impl NativeBackend {
                 }
             }
             IrOpcode::Add => {
+                // Integer addition only (string concatenation uses StringConcat)
                 if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
-                    // Check String + String first (two constants)
+                    if let (IrValue::Register(r1), IrValue::Register(r2)) = (op1, op2) {
+                        // Register + Register addition
+                        if let Some(result) = inst.result {
+                            if let (Some(&off1), Some(&off2), Some(&res_off)) = (
+                                reg_map.get(&r1.id),
+                                reg_map.get(&r2.id),
+                                reg_map.get(&result.id),
+                            ) {
+                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
+                                asm.push_str(&format!("    addq {}(%rbp), %rax\n", off2));
+                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                            }
+                        }
+                    } else if let (IrValue::Register(r1), IrValue::Constant(IrConstant::Integer(val))) = (op1, op2) {
+                        // Register + Constant addition
+                        if let Some(result) = inst.result {
+                            if let (Some(&off1), Some(&res_off)) = (
+                                reg_map.get(&r1.id),
+                                reg_map.get(&result.id),
+                            ) {
+                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
+                                asm.push_str(&format!("    addq ${}, %rax\n", val));
+                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                            }
+                        }
+                    } else if let (IrValue::Constant(IrConstant::Integer(val)), IrValue::Register(r2)) = (op1, op2) {
+                        // Constant + Register addition
+                        if let Some(result) = inst.result {
+                            if let (Some(&off2), Some(&res_off)) = (
+                                reg_map.get(&r2.id),
+                                reg_map.get(&result.id),
+                            ) {
+                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off2));
+                                asm.push_str(&format!("    addq ${}, %rax\n", val));
+                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                            }
+                        }
+                    }
+                }
+            }
+            IrOpcode::StringConcat => {
+                // String concatenation - always treat operands as strings
+                if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
                     if let (IrValue::Constant(IrConstant::String(s1)), IrValue::Constant(IrConstant::String(s2))) = (op1, op2) {
                         // String constant + String constant
                         if let Some(result) = inst.result {
@@ -605,100 +694,17 @@ impl NativeBackend {
                                 asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_offset));
                             }
                         }
-                    } else if let IrValue::Constant(IrConstant::String(s)) = op1 {
-                        if let IrValue::Register(r2) = op2 {
-                            // String + Integer concatenation
-                            if let Some(result) = inst.result {
-                                if let (Some(&int_offset), Some(&res_offset)) = 
-                                    (reg_map.get(&r2.id), reg_map.get(&result.id)) {
-                                    
-                                    // Add the string to the strings map if not already there
-                                    let string_id = if let Some(&id) = strings.get(s) {
-                                        id
-                                    } else {
-                                        // This shouldn't happen as strings are collected earlier
-                                        // but handle it gracefully
-                                        0
-                                    };
-                                    
-                                    asm.push_str(&format!("    # String concatenation: \"{}\" + integer\n", s));
-                                    
-                                    // Allocate buffer on stack (256 bytes should be enough)
-                                    asm.push_str("    sub $256, %rsp\n");
-                                    
-                                    // Copy the string part
-                                    asm.push_str(&format!("    lea str_{}(%rip), %rsi\n", string_id));
-                                    asm.push_str("    lea (%rsp), %rdi\n");
-                                    asm.push_str(&format!("    mov $str_{}_len, %rcx\n", string_id));
-                                    asm.push_str("    push %rcx           # Save string length\n");
-                                    asm.push_str("    rep movsb\n");
-                                    asm.push_str("    pop %r10            # Restore string length\n");
-                                    
-                                    // Convert integer to string and append
-                                    asm.push_str(&format!("    movq {}(%rbp), %rdi\n", int_offset));
-                                    asm.push_str("    lea (%rsp), %rsi\n");
-                                    asm.push_str("    add %r10, %rsi      # Move to end of string\n");
-                                    asm.push_str("    call __bulu_int_to_string\n");
-                                    
-                                    // Calculate total length (string length + integer length)
-                                    asm.push_str("    add %r10, %rax      # Total length\n");
-                                    asm.push_str("    movq %rax, __concat_length(%rip)\n");
-                                    
-                                    // Store pointer to concatenated string in result register
-                                    asm.push_str("    lea (%rsp), %rax\n");
-                                    asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_offset));
-                                    
-                                    // Note: We don't deallocate the buffer here
-                                    // It will be cleaned up when the function returns
-                                }
-                            }
-                        }
                     } else if let (IrValue::Register(r1), IrValue::Register(r2)) = (op1, op2) {
-                        // Could be String + String or Integer + Integer
-                        // Try string concatenation first (check if pointers look like strings)
+                        // Register (string) + Register (string)
                         if let Some(result) = inst.result {
                             if let (Some(&off1), Some(&off2), Some(&res_off)) = (
                                 reg_map.get(&r1.id),
                                 reg_map.get(&r2.id),
                                 reg_map.get(&result.id),
                             ) {
-                                let label_id = *label_counter;
-                                *label_counter += 1;
-                                
-                                // Check if first operand looks like a string pointer
                                 asm.push_str(&format!("    movq {}(%rbp), %rdi\n", off1));
-                                asm.push_str("    # Check if value looks like a pointer (> 0x1000)\n");
-                                asm.push_str("    cmp $0x1000, %rdi\n");
-                                asm.push_str(&format!("    jb .{}_add_as_int_{}\n", func_name, label_id));
-                                asm.push_str("    # Check if length field is reasonable (< 1MB)\n");
-                                asm.push_str("    movq (%rdi), %rax\n");
-                                asm.push_str("    cmp $1048576, %rax\n");
-                                asm.push_str(&format!("    ja .{}_add_as_int_{}\n", func_name, label_id));
-                                
-                                // Looks like a string, do string concatenation
                                 asm.push_str(&format!("    movq {}(%rbp), %rsi\n", off2));
                                 asm.push_str("    call __string_concat\n");
-                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
-                                asm.push_str(&format!("    jmp .{}_add_done_{}\n", func_name, label_id));
-                                
-                                // Integer addition
-                                asm.push_str(&format!(".{}_add_as_int_{}:\n", func_name, label_id));
-                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
-                                asm.push_str(&format!("    addq {}(%rbp), %rax\n", off2));
-                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
-                                
-                                asm.push_str(&format!(".{}_add_done_{}:\n", func_name, label_id));
-                            }
-                        }
-                    } else if let (IrValue::Register(r1), IrValue::Constant(IrConstant::Integer(val))) = (op1, op2) {
-                        // Register + Constant addition
-                        if let Some(result) = inst.result {
-                            if let (Some(&off1), Some(&res_off)) = (
-                                reg_map.get(&r1.id),
-                                reg_map.get(&result.id),
-                            ) {
-                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
-                                asm.push_str(&format!("    addq ${}, %rax\n", val));
                                 asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
                             }
                         }
@@ -739,16 +745,31 @@ impl NativeBackend {
             }
             IrOpcode::Sub => {
                 if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
-                    if let (IrValue::Register(r1), IrValue::Register(r2)) = (op1, op2) {
-                        if let Some(result) = inst.result {
-                            if let (Some(&off1), Some(&off2), Some(&res_off)) = (
-                                reg_map.get(&r1.id),
-                                reg_map.get(&r2.id),
-                                reg_map.get(&result.id),
-                            ) {
-                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
-                                asm.push_str(&format!("    subq {}(%rbp), %rax\n", off2));
-                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                    if let Some(result) = inst.result {
+                        if let Some(&res_off) = reg_map.get(&result.id) {
+                            match (op1, op2) {
+                                (IrValue::Register(r1), IrValue::Register(r2)) => {
+                                    if let (Some(&off1), Some(&off2)) = (reg_map.get(&r1.id), reg_map.get(&r2.id)) {
+                                        asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
+                                        asm.push_str(&format!("    subq {}(%rbp), %rax\n", off2));
+                                        asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                                    }
+                                }
+                                (IrValue::Register(r1), IrValue::Constant(IrConstant::Integer(val))) => {
+                                    if let Some(&off1) = reg_map.get(&r1.id) {
+                                        asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
+                                        asm.push_str(&format!("    subq ${}, %rax\n", val));
+                                        asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                                    }
+                                }
+                                (IrValue::Constant(IrConstant::Integer(val)), IrValue::Register(r2)) => {
+                                    if let Some(&off2) = reg_map.get(&r2.id) {
+                                        asm.push_str(&format!("    mov ${}, %rax\n", val));
+                                        asm.push_str(&format!("    subq {}(%rbp), %rax\n", off2));
+                                        asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                                    }
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -756,24 +777,39 @@ impl NativeBackend {
             }
             IrOpcode::Mul => {
                 if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
-                    if let (IrValue::Register(r1), IrValue::Register(r2)) = (op1, op2) {
-                        if let Some(result) = inst.result {
-                            if let (Some(&off1), Some(&off2), Some(&res_off)) = (
-                                reg_map.get(&r1.id),
-                                reg_map.get(&r2.id),
-                                reg_map.get(&result.id),
-                            ) {
-                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
-                                asm.push_str(&format!("    imulq {}(%rbp), %rax\n", off2));
-                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                    if let Some(result) = inst.result {
+                        if let Some(&res_off) = reg_map.get(&result.id) {
+                            match (op1, op2) {
+                                (IrValue::Register(r1), IrValue::Register(r2)) => {
+                                    if let (Some(&off1), Some(&off2)) = (reg_map.get(&r1.id), reg_map.get(&r2.id)) {
+                                        asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
+                                        asm.push_str(&format!("    imulq {}(%rbp), %rax\n", off2));
+                                        asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                                    }
+                                }
+                                (IrValue::Register(r1), IrValue::Constant(IrConstant::Integer(val))) => {
+                                    if let Some(&off1) = reg_map.get(&r1.id) {
+                                        asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
+                                        asm.push_str(&format!("    imulq ${}, %rax\n", val));
+                                        asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                                    }
+                                }
+                                (IrValue::Constant(IrConstant::Integer(val)), IrValue::Register(r2)) => {
+                                    if let Some(&off2) = reg_map.get(&r2.id) {
+                                        asm.push_str(&format!("    mov ${}, %rax\n", val));
+                                        asm.push_str(&format!("    imulq {}(%rbp), %rax\n", off2));
+                                        asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                                    }
+                                }
+                                _ => {}
                             }
                         }
                     }
                 }
             }
             IrOpcode::Call => {
-                if let Some(func_name) = inst.operands.first() {
-                    let name = match func_name {
+                if let Some(called_func) = inst.operands.first() {
+                    let name = match called_func {
                         IrValue::Function(n) => n.as_str(),
                         IrValue::Global(n) => n.as_str(),
                         _ => return Ok(()),
@@ -781,56 +817,138 @@ impl NativeBackend {
 
                     if name == "println" {
                         // Compiler intrinsic: inline syscalls for println
-                        if let Some(arg) = inst.operands.get(1) {
+                        // If there are multiple arguments, concatenate them with spaces
+                        if inst.operands.len() > 2 {
+                            // Multiple arguments - concatenate them with spaces
+                            let mut concat_reg = None;
+                            for (i, arg) in inst.operands.iter().skip(1).enumerate() {
+                                // Add space before each argument except the first
+                                if i > 0 && concat_reg.is_some() {
+                                    // Create a space string
+                                    asm.push_str("    mov $9, %rdi\n");  // 1 byte + 8 for length
+                                    asm.push_str("    call __malloc\n");
+                                    asm.push_str("    movq $1, (%rax)\n");  // length = 1
+                                    asm.push_str("    movb $32, 8(%rax)\n");  // space character
+                                    asm.push_str("    mov %rax, %rsi\n");
+                                    asm.push_str("    pop %rdi\n");
+                                    asm.push_str("    call __string_concat\n");
+                                    asm.push_str("    push %rax\n");
+                                }
+                                
+                                // Get the current argument and convert to string if needed
+                                match arg {
+                                    IrValue::Register(reg) => {
+                                        if let Some(&offset) = reg_map.get(&reg.id) {
+                                            // Check if it's a string or needs conversion
+                                            let label_id = *label_counter;
+                                            *label_counter += 1;
+                                            
+                                            asm.push_str(&format!("    movq {}(%rbp), %rdi\n", offset));
+                                            // Check if it's a valid string pointer (> 0x1000)
+                                            asm.push_str("    cmp $0x1000, %rdi\n");
+                                            asm.push_str(&format!("    jb .{}_println_convert_int_{}\n", func_name, label_id));
+                                            // Check if it looks like a string (length < 1MB)
+                                            asm.push_str("    movq (%rdi), %rax\n");
+                                            asm.push_str("    cmp $1048576, %rax\n");
+                                            asm.push_str(&format!("    ja .{}_println_convert_int_{}\n", func_name, label_id));
+                                            
+                                            // It's a string - use it directly
+                                            asm.push_str(&format!("    jmp .{}_println_string_ready_{}\n", func_name, label_id));
+                                            
+                                            // Convert integer to string
+                                            asm.push_str(&format!(".{}_println_convert_int_{}:\n", func_name, label_id));
+                                            asm.push_str(&format!("    movq {}(%rbp), %rdi\n", offset));
+                                            asm.push_str("    mov $32, %rdi\n");
+                                            asm.push_str("    call __malloc\n");
+                                            asm.push_str("    push %rax\n");
+                                            asm.push_str(&format!("    movq {}(%rbp), %rdi\n", offset));
+                                            asm.push_str("    lea 8(%rax), %rsi\n");
+                                            asm.push_str("    call __bulu_int_to_string\n");
+                                            asm.push_str("    pop %rbx\n");
+                                            asm.push_str("    movq %rax, (%rbx)\n");
+                                            asm.push_str("    mov %rbx, %rdi\n");
+                                            
+                                            asm.push_str(&format!(".{}_println_string_ready_{}:\n", func_name, label_id));
+                                            
+                                            // Now concatenate
+                                            if concat_reg.is_some() {
+                                                asm.push_str("    mov %rdi, %rsi\n");
+                                                asm.push_str("    pop %rdi\n");
+                                                asm.push_str("    call __string_concat\n");
+                                                asm.push_str("    push %rax\n");
+                                            } else {
+                                                asm.push_str("    push %rdi\n");
+                                                concat_reg = Some(());
+                                            }
+                                        }
+                                    }
+                                    IrValue::Constant(IrConstant::String(s)) => {
+                                        if let Some(&id) = strings.get(s) {
+                                            // Create string from constant
+                                            if concat_reg.is_some() {
+                                                asm.push_str(&format!("    lea str_{}(%rip), %rdi\n", id));
+                                                asm.push_str(&format!("    mov $str_{}_len, %rsi\n", id));
+                                                asm.push_str("    call __string_create\n");
+                                                asm.push_str("    mov %rax, %rsi\n");
+                                                asm.push_str("    pop %rdi\n");
+                                                asm.push_str("    call __string_concat\n");
+                                                asm.push_str("    push %rax\n");
+                                            } else {
+                                                asm.push_str(&format!("    lea str_{}(%rip), %rdi\n", id));
+                                                asm.push_str(&format!("    mov $str_{}_len, %rsi\n", id));
+                                                asm.push_str("    call __string_create\n");
+                                                asm.push_str("    push %rax\n");
+                                                concat_reg = Some(());
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            
+                            // Print the concatenated result
+                            if concat_reg.is_some() {
+                                asm.push_str("    pop %rdi\n");
+                                // Print without newline (we'll add it after)
+                                asm.push_str("    movq (%rdi), %rdx\n");  // length
+                                asm.push_str("    lea 8(%rdi), %rsi\n");  // data
+                                asm.push_str("    mov $1, %rax\n");
+                                asm.push_str("    mov $1, %rdi\n");
+                                asm.push_str("    syscall\n");
+                                // Print newline
+                                asm.push_str("    mov $1, %rax\n");
+                                asm.push_str("    mov $1, %rdi\n");
+                                asm.push_str("    lea newline(%rip), %rsi\n");
+                                asm.push_str("    mov $1, %rdx\n");
+                                asm.push_str("    syscall\n");
+                            }
+                        } else if let Some(arg) = inst.operands.get(1) {
                             match arg {
                                 IrValue::Register(reg) => {
                                     if let Some(&offset) = reg_map.get(&reg.id) {
                                         let label_id = *label_counter;
                                         *label_counter += 1;
                                         
-                                        // Check if this might be a concatenated string (pointer) or an integer
-                                        // We'll try to print it as a concatenated string first
-                                        // If __concat_length is non-zero, it's a concatenated string
-                                        asm.push_str(&format!("    movq {}(%rbp), %rdi\n", offset));
-                                        asm.push_str("    movq __concat_length(%rip), %rdx\n");
-                                        asm.push_str("    test %rdx, %rdx\n");
-                                        asm.push_str(&format!("    jz .{}_print_as_int_{}\n", name, label_id));
-                                        
-                                        // Print as concatenated string
-                                        asm.push_str("    mov $1, %rax\n");
-                                        asm.push_str("    mov $1, %rdi\n");
-                                        asm.push_str(&format!("    movq {}(%rbp), %rsi\n", offset));
-                                        asm.push_str("    syscall\n");
-                                        
-                                        // Print newline
-                                        asm.push_str("    mov $1, %rax\n");
-                                        asm.push_str("    mov $1, %rdi\n");
-                                        asm.push_str("    lea newline(%rip), %rsi\n");
-                                        asm.push_str("    mov $1, %rdx\n");
-                                        asm.push_str("    syscall\n");
-                                        
-                                        // Reset concat length
-                                        asm.push_str("    movq $0, __concat_length(%rip)\n");
-                                        asm.push_str(&format!("    jmp .{}_print_done_{}\n", name, label_id));
-                                        
-                                        // Print as integer or string
-                                        asm.push_str(&format!(".{}_print_as_int_{}:\n", name, label_id));
+                                        // Check if it's a valid string pointer or an integer
                                         asm.push_str(&format!("    movq {}(%rbp), %rdi\n", offset));
                                         // Check if it's a valid string pointer (> 0x1000)
                                         asm.push_str("    cmp $0x1000, %rdi\n");
-                                        asm.push_str(&format!("    jb .{}_print_as_int_really_{}\n", name, label_id));
-                                        asm.push_str("    # Check if it looks like a string (length < 1MB)\n");
+                                        asm.push_str(&format!("    jb .{}_print_as_int_{}\n", func_name, label_id));
+                                        // Check if it looks like a string (length < 1MB)
                                         asm.push_str("    movq (%rdi), %rax\n");
                                         asm.push_str("    cmp $1048576, %rax\n");
-                                        asm.push_str(&format!("    ja .{}_print_as_int_really_{}\n", name, label_id));
-                                        asm.push_str("    # Print as string\n");
+                                        asm.push_str(&format!("    ja .{}_print_as_int_{}\n", func_name, label_id));
+                                        
+                                        // Print as string (__string_print already adds newline)
                                         asm.push_str("    call __string_print\n");
-                                        asm.push_str(&format!("    jmp .{}_print_done_{}\n", name, label_id));
-                                        asm.push_str(&format!(".{}_print_as_int_really_{}:\n", name, label_id));
+                                        asm.push_str(&format!("    jmp .{}_print_done_{}\n", func_name, label_id));
+                                        
+                                        // Print as integer (__bulu_print_int already adds newline)
+                                        asm.push_str(&format!(".{}_print_as_int_{}:\n", func_name, label_id));
                                         asm.push_str(&format!("    movq {}(%rbp), %rdi\n", offset));
                                         asm.push_str("    call __bulu_print_int\n");
                                         
-                                        asm.push_str(&format!(".{}_print_done_{}:\n", name, label_id));
+                                        asm.push_str(&format!(".{}_print_done_{}:\n", func_name, label_id));
                                     }
                                 }
                                 IrValue::Constant(IrConstant::String(s)) => {
@@ -983,23 +1101,33 @@ impl NativeBackend {
                         }
                     } else {
                         // Normal function call - treat all user functions the same
-                        self.generate_normal_function_call(asm, inst, reg_map, name)?;
+                        self.generate_normal_function_call(asm, inst, reg_map, strings, name)?;
                     }
                 }
             }
             IrOpcode::Div => {
                 if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
-                    if let (IrValue::Register(r1), IrValue::Register(r2)) = (op1, op2) {
-                        if let Some(result) = inst.result {
-                            if let (Some(&off1), Some(&off2), Some(&res_off)) = (
-                                reg_map.get(&r1.id),
-                                reg_map.get(&r2.id),
-                                reg_map.get(&result.id),
-                            ) {
-                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
-                                asm.push_str("    cqo\n"); // Sign extend rax to rdx:rax
-                                asm.push_str(&format!("    idivq {}(%rbp)\n", off2));
-                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                    if let Some(result) = inst.result {
+                        if let Some(&res_off) = reg_map.get(&result.id) {
+                            match (op1, op2) {
+                                (IrValue::Register(r1), IrValue::Register(r2)) => {
+                                    if let (Some(&off1), Some(&off2)) = (reg_map.get(&r1.id), reg_map.get(&r2.id)) {
+                                        asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
+                                        asm.push_str("    cqo\n");
+                                        asm.push_str(&format!("    idivq {}(%rbp)\n", off2));
+                                        asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                                    }
+                                }
+                                (IrValue::Register(r1), IrValue::Constant(IrConstant::Integer(val))) => {
+                                    if let Some(&off1) = reg_map.get(&r1.id) {
+                                        asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
+                                        asm.push_str("    cqo\n");
+                                        asm.push_str(&format!("    mov ${}, %rcx\n", val));
+                                        asm.push_str("    idivq %rcx\n");
+                                        asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
+                                    }
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -1036,118 +1164,22 @@ impl NativeBackend {
                 }
             }
             IrOpcode::Eq => {
-                if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
-                    if let (IrValue::Register(r1), IrValue::Register(r2)) = (op1, op2) {
-                        if let Some(result) = inst.result {
-                            if let (Some(&off1), Some(&off2), Some(&res_off)) = (
-                                reg_map.get(&r1.id),
-                                reg_map.get(&r2.id),
-                                reg_map.get(&result.id),
-                            ) {
-                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
-                                asm.push_str(&format!("    cmpq {}(%rbp), %rax\n", off2));
-                                asm.push_str("    sete %al\n");
-                                asm.push_str("    movzbq %al, %rax\n");
-                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
-                            }
-                        }
-                    }
-                }
+                self.generate_comparison(asm, inst, reg_map, "sete");
             }
             IrOpcode::Ne => {
-                if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
-                    if let (IrValue::Register(r1), IrValue::Register(r2)) = (op1, op2) {
-                        if let Some(result) = inst.result {
-                            if let (Some(&off1), Some(&off2), Some(&res_off)) = (
-                                reg_map.get(&r1.id),
-                                reg_map.get(&r2.id),
-                                reg_map.get(&result.id),
-                            ) {
-                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
-                                asm.push_str(&format!("    cmpq {}(%rbp), %rax\n", off2));
-                                asm.push_str("    setne %al\n");
-                                asm.push_str("    movzbq %al, %rax\n");
-                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
-                            }
-                        }
-                    }
-                }
+                self.generate_comparison(asm, inst, reg_map, "setne");
             }
             IrOpcode::Lt => {
-                if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
-                    if let (IrValue::Register(r1), IrValue::Register(r2)) = (op1, op2) {
-                        if let Some(result) = inst.result {
-                            if let (Some(&off1), Some(&off2), Some(&res_off)) = (
-                                reg_map.get(&r1.id),
-                                reg_map.get(&r2.id),
-                                reg_map.get(&result.id),
-                            ) {
-                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
-                                asm.push_str(&format!("    cmpq {}(%rbp), %rax\n", off2));
-                                asm.push_str("    setl %al\n");
-                                asm.push_str("    movzbq %al, %rax\n");
-                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
-                            }
-                        }
-                    }
-                }
+                self.generate_comparison(asm, inst, reg_map, "setl");
             }
             IrOpcode::Le => {
-                if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
-                    if let (IrValue::Register(r1), IrValue::Register(r2)) = (op1, op2) {
-                        if let Some(result) = inst.result {
-                            if let (Some(&off1), Some(&off2), Some(&res_off)) = (
-                                reg_map.get(&r1.id),
-                                reg_map.get(&r2.id),
-                                reg_map.get(&result.id),
-                            ) {
-                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
-                                asm.push_str(&format!("    cmpq {}(%rbp), %rax\n", off2));
-                                asm.push_str("    setle %al\n");
-                                asm.push_str("    movzbq %al, %rax\n");
-                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
-                            }
-                        }
-                    }
-                }
+                self.generate_comparison(asm, inst, reg_map, "setle");
             }
             IrOpcode::Gt => {
-                if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
-                    if let (IrValue::Register(r1), IrValue::Register(r2)) = (op1, op2) {
-                        if let Some(result) = inst.result {
-                            if let (Some(&off1), Some(&off2), Some(&res_off)) = (
-                                reg_map.get(&r1.id),
-                                reg_map.get(&r2.id),
-                                reg_map.get(&result.id),
-                            ) {
-                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
-                                asm.push_str(&format!("    cmpq {}(%rbp), %rax\n", off2));
-                                asm.push_str("    setg %al\n");
-                                asm.push_str("    movzbq %al, %rax\n");
-                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
-                            }
-                        }
-                    }
-                }
+                self.generate_comparison(asm, inst, reg_map, "setg");
             }
             IrOpcode::Ge => {
-                if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
-                    if let (IrValue::Register(r1), IrValue::Register(r2)) = (op1, op2) {
-                        if let Some(result) = inst.result {
-                            if let (Some(&off1), Some(&off2), Some(&res_off)) = (
-                                reg_map.get(&r1.id),
-                                reg_map.get(&r2.id),
-                                reg_map.get(&result.id),
-                            ) {
-                                asm.push_str(&format!("    movq {}(%rbp), %rax\n", off1));
-                                asm.push_str(&format!("    cmpq {}(%rbp), %rax\n", off2));
-                                asm.push_str("    setge %al\n");
-                                asm.push_str("    movzbq %al, %rax\n");
-                                asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_off));
-                            }
-                        }
-                    }
-                }
+                self.generate_comparison(asm, inst, reg_map, "setge");
             }
             IrOpcode::LogicalAnd => {
                 if let (Some(op1), Some(op2)) = (inst.operands.get(0), inst.operands.get(1)) {
@@ -1268,6 +1300,83 @@ impl NativeBackend {
                     }
                 }
             }
+            IrOpcode::StructConstruct => {
+                // Construct a struct: operands are [struct_name, field1_name, field1_value, field2_name, field2_value, ...]
+                // We allocate space on the heap and store field values there
+                if let Some(result) = inst.result {
+                    if let Some(&res_offset) = reg_map.get(&result.id) {
+                        // Count the number of fields
+                        let num_fields = (inst.operands.len() - 1) / 2;
+                        let struct_size = num_fields * 8;
+                        
+                        // Allocate memory for the struct
+                        asm.push_str(&format!("    mov ${}, %rdi\n", struct_size));
+                        asm.push_str("    call __malloc\n");
+                        asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_offset));
+                        
+                        // Store field values in the allocated memory
+                        let mut field_index = 0;
+                        let mut i = 1;
+                        while i < inst.operands.len() {
+                            // Skip field name (operands[i])
+                            if i + 1 < inst.operands.len() {
+                                let field_value = &inst.operands[i + 1];
+                                let field_offset = field_index * 8;
+                                
+                                match field_value {
+                                    IrValue::Constant(IrConstant::Integer(val)) => {
+                                        asm.push_str(&format!("    movq {}(%rbp), %rax\n", res_offset));
+                                        asm.push_str(&format!("    movq ${}, {}(%rax)\n", val, field_offset));
+                                    }
+                                    IrValue::Register(reg) => {
+                                        if let Some(&src_offset) = reg_map.get(&reg.id) {
+                                            asm.push_str(&format!("    movq {}(%rbp), %rax\n", res_offset));
+                                            asm.push_str(&format!("    movq {}(%rbp), %rbx\n", src_offset));
+                                            asm.push_str(&format!("    movq %rbx, {}(%rax)\n", field_offset));
+                                        }
+                                    }
+                                    IrValue::Constant(IrConstant::String(s)) => {
+                                        if let Some(&id) = strings.get(s) {
+                                            asm.push_str(&format!("    push {}(%rbp)\n", res_offset));
+                                            asm.push_str(&format!("    lea str_{}(%rip), %rdi\n", id));
+                                            asm.push_str(&format!("    mov $str_{}_len, %rsi\n", id));
+                                            asm.push_str("    call __string_create\n");
+                                            asm.push_str("    pop %rbx\n");
+                                            asm.push_str(&format!("    movq %rax, {}(%rbx)\n", field_offset));
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                
+                                field_index += 1;
+                            }
+                            i += 2;
+                        }
+                    }
+                }
+            }
+            IrOpcode::StructAccess => {
+                // Access a struct field: operands are [struct_value, field_index]
+                if let (Some(struct_val), Some(field_idx)) = (inst.operands.get(0), inst.operands.get(1)) {
+                    if let Some(result) = inst.result {
+                        if let Some(&res_offset) = reg_map.get(&result.id) {
+                            match (struct_val, field_idx) {
+                                (IrValue::Register(struct_reg), IrValue::Constant(IrConstant::Integer(idx))) => {
+                                    if let Some(&struct_offset) = reg_map.get(&struct_reg.id) {
+                                        // Load struct base address
+                                        asm.push_str(&format!("    movq {}(%rbp), %rax\n", struct_offset));
+                                        // Access field at offset idx * 8
+                                        let field_offset = idx * 8;
+                                        asm.push_str(&format!("    movq {}(%rax), %rax\n", field_offset));
+                                        asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_offset));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
             _ => {
                 // Skip unsupported opcodes for now
             }
@@ -1282,8 +1391,73 @@ impl NativeBackend {
         asm: &mut String,
         inst: &IrInstruction,
         reg_map: &HashMap<u32, i32>,
+        strings: &HashMap<String, usize>,
         name: &str,
     ) -> Result<()> {
+        // Check if this is a native method call (e.g., Int64.toString, String.toString)
+        // But first check if it's a user-defined method (like Complex.toString)
+        if name.ends_with(".toString") {
+            // Check if this is a primitive type (native toString)
+            let is_primitive = name.starts_with("Int64") || name.starts_with("Int32") 
+                || name.starts_with("Float64") || name.starts_with("Bool") 
+                || name.starts_with("String");
+            
+            if !is_primitive {
+                // User-defined toString method - call it normally
+                // Fall through to normal function call
+            } else if name.starts_with("Int64") || name.starts_with("Int32") {
+                // Int64.toString() or Int32.toString()
+                // First argument is the integer value
+                if let Some(arg) = inst.operands.get(1) {
+                    if let IrValue::Register(reg) = arg {
+                        if let Some(&offset) = reg_map.get(&reg.id) {
+                            // Load the integer value
+                            asm.push_str(&format!("    movq {}(%rbp), %rdi\n", offset));
+                            // Allocate buffer for string (max 20 chars for int64)
+                            asm.push_str("    mov $32, %rdi\n");
+                            asm.push_str("    call __malloc\n");
+                            asm.push_str("    push %rax\n");  // Save buffer pointer
+                            
+                            // Convert int to string
+                            if let Some(&offset) = reg_map.get(&reg.id) {
+                                asm.push_str(&format!("    movq {}(%rbp), %rdi\n", offset));
+                            }
+                            asm.push_str("    lea 8(%rax), %rsi\n");  // Buffer data area
+                            asm.push_str("    call __bulu_int_to_string\n");
+                            
+                            // Store length in the string structure
+                            asm.push_str("    pop %rbx\n");  // Restore buffer pointer
+                            asm.push_str("    movq %rax, (%rbx)\n");  // Store length
+                            asm.push_str("    mov %rbx, %rax\n");  // Return string pointer
+                            
+                            // Store result
+                            if let Some(result) = inst.result {
+                                if let Some(&res_offset) = reg_map.get(&result.id) {
+                                    asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_offset));
+                                }
+                            }
+                        }
+                    }
+                }
+                return Ok(());
+            } else if name.starts_with("String") {
+                // String.toString() - just return the string itself
+                if let Some(arg) = inst.operands.get(1) {
+                    if let IrValue::Register(reg) = arg {
+                        if let Some(&offset) = reg_map.get(&reg.id) {
+                            asm.push_str(&format!("    movq {}(%rbp), %rax\n", offset));
+                            if let Some(result) = inst.result {
+                                if let Some(&res_offset) = reg_map.get(&result.id) {
+                                    asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_offset));
+                                }
+                            }
+                        }
+                    }
+                }
+                return Ok(());
+            }
+        }
+        
         // Set up arguments in registers (System V AMD64 ABI)
         // rdi, rsi, rdx, rcx, r8, r9 for first 6 args
         let arg_regs = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
@@ -1305,6 +1479,34 @@ impl NativeBackend {
                 }
                 IrValue::Constant(IrConstant::Integer(val)) => {
                     asm.push_str(&format!("    movq ${}, {}\n", val, arg_regs[i]));
+                }
+                IrValue::Constant(IrConstant::String(s)) => {
+                    // Create string structure and pass pointer
+                    if let Some(&id) = strings.get(s) {
+                        // Save registers that might be clobbered by __string_create
+                        for j in 0..i {
+                            asm.push_str(&format!("    push {}\n", arg_regs[j]));
+                        }
+                        
+                        asm.push_str(&format!("    lea str_{}(%rip), %rdi\n", id));
+                        asm.push_str(&format!("    mov $str_{}_len, %rsi\n", id));
+                        asm.push_str("    call __string_create\n");
+                        asm.push_str(&format!("    mov %rax, {}\n", arg_regs[i]));
+                        
+                        // Restore registers
+                        for j in (0..i).rev() {
+                            asm.push_str(&format!("    pop {}\n", arg_regs[j]));
+                        }
+                    }
+                }
+                IrValue::Constant(IrConstant::Float(val)) => {
+                    // For floats, we'd use xmm registers, but for simplicity, convert to int
+                    asm.push_str(&format!("    # TODO: Float argument: {}\n", val));
+                    asm.push_str(&format!("    movq $0, {}\n", arg_regs[i]));
+                }
+                IrValue::Constant(IrConstant::Boolean(val)) => {
+                    let int_val = if *val { 1 } else { 0 };
+                    asm.push_str(&format!("    movq ${}, {}\n", int_val, arg_regs[i]));
                 }
                 _ => {}
             }

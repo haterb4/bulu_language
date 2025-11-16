@@ -1,0 +1,14 @@
+func main() {
+    let s = "a";
+    let c = s[0];
+    let code = ord(c);
+    
+    // code should be 97
+    let isLower = code >= 97;
+    
+    if isLower {
+        println("Is lowercase");
+    }
+    
+    println("Done");
+}

@@ -1,0 +1,23 @@
+func main() {
+    let s = "abc";
+    let result = "";
+    let i = 0;
+    let length = len(s);
+    
+    while i < length {
+        let c = s[i];
+        let code = ord(c);
+        let isLower = code >= 97;
+        if isLower {
+            let isLower2 = code <= 122;
+            if isLower2 {
+                let newCode = code - 32;
+                let newC = chr(newCode);
+                result = result + newC;
+            }
+        }
+        i = i + 1;
+    }
+    
+    println(result);
+}

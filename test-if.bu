@@ -1,0 +1,11 @@
+func main() {
+    let x = 5;
+    let y = 10;
+    let isGreater = x > 3;
+    
+    if isGreater {
+        println("x is greater than 3");
+    }
+    
+    println("Done");
+}

@@ -1,0 +1,8 @@
+func concat(a: string, b: string): string {
+    return a + b;
+}
+
+func main() {
+    let combined = concat("Hello", " World");
+    println(combined);
+}

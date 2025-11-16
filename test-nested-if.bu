@@ -1,0 +1,18 @@
+func main() {
+    let result = "";
+    let code = 97;
+    
+    let isLower = code >= 97;
+    if isLower {
+        println("First if");
+        let isLower2 = code <= 122;
+        if isLower2 {
+            println("Second if");
+            let newCode = code - 32;
+            let newC = chr(newCode);
+            result = result + newC;
+        }
+    }
+    
+    println(result);
+}

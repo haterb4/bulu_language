@@ -1,0 +1,20 @@
+struct Complex {
+    real: int64,
+    imag: int64,
+    
+    func toString(): string {
+        let realStr = this.real.toString();
+        let imagStr = this.imag.toString();
+        return "(" + realStr + " + " + imagStr + "i)";
+    }
+}
+
+func main() {
+    println("=== toString Test ===");
+    
+    let c = Complex { real: 3, imag: 4 };
+    let str = c.toString();
+    println(str);
+    
+    println("Test passed!");
+}

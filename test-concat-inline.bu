@@ -1,0 +1,6 @@
+func main() {
+    let a = "Hello";
+    let b = " World";
+    let combined = a + b;
+    println(combined);
+}

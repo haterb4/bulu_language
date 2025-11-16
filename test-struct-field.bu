@@ -1,0 +1,16 @@
+struct Point {
+    x: int64,
+    y: int64
+}
+
+func main() {
+    let p = Point { x: 10, y: 20 };
+    let xVal = p.x;
+    
+    let isCorrect = xVal == 10;
+    if isCorrect {
+        println("X value is correct: 10");
+    }
+    
+    println("Done");
+}

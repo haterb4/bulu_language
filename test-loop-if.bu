@@ -1,0 +1,14 @@
+func main() {
+    let result = "";
+    let i = 0;
+    
+    while i < 3 {
+        let shouldAdd = i > 0;
+        if shouldAdd {
+            result = result + "A";
+        }
+        i = i + 1;
+    }
+    
+    println(result);
+}

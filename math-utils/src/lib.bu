@@ -1,8 +1,11 @@
-// Math utilities package v2.0.0
+// Math utilities package
 // Main entry point with re-exports
 
-// Re-export all basic operations
-export { add, subtract, multiply, divide, square } from "./basic.bu"
+//Re-export basic module
+export { add, multiply, square } from "./basic.bu"
+
+// Re-export complex module
+export { Complex, createComplex, addComplex } from "./complex/complex.bu"
 
 // Re-export all advanced operations
 export { power, abs, max, min, clamp } from "./advanced.bu"

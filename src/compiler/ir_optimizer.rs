@@ -783,6 +783,7 @@ impl IrOptimizer {
                     inlined_instructions.push(IrInstruction {
                         opcode: IrOpcode::Copy,
                         result: Some(result_reg),
+                        result_type: None,
                         operands: vec![mapped_return],
                         position: call_instruction.position,
                     });
