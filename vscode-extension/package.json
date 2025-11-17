@@ -1,0 +1,129 @@
+{
+  "name": "bulu-language",
+  "displayName": "Bulu Language Support",
+  "description": "Language support for Bulu programming language with syntax highlighting, LSP integration, and more",
+  "version": "0.1.0",
+  "publisher": "bulu-lang",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bulu-lang/bulu"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters",
+    "Snippets"
+  ],
+  "keywords": [
+    "bulu",
+    "programming language",
+    "syntax highlighting",
+    "lsp",
+    "language server"
+  ],
+  "activationEvents": [
+    "onLanguage:bulu"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "bulu",
+        "aliases": [
+          "Bulu",
+          "bulu"
+        ],
+        "extensions": [
+          ".bu"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./images/file-icon.svg",
+          "dark": "./images/file-icon.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "bulu",
+        "scopeName": "source.bulu",
+        "path": "./syntaxes/bulu.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "bulu",
+        "path": "./snippets/bulu.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Bulu Language Configuration",
+      "properties": {
+        "bulu.lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable the Bulu Language Server"
+        },
+        "bulu.lsp.path": {
+          "type": "string",
+          "default": "bulu_lsp",
+          "description": "Path to the bulu_lsp executable"
+        },
+        "bulu.lsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server"
+        },
+        "bulu.format.onSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Format code on save"
+        },
+        "bulu.lint.onSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run linter on save"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "bulu.restartLanguageServer",
+        "title": "Bulu: Restart Language Server"
+      },
+      {
+        "command": "bulu.showOutputChannel",
+        "title": "Bulu: Show Output Channel"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.75.0",
+    "@typescript-eslint/eslint-plugin": "^5.0.0",
+    "@typescript-eslint/parser": "^5.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0",
+    "@vscode/vsce": "^2.19.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.1.0"
+  }
+}

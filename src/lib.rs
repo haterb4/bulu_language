@@ -21,6 +21,7 @@ pub mod formatter;
 pub mod linter;
 pub mod docs;
 pub mod package;
+pub mod lsp;
 
 pub use error::{BuluError, Result};
 

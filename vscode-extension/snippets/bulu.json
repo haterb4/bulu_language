@@ -1,0 +1,156 @@
+{
+  "Function Declaration": {
+    "prefix": "func",
+    "body": [
+      "func ${1:name}(${2:params}): ${3:returnType} {",
+      "\t${0:// body}",
+      "}"
+    ],
+    "description": "Create a function"
+  },
+  "Async Function": {
+    "prefix": "afunc",
+    "body": [
+      "async func ${1:name}(${2:params}): ${3:returnType} {",
+      "\t${0:// body}",
+      "}"
+    ],
+    "description": "Create an async function"
+  },
+  "Struct Declaration": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} {",
+      "\t${2:field}: ${3:type}",
+      "}"
+    ],
+    "description": "Create a struct"
+  },
+  "Interface Declaration": {
+    "prefix": "interface",
+    "body": [
+      "interface ${1:Name} {",
+      "\t${2:method}(${3:params}): ${4:returnType}",
+      "}"
+    ],
+    "description": "Create an interface"
+  },
+  "If Statement": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "If statement"
+  },
+  "If-Else Statement": {
+    "prefix": "ifelse",
+    "body": [
+      "if ${1:condition} {",
+      "\t${2}",
+      "} else {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "If-else statement"
+  },
+  "For Loop": {
+    "prefix": "for",
+    "body": [
+      "for ${1:item} in ${2:collection} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "For loop"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "While loop"
+  },
+  "Match Statement": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} {",
+      "\t${2:pattern} -> ${3:result}",
+      "\t_ -> ${0:default}",
+      "}"
+    ],
+    "description": "Match statement"
+  },
+  "Try-Fail": {
+    "prefix": "try",
+    "body": [
+      "try {",
+      "\t${1}",
+      "} fail ${2:err} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "Try-fail error handling"
+  },
+  "Variable Declaration": {
+    "prefix": "let",
+    "body": "let ${1:name}: ${2:type} = ${0:value}",
+    "description": "Variable declaration"
+  },
+  "Constant Declaration": {
+    "prefix": "const",
+    "body": "const ${1:NAME}: ${2:type} = ${0:value}",
+    "description": "Constant declaration"
+  },
+  "Print": {
+    "prefix": "print",
+    "body": "print(${0})",
+    "description": "Print to console"
+  },
+  "Println": {
+    "prefix": "println",
+    "body": "println(${0})",
+    "description": "Print line to console"
+  },
+  "Main Function": {
+    "prefix": "main",
+    "body": [
+      "func main() {",
+      "\t${0:println(\"Hello, Bulu!\")}",
+      "}"
+    ],
+    "description": "Main function"
+  },
+  "Import": {
+    "prefix": "import",
+    "body": "import ${0:module}",
+    "description": "Import module"
+  },
+  "Goroutine": {
+    "prefix": "run",
+    "body": "run ${0:function()}",
+    "description": "Run concurrent goroutine"
+  },
+  "Channel": {
+    "prefix": "chan",
+    "body": "let ${1:ch}: chan ${2:type} = make(chan ${2:type})",
+    "description": "Create channel"
+  },
+  "Select": {
+    "prefix": "select",
+    "body": [
+      "select {",
+      "\tcase ${1:value} <- ${2:channel}:",
+      "\t\t${0}",
+      "}"
+    ],
+    "description": "Select statement for channels"
+  },
+  "Defer": {
+    "prefix": "defer",
+    "body": "defer ${0:cleanup()}",
+    "description": "Defer statement"
+  }
+}

@@ -370,7 +370,7 @@ This document outlines the implementation tasks for the Bulu programming languag
 
 ## IDE and Development Support
 
-- [ ] 37. Implement Language Server Protocol (LSP) support
+- [x] 37. Implement Language Server Protocol (LSP) support
   - Create LSP server for IDE integration
   - Implement syntax highlighting and error reporting
   - Add code completion and symbol navigation

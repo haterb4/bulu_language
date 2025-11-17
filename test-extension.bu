@@ -1,0 +1,58 @@
+// Test de l'extension Bulu pour VS Code
+import std.io
+import std.math
+
+const PI: float64 = 3.14159
+const MAX_SIZE: int32 = 1000
+
+struct Point {
+    x: float64
+    y: float64
+}
+
+func distance(p1: Point, p2: Point): float64 {
+    let dx = p2.x - p1.x
+    let dy = p2.y - p1.y
+    return math.sqrt(dx * dx + dy * dy)
+}
+
+async func fetchData(url: string): string {
+    let response = await http.get(url)
+    return response.body
+}
+
+func main() {
+    println("Hello, Bulu!")
+    
+    let p1 = Point { x: 0.0, y: 0.0 }
+    let p2 = Point { x: 3.0, y: 4.0 }
+    
+    let dist = distance(p1, p2)
+    println("Distance: " + dist)
+    
+    // Test concurrency
+    let ch: chan int32 = make(chan int32)
+    
+    run {
+        ch <- 42
+    }
+    
+    let value = <- ch
+    println(value)
+    
+    // Test pattern matching
+    match value {
+        0 -> println("zero")
+        1..10 -> println("small")
+        _ -> println("other")
+    }
+    
+    // Test error handling
+    try {
+        if value < 0 {
+            fail "Negative value"
+        }
+    } fail err {
+        println("Error: " + err)
+    }
+}

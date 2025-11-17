@@ -25,6 +25,10 @@ path = "src/bin/bulu_vm.rs"
 name = "bulu_run"
 path = "src/bin/bulu_run.rs"
 
+[[bin]]
+name = "bulu_lsp"
+path = "src/bin/bulu_lsp.rs"
+
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -49,6 +53,10 @@ flate2 = "1.0"
 tar = "0.4"
 sha256 = "1.0"
 base64 = "0.21"
+# LSP dependencies
+tower-lsp = "0.20"
+async-trait = "0.1"
+dashmap = "5.5"
 
 [dev-dependencies]
 criterion = "0.5"
