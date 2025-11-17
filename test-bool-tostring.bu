@@ -1,0 +1,11 @@
+func main(): int64 {
+    let b1 = true;
+    let b2 = false;
+    
+    println("b1 =", b1)
+    println("b2 =", b2)
+    println("b1.toString() =", b1.toString())
+    println("b2.toString() =", b2.toString())
+    
+    return 0;
+}

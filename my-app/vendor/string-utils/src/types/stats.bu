@@ -1,0 +1,32 @@
+// TextStats structure for text analysis
+
+export struct TextStats {
+    length: int64,
+    wordCount: int64,
+    hasContent: bool
+}
+
+// Text analysis functions
+export func analyzeText(text: string): TextStats {
+    let len = 0;
+    let hasContent = false;
+    
+    if text != "" {
+        hasContent = true;
+        len = 1; // Placeholder
+    }
+    
+    return TextStats {
+        length: len,
+        wordCount: 1,
+        hasContent: hasContent
+    };
+}
+
+export func createStats(length: int64, wordCount: int64, hasContent: bool): TextStats {
+    return TextStats {
+        length: length,
+        wordCount: wordCount,
+        hasContent: hasContent
+    };
+}

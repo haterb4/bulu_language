@@ -602,6 +602,13 @@ impl NativeBackend {
                                         val, res_offset
                                     ));
                                 }
+                                IrValue::Constant(IrConstant::Boolean(val)) => {
+                                    let int_val = if *val { 1 } else { 0 };
+                                    asm.push_str(&format!(
+                                        "    movq ${}, {}(%rbp)\n",
+                                        int_val, res_offset
+                                    ));
+                                }
                                 IrValue::Constant(IrConstant::String(s)) => {
                                     // Create string structure for string constant
                                     if let Some(&id) = strings.get(s) {
@@ -1101,7 +1108,7 @@ impl NativeBackend {
                         }
                     } else {
                         // Normal function call - treat all user functions the same
-                        self.generate_normal_function_call(asm, inst, reg_map, strings, name)?;
+                        self.generate_normal_function_call(asm, inst, reg_map, strings, name, func_name, label_counter)?;
                     }
                 }
             }
@@ -1393,6 +1400,8 @@ impl NativeBackend {
         reg_map: &HashMap<u32, i32>,
         strings: &HashMap<String, usize>,
         name: &str,
+        func_name: &str,
+        label_counter: &mut usize,
     ) -> Result<()> {
         // Check if this is a native method call (e.g., Int64.toString, String.toString)
         // But first check if it's a user-defined method (like Complex.toString)
@@ -1446,6 +1455,58 @@ impl NativeBackend {
                     if let IrValue::Register(reg) = arg {
                         if let Some(&offset) = reg_map.get(&reg.id) {
                             asm.push_str(&format!("    movq {}(%rbp), %rax\n", offset));
+                            if let Some(result) = inst.result {
+                                if let Some(&res_offset) = reg_map.get(&result.id) {
+                                    asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_offset));
+                                }
+                            }
+                        }
+                    }
+                }
+                return Ok(());
+            } else if name.starts_with("Bool") {
+                // Bool.toString() - convert boolean to "true" or "false"
+                if let Some(arg) = inst.operands.get(1) {
+                    if let IrValue::Register(reg) = arg {
+                        if let Some(&offset) = reg_map.get(&reg.id) {
+                            let label_id = *label_counter;
+                            *label_counter += 1;
+                            
+                            // Load the boolean value
+                            asm.push_str(&format!("    movq {}(%rbp), %rdi\n", offset));
+                            
+                            // Allocate buffer for string (max 6 chars: "false\0")
+                            asm.push_str("    mov $16, %rdi\n");
+                            asm.push_str("    call __malloc\n");
+                            asm.push_str("    push %rax\n");  // Save buffer pointer
+                            
+                            // Check if boolean is true or false
+                            if let Some(&offset) = reg_map.get(&reg.id) {
+                                asm.push_str(&format!("    movq {}(%rbp), %rdi\n", offset));
+                            }
+                            asm.push_str("    test %rdi, %rdi\n");
+                            asm.push_str(&format!("    jz .{}_bool_false_{}\n", func_name, label_id));
+                            
+                            // True case
+                            asm.push_str("    pop %rbx\n");  // Restore buffer pointer
+                            asm.push_str("    movq $4, (%rbx)\n");  // Length = 4
+                            asm.push_str("    movl $0x65757274, 8(%rbx)\n");  // "true" (little-endian)
+                            asm.push_str("    movb $0, 12(%rbx)\n");  // Null terminator
+                            asm.push_str("    mov %rbx, %rax\n");
+                            asm.push_str(&format!("    jmp .{}_bool_done_{}\n", func_name, label_id));
+                            
+                            // False case
+                            asm.push_str(&format!(".{}_bool_false_{}:\n", func_name, label_id));
+                            asm.push_str("    pop %rbx\n");  // Restore buffer pointer
+                            asm.push_str("    movq $5, (%rbx)\n");  // Length = 5
+                            asm.push_str("    movl $0x736c6166, 8(%rbx)\n");  // "fals" (little-endian)
+                            asm.push_str("    movb $0x65, 12(%rbx)\n");  // "e"
+                            asm.push_str("    movb $0, 13(%rbx)\n");  // Null terminator
+                            asm.push_str("    mov %rbx, %rax\n");
+                            
+                            asm.push_str(&format!(".{}_bool_done_{}:\n", func_name, label_id));
+                            
+                            // Store result
                             if let Some(result) = inst.result {
                                 if let Some(&res_offset) = reg_map.get(&result.id) {
                                     asm.push_str(&format!("    movq %rax, {}(%rbp)\n", res_offset));

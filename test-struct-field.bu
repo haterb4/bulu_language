@@ -1,16 +1,7 @@
-struct Point {
-    x: int64,
-    y: int64
-}
+import { Point, createPoint } from "math-utils"
 
-func main() {
-    let p = Point { x: 10, y: 20 };
-    let xVal = p.x;
-    
-    let isCorrect = xVal == 10;
-    if isCorrect {
-        println("X value is correct: 10");
-    }
-    
-    println("Done");
+func main(): int64 {
+    let p1 = createPoint(10, 20);
+    println("Point:", p1.x, p1.y)
+    return 0;
 }

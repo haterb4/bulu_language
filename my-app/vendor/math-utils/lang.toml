@@ -1,9 +1,12 @@
 [package]
 name = "math-utils"
-version = "0.1.1"
+version = "2.0.0"
 authors = ["Bulu Team <team@bulu-lang.com>"]
-description = "Mathematical utility functions for Bulu"
-keywords = ["math", "utilities"]
+description = "Mathematical utility functions with Complex numbers, Point and Vector support for Bulu"
+keywords = ["math", "utilities", "complex", "vector", "geometry"]
+
+[package.registry]
+url = "http://localhost:3000"
 
 [dependencies]
 

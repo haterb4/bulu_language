@@ -1,0 +1,51 @@
+// Advanced string operations
+
+export func reverse(s: string): string {
+    // Placeholder - would need character access
+    return s;
+}
+
+export func trim(s: string): string {
+    // Placeholder - would need character access
+    return s;
+}
+
+export func contains(haystack: string, needle: string): bool {
+    // Placeholder - simple check
+    return false;
+}
+
+export func join(strings: string, separator: string): string {
+    // For now, just return the first string
+    return strings;
+}
+
+export func padLeft(text: string, width: int64, padChar: string): string {
+    let padding = "";
+    let i = 0;
+    while i < width {
+        padding = padding + padChar;
+        i = i + 1;
+    }
+    return padding + text;
+}
+
+export func padRight(text: string, width: int64, padChar: string): string {
+    let padding = "";
+    let i = 0;
+    while i < width {
+        padding = padding + padChar;
+        i = i + 1;
+    }
+    return text + padding;
+}
+
+export func replicate(text: string, count: int64): string {
+    let result = "";
+    let i = 0;
+    while i < count {
+        result = result + text;
+        i = i + 1;
+    }
+    return result;
+}

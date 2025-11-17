@@ -1,0 +1,10 @@
+import { Point, createPoint } from "math-utils"
+
+func main(): int64 {
+    let p1 = createPoint(10, 20);
+    let x = p1.x;
+    let y = p1.y;
+    println("Point: x =", x, ", y =", y)
+    println("Direct: x =", p1.x, ", y =", p1.y)
+    return 0;
+}

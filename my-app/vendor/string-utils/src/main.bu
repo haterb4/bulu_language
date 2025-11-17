@@ -1,5 +1,15 @@
-// Main entry point for the Bulu program
+import { uppercase, concat, repeat } from "./lib.bu";
 
 func main() {
-    println("Hello, Bulu!")
+    println("=== String Utils Demo ===");
+    
+    let text = "hello";
+    let upper = uppercase(text);
+    println("uppercase: " + upper);
+    
+    let combined = concat("Hello", " World");
+    println("concat: " + combined);
+    
+    let repeated = repeat("*", 5);
+    println("repeat: " + repeated);
 }

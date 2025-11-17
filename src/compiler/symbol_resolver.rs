@@ -5,6 +5,7 @@ use crate::error::{BuluError, Result};
 use crate::runtime::module::ModuleResolver;
 use crate::types::primitive::RuntimeValue;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Symbol table for tracking imported and local symbols
 #[derive(Debug, Clone)]
@@ -461,8 +462,9 @@ impl SymbolResolver {
 
     /// Handle re-export statements
     fn handle_reexport(&mut self, import_stmt: &ImportStmt) -> Result<()> {
-        // Load the module to get its exports
-        let module = self.module_resolver.load_module(&import_stmt.path)?;
+        // Load the module to get its exports, passing current file for relative path resolution
+        let current_file = self.current_module_path.as_ref().map(|s| Path::new(s.as_str()));
+        let module = self.module_resolver.load_module_from(&import_stmt.path, current_file)?;
 
         if let Some(items) = &import_stmt.items {
             // Re-export specific items
@@ -569,8 +571,9 @@ impl SymbolResolver {
 
     /// Resolve a single import statement
     fn resolve_import_statement(&mut self, import_stmt: &ImportStmt) -> Result<()> {
-        // Load the module
-        let module = self.module_resolver.load_module(&import_stmt.path)?;
+        // Load the module, passing the current file for relative path resolution
+        let current_file = self.current_module_path.as_ref().map(|s| Path::new(s.as_str()));
+        let module = self.module_resolver.load_module_from(&import_stmt.path, current_file)?;
 
         if let Some(items) = &import_stmt.items {
             // Import specific items: import { item1, item2 } from "path"

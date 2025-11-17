@@ -1,0 +1,24 @@
+// StringBuilder structure for efficient string building
+
+export struct StringBuilder {
+    content: string,
+    length: int64
+}
+
+// StringBuilder operations
+export func createStringBuilder(): StringBuilder {
+    return StringBuilder { content: "", length: 0 };
+}
+
+export func sbAppend(sb: StringBuilder, text: string): StringBuilder {
+    let newContent = sb.content + text;
+    return StringBuilder { content: newContent, length: sb.length + 1 };
+}
+
+export func sbToString(sb: StringBuilder): string {
+    return sb.content;
+}
+
+export func sbClear(sb: StringBuilder): StringBuilder {
+    return StringBuilder { content: "", length: 0 };
+}

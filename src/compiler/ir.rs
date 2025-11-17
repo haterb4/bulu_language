@@ -1333,8 +1333,25 @@ impl IrGenerator {
                     args.push(this);
                 }
 
+                // Check if this is a println call - if so, convert bool arguments to strings
+                let is_println = if let IrValue::Global(name) = &callee {
+                    name == "println"
+                } else {
+                    false
+                };
+
                 for arg in &call.args {
-                    args.push(self.generate_expression(arg)?);
+                    let mut arg_value = self.generate_expression(arg)?;
+
+                    // For println, automatically convert booleans to strings
+                    if is_println {
+                        let arg_type = self.infer_value_type(&arg_value);
+                        if matches!(arg_type, IrType::Bool) {
+                            arg_value = self.generate_tostring_call(arg_value, &arg_type)?;
+                        }
+                    }
+
+                    args.push(arg_value);
                 }
 
                 let result_register = self.new_register();
@@ -1389,10 +1406,17 @@ impl IrGenerator {
                         self.register_types
                             .insert(result_register.id, IrType::Struct(type_name.to_string()));
                     } else {
-                        // Common math functions return int64
+                        // Common functions that return int64
                         match func_name.as_str() {
-                            "add" | "multiply" | "square" | "power" | "abs" | "max" | "min" => {
+                            "add" | "multiply" | "square" | "power" | "abs" | "max" | "min"
+                            | "len" | "ord" => {
                                 self.register_types.insert(result_register.id, IrType::I64);
+                            }
+                            // Functions that return string
+                            "chr" | "uppercase" | "lowercase" | "concat" | "repeat" | "reverse"
+                            | "trim" => {
+                                self.register_types
+                                    .insert(result_register.id, IrType::String);
                             }
                             _ => {}
                         }

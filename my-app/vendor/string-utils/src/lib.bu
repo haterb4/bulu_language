@@ -1,20 +1,12 @@
-// String utilities package
+// String utilities package v2.0.0
+// Main entry point with re-exports
 
-export func uppercase(s: string): string {
-    // Simple uppercase implementation
-    return s;
-}
+// Re-export types
+export { StringBuilder, createStringBuilder, sbAppend, sbToString, sbClear } from "./types/builder.bu"
+export { TextStats, analyzeText, createStats } from "./types/stats.bu"
 
-export func concat(a: string, b: string): string {
-    return a + b;
-}
+// Re-export basic operations
+export { uppercase, lowercase, concat, repeat, isEmpty, length } from "./basic/basic.bu"
 
-export func repeat(s: string, n: int64): string {
-    let result = "";
-    let i = 0;
-    while i < n {
-        result = result + s;
-        i = i + 1;
-    }
-    return result;
-}
+// Re-export advanced operations
+export { reverse, trim, contains, join, padLeft, padRight, replicate } from "./advanced/advanced.bu"

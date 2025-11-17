@@ -263,13 +263,17 @@ impl ModuleResolver {
 
     /// Load and parse a module from file or create a standard library module
     pub fn load_module(&self, module_path: &str) -> Result<Module> {
+        self.load_module_from(module_path, None)
+    }
+    
+    pub fn load_module_from(&self, module_path: &str, current_file: Option<&Path>) -> Result<Module> {
         // Handle standard library modules
         if module_path.starts_with("std/") || module_path.starts_with("std.") {
             return self.create_std_module(module_path);
         }
 
         // Handle regular file modules
-        let file_path = self.resolve_module_path(module_path, None)?;
+        let file_path = self.resolve_module_path(module_path, current_file)?;
         let source = fs::read_to_string(&file_path)
             .map_err(|e| BuluError::IoError(format!("Failed to read {}: {}", file_path.display(), e)))?;
 

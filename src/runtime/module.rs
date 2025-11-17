@@ -428,70 +428,119 @@ impl ModuleResolver {
         Ok(module)
     }
 
-    /// Resolve module path from import string
-    fn resolve_module_path(&self, path: &str) -> Result<PathBuf> {
+    /// Load a module from the given path with context of the current file
+    pub fn load_module_from(&mut self, path: &str, current_file: Option<&Path>) -> Result<Module> {
+        eprintln!("🔄 Loading module: {}", path);
+        // Check if module is already loaded
+        if let Some(module) = self.modules.get(path) {
+            eprintln!("  ✓ Already loaded");
+            return Ok(module.clone());
+        }
+
+        // Check if it's a standard library module
+        let std_module_key = if path.starts_with("std/") {
+            // Convert std/net to std.net format
+            path.replace('/', ".")
+        } else if path.starts_with("std.") {
+            path.to_string()
+        } else {
+            String::new()
+        };
+
+        if !std_module_key.is_empty() {
+            if let Some(module) = self.std_modules.get(&std_module_key) {
+                return Ok(module.clone());
+            } else {
+                // Module not found in std_modules, but it's a std module
+                return Err(BuluError::RuntimeError {
+                    message: format!("Standard library module '{}' not found", path),
+                    file: Some(path.to_string()),
+                });
+            }
+        }
+
+        // Check for in-memory modules first
+        let (source, actual_file_path) = if let Some(memory_source) = self.memory_modules.get(path)
+        {
+            (memory_source.clone(), None)
+        } else {
+            // Try to load from file system with current_file context
+            let module_path = self.resolve_module_path_from(path, current_file)?;
+            let file_path_str = module_path.to_string_lossy().to_string();
+            let source = fs::read_to_string(&module_path).map_err(|e| BuluError::RuntimeError {
+                message: format!("Failed to read module '{}': {}", path, e),
+                file: Some(file_path_str.clone()),
+            })?;
+            (source, Some(file_path_str))
+        };
+
+        // Parse the module
+        let file_for_errors = actual_file_path
+            .as_ref()
+            .unwrap_or(&path.to_string())
+            .clone();
+        let mut lexer = Lexer::with_file(&source, file_for_errors.clone());
+        let tokens = lexer.tokenize()?;
+        let mut parser = Parser::with_file(tokens, file_for_errors.clone());
+        let ast = parser.parse()?;
+
+        // Before executing the module, recursively load all its imports
+        // This ensures all transitive dependencies are in the cache
+        // Pass the module's own file path as context for its imports
+        let module_file_path = actual_file_path.as_ref().map(|s| Path::new(s.as_str()));
+        for statement in &ast.statements {
+            match statement {
+                Statement::Import(import_stmt) => {
+                    // Load the imported module recursively with context
+                    let _ = self.load_module_from(&import_stmt.path, module_file_path)?;
+                }
+                Statement::Export(export_stmt) => {
+                    // Check if this is a re-export
+                    if let Statement::Import(import_stmt) = export_stmt.item.as_ref() {
+                        // Load the re-exported module recursively with context
+                        let _ = self.load_module_from(&import_stmt.path, module_file_path)?;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Execute the module to get real function definitions and its interpreter context
+        let (exports, function_definitions, interpreter_wrapper) =
+            self.execute_module_and_extract_exports(&ast, &file_for_errors)?;
+
+        let module = Module {
+            path: path.to_string(),
+            source_info: SourceInfo {
+                file_path: actual_file_path,
+                is_std_lib: false,
+            },
+            exports,
+            ast,
+            function_definitions,
+            interpreter: Some(interpreter_wrapper),
+        };
+
+        eprintln!("  ✓ Loaded and cached as: {}", path);
+        self.modules.insert(path.to_string(), module.clone());
+        Ok(module)
+    }
+
+    /// Resolve module path from import string with current file context
+    fn resolve_module_path_from(&self, path: &str, current_file: Option<&Path>) -> Result<PathBuf> {
         // Use the resolver module for proper module resolution
         use crate::resolver::ModuleResolver as ResolverModuleResolver;
 
         let mut resolver = ResolverModuleResolver::new();
         resolver.add_search_path(self.current_dir.clone());
 
-        // Try to resolve using the proper module resolver
-        match resolver.resolve_module_path(path, None) {
-            Ok(resolved_path) => Ok(resolved_path),
-            Err(_) => {
-                // Fallback to old behavior for compatibility
-                // Handle different import path formats
-                if path.starts_with("./") || path.starts_with("../") {
-                    // Relative import
-                    let mut full_path = self.current_dir.join(path);
+        // Try to resolve using the proper module resolver with current_file context
+        resolver.resolve_module_path(path, current_file)
+    }
 
-                    // Normalize the path to resolve . and .. components manually
-                    let mut components = Vec::new();
-                    for component in full_path.components() {
-                        match component {
-                            std::path::Component::CurDir => {
-                                // Skip current directory components
-                            }
-                            std::path::Component::ParentDir => {
-                                // Pop the last component for parent directory
-                                components.pop();
-                            }
-                            _ => {
-                                components.push(component);
-                            }
-                        }
-                    }
-                    full_path = components.iter().collect();
-
-                    if !full_path.extension().map_or(false, |ext| ext == "bu") {
-                        full_path.set_extension("bu");
-                    }
-                    Ok(full_path)
-                } else if path.starts_with("/") {
-                    // Absolute import
-                    let mut full_path = PathBuf::from(path);
-                    if !full_path.extension().map_or(false, |ext| ext == "bu") {
-                        full_path.set_extension("bu");
-                    }
-                    Ok(full_path)
-                } else if path.starts_with("std.") {
-                    // Standard library import - these are built-in
-                    Err(BuluError::RuntimeError {
-                        message: format!("Standard library module '{}' not found", path),
-                        file: Some(path.to_string()),
-                    })
-                } else {
-                    // Package import or bare module name
-                    let mut full_path = self.current_dir.join(format!("{}.bu", path));
-                    if !full_path.exists() {
-                        // Try in src directory
-                        full_path = self.current_dir.join("src").join(format!("{}.bu", path));
-                    }
-                    Ok(full_path)
-                }
-            }
-        }
+    /// Resolve module path from import string
+    fn resolve_module_path(&self, path: &str) -> Result<PathBuf> {
+        self.resolve_module_path_from(path, None)
     }
 
     /// Execute module and extract real exported values

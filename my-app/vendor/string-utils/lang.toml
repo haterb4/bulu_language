@@ -1,9 +1,12 @@
 [package]
 name = "string-utils"
-version = "0.1.1"
+version = "2.0.0"
 authors = ["Bulu Team <team@bulu-lang.com>"]
-description = "String manipulation utilities for Bulu"
-keywords = ["string", "text", "utilities"]
+description = "String manipulation utilities with StringBuilder and text analysis for Bulu"
+keywords = ["string", "text", "utilities", "builder", "analysis"]
+
+[package.registry]
+url = "http://localhost:3000"
 
 [dependencies]
 
